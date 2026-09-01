@@ -44,36 +44,52 @@ export function useArchiveSnapshotLiveRefresh(enabled: boolean): void {
 
     let isCancelled = false;
     let dispose: (() => Promise<void>) | undefined;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
 
-    void relayClient
-      .subscribeLive(
-        {
-          kinds: [KIND_IA_ARCHIVE_SNAPSHOT],
-          limit: 1,
-          since: Math.floor(Date.now() / 1_000) - 30,
-        },
-        () => {
-          if (!isCancelled) {
-            void queryClient.invalidateQueries({
-              queryKey: archivedIdentitiesQueryKey,
-            });
+    const subscribe = () => {
+      void relayClient
+        .subscribeLive(
+          {
+            kinds: [KIND_IA_ARCHIVE_SNAPSHOT],
+            limit: 1,
+            since: Math.floor(Date.now() / 1_000) - 30,
+          },
+          () => {
+            if (!isCancelled) {
+              void queryClient.invalidateQueries({
+                queryKey: archivedIdentitiesQueryKey,
+              });
+            }
+          },
+        )
+        .then((nextDispose) => {
+          if (isCancelled) {
+            void nextDispose().catch(() => {});
+            return;
           }
-        },
-      )
-      .then((nextDispose) => {
-        if (isCancelled) {
-          void nextDispose().catch(() => {});
-          return;
-        }
-        dispose = nextDispose;
-      })
-      .catch((error) => {
-        // Best-effort: the 30s staleTime polling path still applies.
-        console.warn("Failed to subscribe to archive snapshot updates", error);
-      });
+          dispose = nextDispose;
+        })
+        .catch((error) => {
+          // staleTime alone is NOT polling — without this subscription the
+          // query only refetches on remount/focus/invalidate, so a transient
+          // startup WebSocket error would hide other devices' archive changes
+          // indefinitely. Keep retrying while mounted.
+          console.warn(
+            "Failed to subscribe to archive snapshot updates",
+            error,
+          );
+          if (!isCancelled) {
+            retryTimer = setTimeout(subscribe, 30_000);
+          }
+        });
+    };
+    subscribe();
 
     return () => {
       isCancelled = true;
+      if (retryTimer !== undefined) {
+        clearTimeout(retryTimer);
+      }
       if (dispose) {
         void dispose().catch(() => {});
       }
