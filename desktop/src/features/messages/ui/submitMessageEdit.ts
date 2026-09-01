@@ -9,8 +9,12 @@ import {
   mergeOutgoingTags,
 } from "@/features/messages/lib/imetaMediaMarkdown";
 import { diffAddedMentionPubkeys } from "@/features/messages/lib/threading";
-import { mergeOutgoingTagsWithReferenceMentions } from "@/features/messages/ui/useMentionSendFlow.helpers";
+import {
+  buildMentionNameTags,
+  mergeOutgoingTagsWithReferenceMentions,
+} from "@/features/messages/ui/useMentionSendFlow.helpers";
 import { buildCustomEmojiTags } from "@/shared/lib/customEmojiTags";
+import { normalizePubkey } from "@/shared/lib/pubkey";
 import type { CustomEmoji } from "@/shared/lib/remarkCustomEmoji";
 
 type EditDraft = {
@@ -115,13 +119,24 @@ export async function submitMessageEdit({
         ),
       ]),
     );
+    // Edits rebuild the tag set from scratch, so re-emit the send-time name
+    // tags too — otherwise one edit strips the rename resilience the original
+    // send recorded (see `buildMentionNameTags`). Refs without a usable name
+    // and unresolved pubkeys fall back to bare reference tags below.
+    const mentionNameTags = buildMentionNameTags(draft.mentionRefs);
+    const namedPubkeys = new Set(mentionNameTags.map((tag) => tag[1]));
     const outgoingTags = mergeOutgoingTagsWithReferenceMentions(
-      mergeOutgoingTags(
-        mediaTags,
-        buildCustomEmojiTags(finalContent, customEmoji),
-      ),
       [
-        ...draft.mentionRefs.map(({ pubkey }) => pubkey),
+        ...(mergeOutgoingTags(
+          mediaTags,
+          buildCustomEmojiTags(finalContent, customEmoji),
+        ) ?? []),
+        ...mentionNameTags,
+      ],
+      [
+        ...draft.mentionRefs
+          .map(({ pubkey }) => pubkey)
+          .filter((pubkey) => !namedPubkeys.has(normalizePubkey(pubkey))),
         ...draft.unresolvedMentionPubkeys,
       ],
     );

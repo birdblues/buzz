@@ -191,3 +191,16 @@ test("send-time name never overrides a current alias owner", () => {
 
   assert.equal(mentionPubkeysByName.alice, OTHER_PUBKEY);
 });
+
+test("the agent-address provenance marker is never treated as a name", () => {
+  const tags = [["mention", PUBKEY, "agent-address"]];
+  const profiles = { [PUBKEY]: profile({ displayName: "Pollen" }) };
+
+  const { mentionNames, mentionPubkeysByName } = resolveMentionProps(
+    tags,
+    profiles,
+  );
+
+  assert.deepEqual(mentionNames, ["Pollen"]);
+  assert.equal(mentionPubkeysByName["agent-address"], undefined);
+});

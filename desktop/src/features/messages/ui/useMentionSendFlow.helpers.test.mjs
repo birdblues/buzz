@@ -96,3 +96,16 @@ test("buildMentionNameTags records one send-time name per pubkey", () => {
     ["mention", "a".repeat(64), "살짝데친문어"],
   ]);
 });
+
+test("buildMentionNameTags skips names the backend validator would reject", () => {
+  const refs = [
+    { displayName: "agent-address", pubkey: "a".repeat(64), isAgent: true },
+    { displayName: "x".repeat(129), pubkey: "b".repeat(64), isAgent: false },
+    { displayName: "line\nbreak", pubkey: "c".repeat(64), isAgent: false },
+    { displayName: "ok", pubkey: "d".repeat(64), isAgent: false },
+  ];
+
+  assert.deepEqual(buildMentionNameTags(refs), [
+    ["mention", "d".repeat(64), "ok"],
+  ]);
+});

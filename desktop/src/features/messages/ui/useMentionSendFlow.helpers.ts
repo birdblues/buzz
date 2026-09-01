@@ -7,7 +7,11 @@ import type { QueuedMediaAttachment } from "@/features/messages/lib/backgroundMe
 import type { PreparedBackgroundLinkPreviews } from "@/features/messages/lib/linkPreviewPreparationStore";
 import type { DraftMentionRef } from "@/features/messages/lib/useDrafts";
 import { normalizePubkey } from "@/shared/lib/pubkey";
-import { MENTION_REFERENCE_TAG } from "@/shared/lib/resolveMentionNames";
+import {
+  AGENT_ADDRESS_MENTION_MARKER,
+  MAX_MENTION_DISPLAY_NAME_CHARS,
+  MENTION_REFERENCE_TAG,
+} from "@/shared/lib/resolveMentionNames";
 
 export { MENTION_REFERENCE_TAG };
 
@@ -122,6 +126,11 @@ export async function resolvePreviewTags(
  * degrade to plain text; the send-time name keeps historical mentions
  * rendering (see `resolveMentionProps`). One tag per pubkey — the first
  * occurrence's name wins, matching the resolver's first-alias-wins map.
+ *
+ * Names the backend validator would reject (empty, over the length cap,
+ * control characters) and the reserved `agent-address` provenance marker are
+ * skipped rather than truncated — a missing name tag only costs rename
+ * resilience, while an invalid one would fail the whole send.
  */
 export function buildMentionNameTags(
   refs: readonly DraftMentionRef[],
@@ -132,6 +141,15 @@ export function buildMentionNameTags(
     const name = ref.displayName.trim();
     const pubkey = normalizePubkey(ref.pubkey);
     if (!name || !pubkey || seen.has(pubkey)) continue;
+    if (
+      name === AGENT_ADDRESS_MENTION_MARKER ||
+      [...name].length > MAX_MENTION_DISPLAY_NAME_CHARS ||
+      // Cc only — matches the backend's `char::is_control` (Cf format chars
+      // like the emoji ZWJ are legitimate in names).
+      /\p{Cc}/u.test(name)
+    ) {
+      continue;
+    }
     seen.add(pubkey);
     tags.push([MENTION_REFERENCE_TAG, pubkey, name]);
   }

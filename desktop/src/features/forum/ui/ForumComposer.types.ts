@@ -19,12 +19,14 @@ export type ForumComposerProps = {
     content: string,
     mentionPubkeys: string[],
     mediaTags?: string[][],
+    mentionTags?: string[][],
   ) => undefined | Promise<unknown>;
   /** Optional alternate submission using the same composed content. */
   onSecondarySubmit?: (
     content: string,
     mentionPubkeys: string[],
     mediaTags?: string[][],
+    mentionTags?: string[][],
   ) => undefined | Promise<unknown>;
   secondarySubmitLabel?: string;
   /** Render as a single-line composer until the user focuses it. */

@@ -149,12 +149,13 @@ export function ForumView({
           deleteReplyMutation.mutate({ eventId });
         }}
         channelId={channel.id}
-        onReply={(content, mentionPubkeys, mediaTags) =>
+        onReply={(content, mentionPubkeys, mediaTags, mentionTags) =>
           createReplyMutation.mutateAsync({
             content,
             parentEventId: selectedPostId,
             mentionPubkeys,
             mediaTags,
+            mentionTags,
           })
         }
         onTargetReached={onTargetReached}
@@ -177,11 +178,17 @@ export function ForumView({
             channelType="forum"
             isSending={createPostMutation.isPending}
             onCancel={() => setIsComposerOpen(false)}
-            onSubmit={async (content, mentionPubkeys, mediaTags) => {
+            onSubmit={async (
+              content,
+              mentionPubkeys,
+              mediaTags,
+              mentionTags,
+            ) => {
               await createPostMutation.mutateAsync({
                 content,
                 mentionPubkeys,
                 mediaTags,
+                mentionTags,
               });
               setIsComposerOpen(false);
             }}

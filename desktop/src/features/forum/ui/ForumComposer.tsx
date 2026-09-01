@@ -9,6 +9,7 @@ import { useComposerFocusOwnership } from "@/features/messages/lib/useComposerFo
 import { useMediaUpload } from "@/features/messages/lib/useMediaUpload";
 import { isMentionCodeContext } from "@/features/messages/lib/mentionCodeContext";
 import { useMentions } from "@/features/messages/lib/useMentions";
+import { buildMentionNameTags } from "@/features/messages/ui/useMentionSendFlow.helpers";
 import {
   hasMentionClipboardHtml,
   normalizeMentionClipboardHtml,
@@ -245,6 +246,12 @@ export function ForumComposer({
         const pubkeys = await mentions.revalidateMentionPubkeys(
           mentions.extractMentionPubkeys(trimmed),
         );
+        // Send-time name tags, same as chat: without them a forum mention
+        // stops rendering as a chip once the mentioned profile is renamed
+        // (see `buildMentionNameTags`). Captured before the composer clears.
+        const mentionNameTags = buildMentionNameTags(
+          mentions.getDraftMentionRefs(trimmed),
+        );
 
         // Reuse the shared send-path builder so forum/notes posts emit the same
         // body + imeta as chat: generic files become `[filename](url)` links with a
@@ -268,7 +275,7 @@ export function ForumComposer({
         setIsEmojiPickerOpen(false);
 
         try {
-          await submitter(finalContent, pubkeys, mediaTags);
+          await submitter(finalContent, pubkeys, mediaTags, mentionNameTags);
           setSubmitMode("primary");
           if (compact) setIsCompactExpanded(false);
         } catch {
@@ -291,6 +298,7 @@ export function ForumComposer({
       media.setPendingImeta,
       mentions.cancelMentionAutocomplete,
       mentions.extractMentionPubkeys,
+      mentions.getDraftMentionRefs,
       mentions.revalidateMentionPubkeys,
       mentions.clearMentions,
       channelLinks.clearChannels,
