@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildMentionNameTags,
   formatMessageSendError,
   getErrorMessage,
   mergeMentionRecipients,
@@ -82,4 +83,16 @@ test("an empty presence map suppresses nothing", () => {
 test("live pubkeys are normalized so mixed-case lookups match", () => {
   const upper = "E".repeat(64);
   assert.ok(pubkeysLiveElsewhere({ [upper]: "online" }).has("e".repeat(64)));
+});
+
+test("buildMentionNameTags records one send-time name per pubkey", () => {
+  const refs = [
+    { displayName: "살짝데친문어", pubkey: "A".repeat(64), isAgent: true },
+    { displayName: "문어", pubkey: "a".repeat(64), isAgent: true },
+    { displayName: "  ", pubkey: "b".repeat(64), isAgent: false },
+  ];
+
+  assert.deepEqual(buildMentionNameTags(refs), [
+    ["mention", "a".repeat(64), "살짝데친문어"],
+  ]);
 });

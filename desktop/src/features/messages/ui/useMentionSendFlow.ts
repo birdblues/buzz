@@ -34,6 +34,7 @@ import {
   enqueueAgentWake,
   formatMessageSendError,
   getErrorMessage,
+  buildMentionNameTags,
   mergeMentionRecipients,
   MENTION_REFERENCE_TAG,
   mergeOutgoingTagsWithReferenceMentions,
@@ -723,9 +724,11 @@ export function useMentionSendFlow({
           explicitMentionPubkeys,
           addressedAgentPubkeys,
         );
+        const savedMentionRefs = mentions.getDraftMentionRefs(trimmed);
         const outgoingTags = [
           ...buildCustomEmojiTags(trimmed, customEmoji),
           ...linkPreviewTags,
+          ...buildMentionNameTags(savedMentionRefs),
         ];
         const nonMemberPubkeys =
           channelType === null ||
@@ -749,7 +752,6 @@ export function useMentionSendFlow({
             );
           } catch {}
         }
-        const savedMentionRefs = mentions.getDraftMentionRefs(trimmed);
         const pendingDraft: PendingNonMemberMentionSend = {
           addressedAgentPubkeys: uniqueNormalizedPubkeys(addressedAgentPubkeys),
           inlineAgentMentionPubkeys: uniqueNormalizedPubkeys(

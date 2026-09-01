@@ -82,6 +82,18 @@ export function resolveMentionProps(
       names.add(alias);
       pubkeysByName[alias.toLowerCase()] = pubkey;
     }
+
+    // A `mention` tag may carry the display name the sender matched at send
+    // time. Profiles only expose CURRENT aliases, so after a rename the old
+    // name in the message body stops matching and the chip degrades to plain
+    // text. The send-time name keeps historical mentions rendering. (Only the
+    // custom `mention` tag — a `p` tag's third element is a relay URL.)
+    const sendTimeName =
+      tag[0] === MENTION_REFERENCE_TAG ? tag[2]?.trim() : undefined;
+    if (sendTimeName) {
+      names.add(sendTimeName);
+      pubkeysByName[sendTimeName.toLowerCase()] ??= pubkey;
+    }
   }
 
   return {

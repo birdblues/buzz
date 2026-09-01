@@ -115,6 +115,29 @@ export async function resolvePreviewTags(
   );
 }
 
+/**
+ * `["mention", pubkey, displayName]` tags recording the name each mention was
+ * matched by at send time. Profiles only expose current aliases, so a later
+ * rename would stop the body's `@old-name` from resolving and the chip would
+ * degrade to plain text; the send-time name keeps historical mentions
+ * rendering (see `resolveMentionProps`). One tag per pubkey — the first
+ * occurrence's name wins, matching the resolver's first-alias-wins map.
+ */
+export function buildMentionNameTags(
+  refs: readonly DraftMentionRef[],
+): string[][] {
+  const seen = new Set<string>();
+  const tags: string[][] = [];
+  for (const ref of refs) {
+    const name = ref.displayName.trim();
+    const pubkey = normalizePubkey(ref.pubkey);
+    if (!name || !pubkey || seen.has(pubkey)) continue;
+    seen.add(pubkey);
+    tags.push([MENTION_REFERENCE_TAG, pubkey, name]);
+  }
+  return tags;
+}
+
 export function mergeOutgoingTagsWithReferenceMentions(
   outgoingTags: string[][] | undefined,
   pubkeys: Iterable<string>,
