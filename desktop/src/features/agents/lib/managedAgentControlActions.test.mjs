@@ -170,58 +170,23 @@ test("test_respawn_onStopped_fires_before_start_resolves", async () => {
 // ── cross-machine duplicate guard ───────────────────────────────────────────
 //
 // The backend reports `runningElsewhere` instead of erroring, so a start that
-// spawned nothing still resolves. These tests pin who gets to override that.
+// spawned nothing still resolves. Explicit surfaces fence that ahead of the
+// call with `agentPresenceStartBlockReason` (no override), so these rules only
+// have to pin that nothing here retries with a duplicate-forcing intent.
 
-test("an explicit Start asks before adding a second harness", async () => {
-  const calls = [];
-  let asked = false;
-
-  await startManagedAgentWithRules({
-    agent: agent(),
-    startManagedAgent: async (input) => {
-      const intent = typeof input === "string" ? undefined : input.intent;
-      calls.push(intent);
-      // The first (implicit) attempt reports the agent is already live.
-      return intent === "explicit" ? {} : { startOutcome: "runningElsewhere" };
-    },
-    confirmRunningElsewhere: () => {
-      asked = true;
-      return true;
-    },
-  });
-
-  assert.ok(asked, "the user must see the duplicate-reply consequence");
-  assert.deepEqual(calls, [undefined, "explicit"]);
-});
-
-test("declining the confirmation leaves no second harness", async () => {
+test("an explicit Start never retries a runningElsewhere outcome", async () => {
   const calls = [];
 
-  await startManagedAgentWithRules({
+  const result = await startManagedAgentWithRules({
     agent: agent(),
     startManagedAgent: async (input) => {
       calls.push(typeof input === "string" ? undefined : input.intent);
       return { startOutcome: "runningElsewhere" };
     },
-    confirmRunningElsewhere: () => false,
   });
 
-  assert.deepEqual(calls, [undefined], "no retry after the user declines");
-});
-
-test("a normal start never prompts", async () => {
-  let asked = false;
-
-  await startManagedAgentWithRules({
-    agent: agent(),
-    startManagedAgent: async () => ({ startOutcome: "startedLocal" }),
-    confirmRunningElsewhere: () => {
-      asked = true;
-      return true;
-    },
-  });
-
-  assert.equal(asked, false);
+  assert.deepEqual(calls, [undefined], "no second, duplicate-forcing start");
+  assert.equal(result.startOutcome, "runningElsewhere", "reported, not hidden");
 });
 
 test("respawn bypasses the guard only after killing a live local child", async () => {
@@ -247,12 +212,11 @@ test("respawn bypasses the guard only after killing a live local child", async (
   );
 });
 
-test("respawn of a stopped agent goes through the confirmation instead", async () => {
+test("respawn of a stopped agent claims no local-stop exemption", async () => {
   // Nothing local was killed, so an `online` reading belongs to another
-  // device — bypassing the guard here would recreate the duplicate.
+  // device — sending `afterLocalStop` here would recreate the duplicate.
   const calls = [];
   let stopped = false;
-  let asked = false;
 
   await respawnManagedAgentWithRules({
     agent: agent({ status: "stopped" }),
@@ -260,17 +224,11 @@ test("respawn of a stopped agent goes through the confirmation instead", async (
       stopped = true;
     },
     startManagedAgent: async (input) => {
-      const intent = typeof input === "string" ? undefined : input.intent;
-      calls.push(intent);
-      return intent === "explicit" ? {} : { startOutcome: "runningElsewhere" };
-    },
-    confirmRunningElsewhere: () => {
-      asked = true;
-      return true;
+      calls.push(typeof input === "string" ? undefined : input.intent);
+      return { startOutcome: "runningElsewhere" };
     },
   });
 
   assert.equal(stopped, false, "there was no live local child to stop");
-  assert.ok(asked, "the user decides, not an automatic bypass");
-  assert.deepEqual(calls, [undefined, "explicit"]);
+  assert.deepEqual(calls, [undefined], "plain start, no exemption");
 });

@@ -17,11 +17,6 @@ export function isRunningElsewhere(result: unknown): boolean {
   );
 }
 
-/** Copy for the duplicate-start confirmation. Exported so tests can assert it. */
-export const RUNNING_ELSEWHERE_CONFIRM =
-  "This agent is already running on another device. Starting it here too " +
-  "will make it answer every message twice.\n\nStart it here anyway?";
-
 type DeleteManagedAgentInput = {
   pubkey: string;
   forceRemoteDelete?: boolean;
@@ -96,26 +91,20 @@ export function resolveManagedAgentChannelId(
 export async function startManagedAgentWithRules({
   agent,
   startManagedAgent,
-  confirmRunningElsewhere,
 }: {
   agent: ManagedAgent;
   startManagedAgent: StartManagedAgent;
-  /** Injected so this stays testable; defaults to `window.confirm`. */
-  confirmRunningElsewhere?: (message: string) => boolean;
 }) {
   // Relay-mesh agents are no longer blocked here: the backend start preflight
   // (ensure_relay_mesh_for_record) re-resolves a live serve target and dials
   // it, failing with an actionable error when no peer serves the model.
-  const result = await startManagedAgent(agent.pubkey);
-  if (!isRunningElsewhere(result)) return result;
-
-  // The user aimed at THIS machine, so they get the final say — but they see
-  // the consequence first. Mirrors the delete flow's remote-shutdown confirm.
-  const confirm =
-    confirmRunningElsewhere ?? ((message: string) => window.confirm(message));
-  if (!confirm(RUNNING_ELSEWHERE_CONFIRM)) return result;
-
-  return startManagedAgent({ pubkey: agent.pubkey, intent: "explicit" });
+  //
+  // Explicit surfaces fence a duplicate start ahead of this call with
+  // `agentPresenceStartBlockReason`, which offers no override. A
+  // `runningElsewhere` outcome still reaches callers here — presence that is
+  // unknown or a disconnected relay leaves that fence open — and it is
+  // reported, not retried: the backend probe is the authoritative guard.
+  return startManagedAgent(agent.pubkey);
 }
 
 export async function respawnManagedAgentWithRules({
@@ -123,7 +112,6 @@ export async function respawnManagedAgentWithRules({
   startManagedAgent,
   stopManagedAgent,
   onStopped,
-  confirmRunningElsewhere,
 }: {
   agent: ManagedAgent;
   startManagedAgent: StartManagedAgent;
@@ -131,8 +119,6 @@ export async function respawnManagedAgentWithRules({
   /** Called after a successful stop and before start begins — use this to
    * clear stale working badges at the right boundary. */
   onStopped?: () => void;
-  /** Forwarded to the explicit-start path; defaults to `window.confirm`. */
-  confirmRunningElsewhere?: (message: string) => boolean;
 }) {
   if (agent.backend.type === "local" && isManagedAgentActive(agent)) {
     await stopManagedAgent(agent.pubkey);
@@ -147,12 +133,8 @@ export async function respawnManagedAgentWithRules({
   }
 
   // Nothing local was stopped, so any `online` reading belongs to another
-  // device. Go through the same confirmation an explicit Start would get.
-  return startManagedAgentWithRules({
-    agent,
-    startManagedAgent,
-    confirmRunningElsewhere,
-  });
+  // device — the ordinary explicit-start rules apply.
+  return startManagedAgentWithRules({ agent, startManagedAgent });
 }
 
 export async function stopManagedAgentWithRules({

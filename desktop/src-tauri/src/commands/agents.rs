@@ -207,12 +207,14 @@ pub(super) async fn start_local_agent_with_preflight(
             &personas,
             &global,
         );
-    ensure_relay_mesh_for_record(app, mesh_model_id.as_deref(), allow_fresh_create_start).await?;
-
     // Read the workspace relay ONCE and use that same value for both the
     // presence probe and the scope bind below. Reading it twice would let a
     // community switch landing in between authorize a spawn against relay B on
-    // the strength of relay A's presence answer.
+    // the strength of relay A's presence answer. The probe and mesh preflight
+    // both await, so after them we re-read and require the relay to be
+    // unchanged — otherwise a switch during either would slip a spawn past
+    // `bind_expected_relay_scope` (the stale caller's expected relay still
+    // equals this stale read).
     let observed_relay = relay_ws_url_with_override(state);
 
     // Cross-machine guard. `record.status` only knows about THIS machine, so
@@ -254,13 +256,24 @@ pub(super) async fn start_local_agent_with_preflight(
         }
     }
 
-    // The mesh preflight above is the suspension window Projects callbacks
-    // capture their scope against: a community switch during that await
-    // would otherwise spawn this pair keyed to the *new* workspace relay.
-    // Read the workspace relay ONCE, assert the caller's captured scope
-    // against that exact read, and hand the same bound value to the spawn
-    // below — the check is tied to its use, so a switch landing after this
-    // point can no longer retarget the spawn (it only changes state this
+    // Mesh preflight runs AFTER the presence skip on purpose: an agent that is
+    // live on another device needs no local spawn, so a mesh-llm build with no
+    // serve target on this machine must not fail the attach/mention flow for
+    // it. Only a start that will actually spawn here needs a mesh target.
+    ensure_relay_mesh_for_record(app, mesh_model_id.as_deref(), allow_fresh_create_start).await?;
+
+    // The awaits above suspended; if a community switch landed meanwhile, the
+    // presence answer came from a relay this spawn would no longer target.
+    // Fail rather than proceed on cross-relay evidence.
+    if relay_ws_url_with_override(state) != observed_relay {
+        return Err("workspace relay changed while starting the agent; try again".to_string());
+    }
+
+    // `observed_relay` was read before the probe/mesh awaits and re-asserted
+    // unchanged just above, so it is current here. Assert the caller's
+    // captured scope against that read and hand the same bound value to the
+    // spawn below — the check is tied to its use, so a switch landing after
+    // this point can no longer retarget the spawn (it only changes state this
     // call no longer consults).
     let workspace_relay_url =
         crate::relay::bind_expected_relay_scope(expected_relay_url, observed_relay)?;
