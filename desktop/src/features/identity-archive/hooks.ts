@@ -4,6 +4,8 @@ import { toast } from "sonner";
 
 import { useMyRelayMembershipQuery } from "@/features/community-members/hooks";
 import { useIdentityQuery } from "@/shared/api/hooks";
+import { relayClient } from "@/shared/api/relayClient";
+import { KIND_IA_ARCHIVE_SNAPSHOT } from "@/shared/constants/kinds";
 import {
   archiveIdentity,
   listArchivedIdentities,
@@ -24,6 +26,59 @@ export function useArchivedIdentitiesQuery(enabled = true) {
     queryFn: listArchivedIdentities,
     staleTime: 30_000,
   });
+}
+
+/**
+ * Refresh the cached archive snapshot when the relay republishes it. Archival
+ * from another device or the CLI otherwise stays invisible until the 30-second
+ * staleTime plus a remount — discovery folding (autocomplete, member pickers)
+ * kept showing archived identities for minutes. Mounted once in AppShell.
+ */
+export function useArchiveSnapshotLiveRefresh(enabled: boolean): void {
+  const queryClient = useQueryClient();
+
+  React.useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
+    let isCancelled = false;
+    let dispose: (() => Promise<void>) | undefined;
+
+    void relayClient
+      .subscribeLive(
+        {
+          kinds: [KIND_IA_ARCHIVE_SNAPSHOT],
+          limit: 1,
+          since: Math.floor(Date.now() / 1_000) - 30,
+        },
+        () => {
+          if (!isCancelled) {
+            void queryClient.invalidateQueries({
+              queryKey: archivedIdentitiesQueryKey,
+            });
+          }
+        },
+      )
+      .then((nextDispose) => {
+        if (isCancelled) {
+          void nextDispose().catch(() => {});
+          return;
+        }
+        dispose = nextDispose;
+      })
+      .catch((error) => {
+        // Best-effort: the 30s staleTime polling path still applies.
+        console.warn("Failed to subscribe to archive snapshot updates", error);
+      });
+
+    return () => {
+      isCancelled = true;
+      if (dispose) {
+        void dispose().catch(() => {});
+      }
+    };
+  }, [enabled, queryClient]);
 }
 
 /** `undefined` while the snapshot loads so callers can defer the flair. */
