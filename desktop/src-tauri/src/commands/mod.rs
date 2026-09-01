@@ -50,7 +50,7 @@ mod os_idle;
 pub mod pairing;
 mod personas;
 mod prevent_sleep;
-mod profile;
+pub(crate) mod profile;
 mod project_git;
 mod project_git_branches;
 mod project_git_diff;

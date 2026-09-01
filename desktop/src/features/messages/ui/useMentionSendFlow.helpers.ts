@@ -170,3 +170,28 @@ export function isManagedAgentRunning(agent: ManagedAgent) {
 export function isProviderBackedAgent(agent: ManagedAgent) {
   return agent.backend.type === "provider";
 }
+
+/**
+ * Pubkeys the relay reports as live, so the mention flow can skip starting a
+ * local harness for them.
+ *
+ * Mirrors the backend `presence_start_decision` exactly: `online` and `away`
+ * both count as alive (the harness only ever publishes `online`/`offline`, so
+ * `away` means some other authenticated session holds that identity), and a
+ * missing entry means "unknown" and must NOT suppress a start.
+ *
+ * Keeping this in step with the backend matters: a mismatch just costs a
+ * redundant round trip, but inverting it would either resurrect the duplicate
+ * or stop agents starting at all.
+ */
+export function pubkeysLiveElsewhere(
+  presence: Record<string, "online" | "away" | "offline">,
+): Set<string> {
+  const live = new Set<string>();
+  for (const [pubkey, status] of Object.entries(presence)) {
+    if (status === "online" || status === "away") {
+      live.add(normalizePubkey(pubkey));
+    }
+  }
+  return live;
+}

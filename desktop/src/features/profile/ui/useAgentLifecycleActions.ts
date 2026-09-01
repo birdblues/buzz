@@ -6,6 +6,7 @@ import {
   respawnManagedAgentWithRules,
   startManagedAgentWithRules,
   stopManagedAgentWithRules,
+  type StartManagedAgent,
 } from "@/features/agents/lib/managedAgentControlActions";
 import { agentPresenceStartBlockReason } from "@/features/agents/lib/useAgentAvailability";
 import { clearActiveTurnsForAgentOnStop } from "@/features/agents/managedAgentRuntimeHooks";
@@ -28,7 +29,7 @@ export function useAgentLifecycleActions({
   channels: readonly Channel[] | undefined;
   managedAgent: ManagedAgent | undefined;
   relayAgents: readonly RelayAgent[] | undefined;
-  startManagedAgent: (pubkey: string) => Promise<unknown>;
+  startManagedAgent: StartManagedAgent;
   stopManagedAgent: (pubkey: string) => Promise<unknown>;
 }) {
   const handleAgentPrimaryAction = React.useCallback(async () => {

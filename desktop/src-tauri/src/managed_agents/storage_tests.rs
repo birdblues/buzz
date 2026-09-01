@@ -830,3 +830,71 @@ fn install_log_filename_accepts_ordinary_runtime_ids() {
         );
     }
 }
+
+// ── presence_start_decision ─────────────────────────────────────────────────
+//
+// The guard that stops this machine from spawning a second harness for an
+// agent that is already answering from another device. Pure function, so the
+// whole truth table is cheap to pin down.
+
+use super::{presence_start_decision, StartDecision, StartIntent};
+use buzz_core_pkg::PresenceStatus;
+
+#[test]
+fn implicit_start_skips_when_agent_is_online_elsewhere() {
+    // The reported bug: mentioning an agent hosted on another machine starts
+    // a duplicate harness here, and the agent answers twice.
+    assert_eq!(
+        presence_start_decision(Some(PresenceStatus::Online), StartIntent::Implicit),
+        StartDecision::SkipRunningElsewhere
+    );
+}
+
+#[test]
+fn implicit_start_skips_when_agent_is_away_elsewhere() {
+    // The harness only publishes online/offline, so `away` means some other
+    // authenticated session holds this identity — equally a reason not to add
+    // a second one.
+    assert_eq!(
+        presence_start_decision(Some(PresenceStatus::Away), StartIntent::Implicit),
+        StartDecision::SkipRunningElsewhere
+    );
+}
+
+#[test]
+fn implicit_start_spawns_when_relay_says_offline() {
+    assert_eq!(
+        presence_start_decision(Some(PresenceStatus::Offline), StartIntent::Implicit),
+        StartDecision::Spawn
+    );
+}
+
+#[test]
+fn unknown_presence_fails_open() {
+    // `None` is "we don't know" — a relay error, a timeout, a Redis outage, or
+    // an agent that never published. Failing closed here would make a Redis
+    // hiccup unable to start ANY agent, which is worse than a duplicate reply.
+    assert_eq!(
+        presence_start_decision(None, StartIntent::Implicit),
+        StartDecision::Spawn
+    );
+}
+
+#[test]
+fn explicit_start_overrides_a_live_remote_instance() {
+    // The user pressed Start and confirmed the duplicate warning.
+    assert_eq!(
+        presence_start_decision(Some(PresenceStatus::Online), StartIntent::Explicit),
+        StartDecision::Spawn
+    );
+}
+
+#[test]
+fn after_local_stop_ignores_the_afterglow_of_the_harness_we_just_killed() {
+    // A hard kill can leave presence up until the Redis TTL, so a respawn that
+    // follows a real local termination must not be blocked by its own ghost.
+    assert_eq!(
+        presence_start_decision(Some(PresenceStatus::Online), StartIntent::AfterLocalStop),
+        StartDecision::Spawn
+    );
+}

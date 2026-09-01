@@ -5,6 +5,7 @@ import {
   formatMessageSendError,
   getErrorMessage,
   mergeMentionRecipients,
+  pubkeysLiveElsewhere,
 } from "./useMentionSendFlow.helpers.ts";
 
 test("formatMessageSendError preserves the publication failure", () => {
@@ -38,4 +39,47 @@ test("address-locked agents join explicit mentions without duplicating recipient
     "b".repeat(64),
     "c".repeat(64),
   ]);
+});
+
+// `pubkeysLiveElsewhere` decides whether a mention starts a LOCAL harness for
+// an agent that is already answering from another machine. It must stay in
+// lockstep with the Rust `presence_start_decision`: getting it wrong either
+// resurrects the duplicate-reply bug or stops agents from starting at all.
+
+test("online and away both count as live, so no second harness is started", () => {
+  const online = "a".repeat(64);
+  const away = "b".repeat(64);
+
+  const live = pubkeysLiveElsewhere({ [online]: "online", [away]: "away" });
+
+  assert.ok(live.has(online));
+  assert.ok(
+    live.has(away),
+    "the harness never publishes away, so an away " +
+      "reading means another session holds this identity",
+  );
+});
+
+test("offline does not suppress a local start", () => {
+  const pubkey = "c".repeat(64);
+  assert.equal(
+    pubkeysLiveElsewhere({ [pubkey]: "offline" }).has(pubkey),
+    false,
+  );
+});
+
+test("a pubkey the relay said nothing about is unknown, not offline", () => {
+  // get_presence returns a sparse map. Absent must fail OPEN — a relay error
+  // or a Redis outage must never make every agent unstartable.
+  const pubkey = "d".repeat(64);
+  assert.equal(pubkeysLiveElsewhere({}).has(pubkey), false);
+});
+
+test("an empty presence map suppresses nothing", () => {
+  assert.equal(pubkeysLiveElsewhere({}).size, 0);
+});
+
+test("live pubkeys are normalized so mixed-case lookups match", () => {
+  const upper = "E".repeat(64);
+  assert.ok(pubkeysLiveElsewhere({ [upper]: "online" }).has("e".repeat(64)));
 });

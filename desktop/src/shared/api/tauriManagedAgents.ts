@@ -8,6 +8,9 @@ import type {
   ManagedAgentRuntimeStatus,
 } from "@/shared/api/types";
 
+/** Mirrors the Rust `StartIntent`. See `startManagedAgent`'s `intent` option. */
+export type StartIntent = "implicit" | "explicit" | "afterLocalStop";
+
 export async function startManagedAgent(
   pubkey: string,
   options?: {
@@ -24,6 +27,17 @@ export async function startManagedAgent(
      * long the spawn takes. Local spawns receive it as process env; provider
      * deploys carry it in the payload's launch.policy_env. */
     replayFloorUnix?: number;
+    /**
+     * Why this start was requested. Omit (or pass "implicit") for anything
+     * the user did not aim at THIS machine — mention, attach, project send,
+     * huddle add. Those skip the spawn when the agent is already live on
+     * another device, which is what stops it answering twice.
+     *
+     * "explicit" = the user pressed Start and confirmed the duplicate warning.
+     * "afterLocalStop" = this machine just terminated a live local child and
+     * is respawning it, so an `online` reading may be its own afterglow.
+     */
+    intent?: StartIntent;
   },
 ): Promise<ManagedAgent> {
   const response = await invokeTauri<RawManagedAgent>("start_managed_agent", {
@@ -31,6 +45,7 @@ export async function startManagedAgent(
     expectedRelayUrl: options?.expectedRelayUrl ?? null,
     expectedSignerPubkey: options?.expectedSignerPubkey ?? null,
     replayFloorUnix: options?.replayFloorUnix ?? null,
+    intent: options?.intent ?? null,
   });
   return fromRawManagedAgent(response);
 }

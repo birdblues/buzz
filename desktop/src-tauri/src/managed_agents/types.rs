@@ -525,8 +525,35 @@ pub struct ManagedAgentProcess {
     pub job: Option<crate::managed_agents::JobHandle>,
 }
 
+/// What a start request actually did.
+///
+/// Returned as a successful outcome rather than an error on purpose. Five
+/// call sites (mention send, project send, huddle add, welcome kickoff,
+/// channel attach) treat a failed start as "this agent is unusable" and abort
+/// the surrounding operation — for a mention that means the pubkey never gets
+/// tagged, so the agent running on the OTHER machine never sees the message.
+/// Reporting "it's already alive elsewhere" as success lets all of them carry
+/// on unchanged; only callers that assume "Ok means a local child exists"
+/// need to branch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StartOutcome {
+    /// A local harness was spawned by this call.
+    StartedLocal,
+    /// A local harness for this (agent, relay) pair was already running.
+    AlreadyLocal,
+    /// No local harness was started: the agent is already live on another
+    /// device, and a second one would answer every message twice.
+    RunningElsewhere,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ManagedAgentSummary {
+    /// Set only by the start commands; `None` on listing/refresh reads where
+    /// no start was attempted. Skipped on the wire when absent so existing
+    /// consumers are untouched.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_outcome: Option<StartOutcome>,
     pub pubkey: String,
     pub name: String,
     pub persona_id: Option<String>,

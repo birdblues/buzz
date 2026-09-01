@@ -2,13 +2,34 @@ import { sendChannelMessage } from "@/shared/api/tauri";
 import type { Channel, ManagedAgent, RelayAgent } from "@/shared/api/types";
 import type { AgentAvailabilityReader } from "./useAgentAvailability";
 import { normalizePubkey } from "@/shared/lib/pubkey";
+import type { StartIntent } from "@/shared/api/tauriManagedAgents";
+
+/**
+ * True when a start returned without spawning because the agent is already
+ * live on another device. Not an error — the agent is reachable, it just
+ * isn't hosted here.
+ */
+export function isRunningElsewhere(result: unknown): boolean {
+  return (
+    typeof result === "object" &&
+    result !== null &&
+    (result as ManagedAgent).startOutcome === "runningElsewhere"
+  );
+}
+
+/** Copy for the duplicate-start confirmation. Exported so tests can assert it. */
+export const RUNNING_ELSEWHERE_CONFIRM =
+  "This agent is already running on another device. Starting it here too " +
+  "will make it answer every message twice.\n\nStart it here anyway?";
 
 type DeleteManagedAgentInput = {
   pubkey: string;
   forceRemoteDelete?: boolean;
 };
 
-type StartManagedAgent = (pubkey: string) => Promise<unknown>;
+export type StartManagedAgent = (
+  input: string | { pubkey: string; intent?: StartIntent },
+) => Promise<ManagedAgent | unknown>;
 type StopManagedAgent = (pubkey: string) => Promise<unknown>;
 type DeleteManagedAgent = (input: DeleteManagedAgentInput) => Promise<unknown>;
 
@@ -75,14 +96,26 @@ export function resolveManagedAgentChannelId(
 export async function startManagedAgentWithRules({
   agent,
   startManagedAgent,
+  confirmRunningElsewhere,
 }: {
   agent: ManagedAgent;
   startManagedAgent: StartManagedAgent;
+  /** Injected so this stays testable; defaults to `window.confirm`. */
+  confirmRunningElsewhere?: (message: string) => boolean;
 }) {
   // Relay-mesh agents are no longer blocked here: the backend start preflight
   // (ensure_relay_mesh_for_record) re-resolves a live serve target and dials
   // it, failing with an actionable error when no peer serves the model.
-  await startManagedAgent(agent.pubkey);
+  const result = await startManagedAgent(agent.pubkey);
+  if (!isRunningElsewhere(result)) return result;
+
+  // The user aimed at THIS machine, so they get the final say — but they see
+  // the consequence first. Mirrors the delete flow's remote-shutdown confirm.
+  const confirm =
+    confirmRunningElsewhere ?? ((message: string) => window.confirm(message));
+  if (!confirm(RUNNING_ELSEWHERE_CONFIRM)) return result;
+
+  return startManagedAgent({ pubkey: agent.pubkey, intent: "explicit" });
 }
 
 export async function respawnManagedAgentWithRules({
@@ -90,6 +123,7 @@ export async function respawnManagedAgentWithRules({
   startManagedAgent,
   stopManagedAgent,
   onStopped,
+  confirmRunningElsewhere,
 }: {
   agent: ManagedAgent;
   startManagedAgent: StartManagedAgent;
@@ -97,13 +131,28 @@ export async function respawnManagedAgentWithRules({
   /** Called after a successful stop and before start begins — use this to
    * clear stale working badges at the right boundary. */
   onStopped?: () => void;
+  /** Forwarded to the explicit-start path; defaults to `window.confirm`. */
+  confirmRunningElsewhere?: (message: string) => boolean;
 }) {
   if (agent.backend.type === "local" && isManagedAgentActive(agent)) {
     await stopManagedAgent(agent.pubkey);
     onStopped?.();
+    // We just killed a live LOCAL child. Relay presence can lag behind that
+    // by up to the Redis TTL, so an `online` reading here is most likely our
+    // own afterglow — bypass the cross-machine guard for this respawn only.
+    return startManagedAgent({
+      pubkey: agent.pubkey,
+      intent: "afterLocalStop",
+    });
   }
 
-  await startManagedAgent(agent.pubkey);
+  // Nothing local was stopped, so any `online` reading belongs to another
+  // device. Go through the same confirmation an explicit Start would get.
+  return startManagedAgentWithRules({
+    agent,
+    startManagedAgent,
+    confirmRunningElsewhere,
+  });
 }
 
 export async function stopManagedAgentWithRules({

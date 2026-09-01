@@ -305,7 +305,20 @@ export type ManagedAgentBackend =
 
 import type { RestartDiffEntry } from "./restartDiff";
 export type { JsonValue, RestartChange, RestartDiffEntry } from "./restartDiff";
+/**
+ * What a start request actually did. Present only on the value returned by a
+ * start command; `null` on listing/refresh reads.
+ *
+ * `runningElsewhere` is a SUCCESS: the agent is already live on another
+ * device, so no local harness was spawned and a second one would have made it
+ * answer every message twice. Callers that merely need the agent reachable
+ * should treat it exactly like a start; only callers that assume a local
+ * child now exists (rollback, "started" bookkeeping) must branch on it.
+ */
+export type StartOutcome = "startedLocal" | "alreadyLocal" | "runningElsewhere";
+
 export type ManagedAgent = {
+  startOutcome?: StartOutcome | null;
   pubkey: string;
   name: string;
   personaId: string | null;

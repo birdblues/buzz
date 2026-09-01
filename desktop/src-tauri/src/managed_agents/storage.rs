@@ -7,6 +7,8 @@ use std::{
 
 use tauri::{AppHandle, Manager};
 
+use buzz_core_pkg::PresenceStatus;
+
 use crate::app_state::keyring_service;
 use crate::managed_agents::{
     ManagedAgentRecord, ManagedAgentRuntimeKey, ManagedAgentRuntimeReceipt,
@@ -234,6 +236,61 @@ pub(crate) fn spawn_key_refusal(record: &ManagedAgentRecord) -> Option<String> {
             record.pubkey
         )
     })
+}
+
+/// Why a start was requested. Decides whether a live instance on ANOTHER
+/// machine should suppress a local spawn.
+///
+/// The distinction that matters is not "did the caller call stop" but "did
+/// this machine actually terminate a live local child". Only the latter can
+/// legitimately ignore an `online` reading, because that reading may be the
+/// afterglow of the harness we just killed (the relay clears presence on
+/// socket close, but a hard kill can leave it up to the Redis TTL).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StartIntent {
+    /// Mention, attach, project send, huddle add — nobody pointed at THIS
+    /// machine. If the agent already answers from somewhere else, starting a
+    /// second harness here only produces duplicate replies.
+    Implicit,
+    /// The user pressed Start and acknowledged the duplicate warning.
+    Explicit,
+    /// This machine just terminated a live local child and is respawning it.
+    AfterLocalStop,
+}
+
+/// Outcome of the presence preflight.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StartDecision {
+    /// Spawn a local harness.
+    Spawn,
+    /// Skip the local spawn: this agent is already live on another device.
+    SkipRunningElsewhere,
+}
+
+/// Decide whether to spawn locally given what the relay says about this
+/// agent's presence.
+///
+/// Fail-open by construction: `None` means "unknown" — a relay error, a
+/// timeout, a Redis outage, or an agent that simply never published — and
+/// MUST allow the spawn. Failing closed here would make a Redis hiccup
+/// unable-to-start-any-agent, which is strictly worse than a duplicate reply.
+///
+/// `Away` counts as alive: the harness itself only ever publishes
+/// `online`/`offline`, so an `away` reading means some other authenticated
+/// session holds that identity, which is equally a reason not to add a second.
+pub(crate) fn presence_start_decision(
+    presence: Option<PresenceStatus>,
+    intent: StartIntent,
+) -> StartDecision {
+    match intent {
+        StartIntent::Explicit | StartIntent::AfterLocalStop => StartDecision::Spawn,
+        StartIntent::Implicit => match presence {
+            Some(PresenceStatus::Online) | Some(PresenceStatus::Away) => {
+                StartDecision::SkipRunningElsewhere
+            }
+            Some(PresenceStatus::Offline) | None => StartDecision::Spawn,
+        },
+    }
 }
 
 /// Read the raw unified store — keyed instances AND key-less definitions —

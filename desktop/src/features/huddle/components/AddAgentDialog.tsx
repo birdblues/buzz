@@ -86,8 +86,14 @@ export function AddAgentDialog({
         ? agent.status !== "running"
         : agent.status !== "deployed";
       if (needsStart && isLocal) {
-        await invoke("start_managed_agent", { pubkey: agent.pubkey });
-        startedForAdd = true;
+        // A start that reports `runningElsewhere` spawned nothing on this
+        // machine — the agent is already live on another device. The add still
+        // succeeds, but there is no local child to roll back if it fails.
+        const started = await invoke<{ start_outcome?: string }>(
+          "start_managed_agent",
+          { pubkey: agent.pubkey },
+        );
+        startedForAdd = started?.start_outcome !== "runningElsewhere";
       }
       const result = await onAdd(agent.pubkey);
       if (needsStart && !isLocal) {

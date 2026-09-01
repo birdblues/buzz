@@ -202,16 +202,23 @@ export async function attachManagedAgentToChannel(
     // community's (agent, relay) pair, and `startManagedAgent` spawns that same
     // pair — so this ensures the pair the caller is attaching to, never
     // another community's.
+    //
+    // `started` means "a local child now exists because of this call" — it is
+    // used for rollback bookkeeping. A start that returned `runningElsewhere`
+    // spawned nothing here (the agent already answers from another device), so
+    // it must NOT set the flag even though the attach itself succeeded.
     const isRemote = input.agent.backend.type === "provider";
     const needsStart = isRemote
       ? input.agent.status !== "deployed"
       : input.agent.status !== "running" && input.agent.status !== "deployed";
     if (needsStart) {
       if (input.detachedStart) {
+        // Fire-and-forget wake: nothing started HERE, so the rollback below
+        // must not claim it did.
         input.detachedStart(input.agent);
       } else {
         agent = await startManagedAgent(input.agent.pubkey);
-        started = true;
+        started = agent.startOutcome !== "runningElsewhere";
       }
     }
   }

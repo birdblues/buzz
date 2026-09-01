@@ -493,6 +493,9 @@ export async function restartWelcomeTeammate(
   if (agent.status === "running") {
     await stopAgent(agent.pubkey);
     options.onStopped?.();
+    // A live local child was just terminated; its presence may still linger
+    // in Redis, so this respawn must not be mistaken for a duplicate.
+    return startAgent(agent.pubkey, { intent: "afterLocalStop" });
   }
   return startAgent(agent.pubkey);
 }
