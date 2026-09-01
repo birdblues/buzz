@@ -131,6 +131,36 @@ function markerEvent(events: readonly RelayEvent[], marker: string) {
   );
 }
 
+/**
+ * Provision the Welcome Team for `channelId` — unless this channel's kickoff
+ * already finished.
+ *
+ * The order is the whole point. `ensureTeam` is NOT a read: it activates the
+ * three starter personas, mints a managed agent for any starter that has no
+ * instance on this relay, and re-adds all three to the channel as bots.
+ * Checking for completion afterwards means every visit to a finished Welcome
+ * channel re-provisions it, and removing the Welcome Team from that channel
+ * becomes impossible — the next run puts it back, minting a fresh agent
+ * identity when the removed one is gone.
+ *
+ * Returns `null` when the channel is already done, so the caller skips the
+ * rest of the kickoff.
+ */
+export async function provisionWelcomeTeamUnlessComplete<T>({
+  channelId,
+  relayUrl,
+  hasCloserMarker,
+  ensureTeam,
+}: {
+  channelId: string;
+  relayUrl?: string | null;
+  hasCloserMarker: (channelId: string) => Promise<boolean>;
+  ensureTeam: (channelId: string, relayUrl?: string | null) => Promise<T>;
+}): Promise<T | null> {
+  if (await hasCloserMarker(channelId)) return null;
+  return ensureTeam(channelId, relayUrl);
+}
+
 export function resolveWelcomeAgentSet(
   agents: readonly ManagedAgent[],
 ): WelcomeAgentSet | null {
@@ -575,10 +605,16 @@ export function useWelcomeKickoff(
       focusedWelcomeChannelRef.current !== channelId;
     void (async () => {
       try {
-        const welcomeTeam = await ensureWelcomeTeam(
+        // Completion check runs BEFORE provisioning — see
+        // `provisionWelcomeTeamUnlessComplete` for why the order is load-bearing.
+        const welcomeTeam = await provisionWelcomeTeamUnlessComplete({
           channelId,
-          activeCommunity?.relayUrl,
-        );
+          relayUrl: activeCommunity?.relayUrl,
+          hasCloserMarker: (id) => markerExists(id, closerMarker),
+          ensureTeam: ensureWelcomeTeam,
+        });
+        if (!welcomeTeam) return;
+
         await queryClient.invalidateQueries({
           queryKey: managedAgentsQueryKey,
         });
@@ -586,10 +622,6 @@ export function useWelcomeKickoff(
           lead: welcomeTeam[0],
           teammates: [welcomeTeam[1], welcomeTeam[2]],
         };
-
-        if (await markerExists(channelId, closerMarker)) {
-          return;
-        }
         if (!readiness.ready) {
           await sendManagedAgentChannelMessage({
             agentPubkey: resolvedAgentSet.lead.pubkey,
