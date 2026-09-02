@@ -808,9 +808,25 @@ fn default_agent_args(command: &str) -> Option<Vec<String>> {
 /// startup budget (see block/buzz#3355). Skip that unrelated global startup
 /// by default; an operator or persona can still opt back in by setting the
 /// variable explicitly.
+///
+/// Codex: `@agentclientprotocol/codex-acp` 1.7.0's default agent mode
+/// ("agent" / "Approve for me") sends `approvals_reviewer=auto_review` and
+/// `network_access=false` explicitly on every `turn/start`, so Codex's own
+/// guardian model reviews each escalation. The guardian treats the Buzz
+/// channel as an untrusted sink and vetoes the `buzz messages send` network
+/// escalation the agent needs to reply at all — including any user approval
+/// it can see, because that approval arrives as "untrusted transcript
+/// content". Defaulting `INITIAL_AGENT_MODE` to the adapter's "read-only"
+/// mode id (which, despite the name, keeps the workspace-write sandbox)
+/// swaps the reviewer to `user` with `approvalPolicy=on-request`, so the
+/// escalation surfaces as an ACP `session/request_permission` — which this
+/// harness auto-approves by design (agents are headless; there is no human
+/// at the ACP prompt). Operators and personas can still pick another mode
+/// by setting the variable themselves.
 pub(crate) fn default_agent_env(command: &str) -> &'static [(&'static str, &'static str)] {
     match normalize_agent_command_identity(command).as_str() {
         "hermes" | "hermes-agent" | "hermes-acp" => &[("HERMES_ACP_SKIP_CONFIGURED_MCP", "1")],
+        "codex" | "codex-acp" => &[("INITIAL_AGENT_MODE", "read-only")],
         _ => &[],
     }
 }
@@ -835,6 +851,15 @@ pub(crate) fn default_agent_env(command: &str) -> &'static [(&'static str, &'sta
 /// be parsed, avoiding accidental sandbox widening for malformed configs.
 ///
 /// Handles `ws://`, `wss://`, `http://`, and `https://` schemes.
+///
+/// KNOWN LIMITATION (adapter 1.7.0): the adapter now re-sends the active agent
+/// mode's sandbox policy explicitly on every `turn/start`, and that turn-level
+/// `network_access=false` overrides this thread-level config merge — observed
+/// in rollout `turn_context` entries carrying `network_access: false` with
+/// `CODEX_CONFIG` present in the process env. The injection is kept for older
+/// adapters and as thread-level intent; the operative mitigation is the
+/// `INITIAL_AGENT_MODE` default in [`default_agent_env`], which routes the
+/// blocked escalation to an ACP permission request the harness auto-approves.
 pub fn codex_network_env(agent_command: &str, relay_url: &str) -> Option<(String, String)> {
     match normalize_agent_command_identity(agent_command).as_str() {
         "codex" | "codex-acp" => {}
@@ -1755,10 +1780,31 @@ mod tests {
                 "unexpected env defaults for {command}"
             );
         }
-        for command in ["goose", "codex-acp", "claude-agent-acp", "buzz-agent", ""] {
+        for command in ["goose", "claude-agent-acp", "buzz-agent", ""] {
             assert!(
                 default_agent_env(command).is_empty(),
-                "non-Hermes command must have no env defaults: {command}"
+                "command must have no env defaults: {command}"
+            );
+        }
+    }
+
+    // codex-acp 1.7.0's default "agent" mode routes escalations to the
+    // auto_review guardian, which vetoes channel replies as exfiltration to an
+    // untrusted sink. The "read-only" mode id keeps the workspace-write
+    // sandbox but sends escalations as ACP permission requests the harness
+    // auto-approves — losing this default silently re-mutes codex agents.
+    #[test]
+    fn default_agent_env_gives_codex_a_user_reviewed_initial_mode() {
+        for command in [
+            "codex",
+            "codex-acp",
+            "/usr/local/bin/codex-acp",
+            r"C:\Users\test\AppData\Roaming\npm\codex-acp.cmd",
+        ] {
+            assert_eq!(
+                default_agent_env(command),
+                &[("INITIAL_AGENT_MODE", "read-only")],
+                "unexpected env defaults for {command}"
             );
         }
     }
