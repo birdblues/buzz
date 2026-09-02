@@ -1025,6 +1025,8 @@ type RawPersona = {
   name_pool?: string[];
   is_builtin: boolean;
   is_active: boolean;
+  /** Device-local: first reached this device via inbound sync. */
+  remote_origin?: boolean;
   shared: boolean;
   source_team?: string | null;
   catalog_source?: { owner_pubkey: string; persona_id: string } | null;
@@ -13525,6 +13527,9 @@ export function maybeInstallE2eTauriMocks() {
                 system_prompt: content.system_prompt ?? "",
                 is_builtin: false,
                 is_active: true,
+                // Mirrors apply_inbound_persona: a definition first seen via
+                // inbound sync is marked remote-origin (device-local fact).
+                remote_origin: true,
                 shared,
                 env_vars: {},
                 created_at: now,

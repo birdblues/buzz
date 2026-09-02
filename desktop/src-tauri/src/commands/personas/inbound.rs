@@ -700,7 +700,17 @@ fn apply_inbound_persona(personas: &mut Vec<AgentDefinition>, inbound: AgentDefi
             local.shared = inbound.shared;
             local.updated_at = inbound.updated_at;
         }
-        None => personas.push(inbound),
+        None => personas.push(AgentDefinition {
+            // No local row for this d-tag means this device is seeing the
+            // definition for the first time through sync: created on another
+            // device, or a fresh-store backfill. A local create saves before
+            // it publishes (create.rs), so its own echo always hits the merge
+            // branch above. The flag is device-local (never in event content)
+            // and the merge branch never touches it, so it survives every
+            // later remote edit.
+            remote_origin: true,
+            ..inbound
+        }),
     }
 }
 

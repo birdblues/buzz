@@ -45,6 +45,15 @@ pub struct AgentDefinition {
     pub is_builtin: bool,
     #[serde(default = "default_record_active")]
     pub is_active: bool,
+    /// DEVICE-LOCAL fact: this definition first reached this device via an
+    /// inbound 30175 insert (created on another device, or a fresh-store
+    /// backfill) rather than a local create. Never part of the 30175 event
+    /// content, never published; the inbound merge only patches listed
+    /// content fields, so this survives every remote edit. Drives the
+    /// "From another device" card badge and excludes the persona from the
+    /// mention launcher candidates — nothing else consults it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub remote_origin: bool,
     /// Whether this persona is discoverable in the currently active community.
     ///
     /// This is a command/view projection only. Durable share state lives in
@@ -157,6 +166,7 @@ impl AgentDefinition {
             name_pool: self.name_pool,
             is_builtin: self.is_builtin,
             is_active: self.is_active,
+            remote_origin: self.remote_origin,
             // Catalog visibility is relay+owner scoped, not definition-global.
             shared: false,
             source_team: self.source_team,
@@ -194,6 +204,7 @@ impl ManagedAgentRecord {
             name_pool: self.name_pool.clone(),
             is_builtin: self.is_builtin,
             is_active: self.is_active,
+            remote_origin: self.remote_origin,
             // Projected by `list_personas` from the active retention scope.
             shared: false,
             source_team: self.source_team.clone(),
@@ -412,6 +423,10 @@ pub struct ManagedAgentRecord {
     /// definition hidden from pickers. Defaults `true` for existing records.
     #[serde(default = "default_record_active")]
     pub is_active: bool,
+    /// Absorbed from `AgentDefinition.remote_origin` — device-local
+    /// "first seen via inbound sync" fact. See that field's doc.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub remote_origin: bool,
     /// Legacy process-global catalog visibility field.
     ///
     /// New writes omit it and definition views ignore it. It remains

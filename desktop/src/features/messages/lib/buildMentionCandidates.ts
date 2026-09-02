@@ -227,6 +227,13 @@ export function buildMentionCandidates({
   }
   const personaCandidates: MentionCandidate[] = activePersonas
     .filter((persona) => !managedAgentPersonaIds.has(persona.id))
+    // Selecting a launcher candidate mints a NEW local agent identity, so a
+    // definition that arrived via device sync must not offer one here — the
+    // agent it describes already answers from the device that created it, and
+    // a second identity would answer every mention twice. Team mention
+    // resolution and the Agents screen are unaffected (they read the full
+    // persona list).
+    .filter((persona) => !persona.remoteOrigin)
     .map((persona) => ({
       kind: "persona" as const,
       personaId: persona.id,

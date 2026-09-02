@@ -110,6 +110,27 @@ test("active personas join unless a managed agent already carries them", () => {
   );
 });
 
+test("remote-origin personas never offer a launcher candidate", () => {
+  // A definition synced from another device: selecting a launcher would mint
+  // a NEW local identity while the real agent already answers elsewhere.
+  const activePersonas = [
+    { id: "planner", displayName: "Planner", avatarUrl: null, isActive: true },
+    {
+      id: "remote",
+      displayName: "Remote",
+      avatarUrl: null,
+      isActive: true,
+      remoteOrigin: true,
+    },
+  ];
+
+  const candidates = buildMentionCandidates(input({ activePersonas }));
+  assert.deepEqual(
+    candidates.map((candidate) => candidate.personaId),
+    ["planner"],
+  );
+});
+
 test("global search results join only while global search is enabled", () => {
   const userSearchResults = [
     {

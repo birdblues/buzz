@@ -19,6 +19,7 @@ fn custom_persona(id: &str, display_name: &str) -> AgentDefinition {
         name_pool: Vec::new(),
         is_builtin: false,
         is_active: true,
+        remote_origin: false,
         shared: false,
         source_team: None,
         source_team_persona_slug: None,
@@ -318,6 +319,7 @@ fn migrate_preserves_customized_personas() {
         system_prompt: "My custom research workflow with special instructions".to_string(),
         is_builtin: false,
         is_active: true,
+        remote_origin: false,
         shared: false,
         ..custom_persona("builtin:researcher", "My Researcher")
     }];
@@ -352,6 +354,7 @@ fn migrate_is_idempotent() {
         system_prompt: "My custom prompt".to_string(),
         is_builtin: false,
         is_active: false,
+        remote_origin: false,
         shared: false,
         ..custom_persona("builtin:researcher", "Researcher (retired)")
     }];
@@ -368,6 +371,7 @@ fn migrate_is_idempotent() {
         system_prompt: "Custom review prompt".to_string(),
         is_builtin: true,
         is_active: true,
+        remote_origin: false,
         shared: false,
         ..custom_persona("builtin:reviewer", "Reviewer")
     }];

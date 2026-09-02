@@ -361,6 +361,18 @@ function AgentPersonaCard({
             <AlertTriangle className="h-3 w-3" />
             Configuration missing
           </Badge>
+        ) : !agent && persona.remoteOrigin ? (
+          // Definition synced from another of the owner's devices. Starting
+          // it here mints a NEW local identity — the badge is the "are you
+          // sure this isn't already running elsewhere?" cue. Once an instance
+          // exists on this device the card represents that instance and the
+          // provenance cue is noise.
+          <Badge
+            data-testid={`persona-remote-origin-${persona.id}`}
+            variant="secondary"
+          >
+            From another device
+          </Badge>
         ) : null
       }
     />
