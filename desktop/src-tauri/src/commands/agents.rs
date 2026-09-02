@@ -399,6 +399,11 @@ pub async fn create_managed_agent(
         if let Some(persona_id) = requested_persona_id.as_deref() {
             let personas = load_personas(&app)?;
             ensure_persona_is_active(&personas, persona_id)?;
+            // Every creation surface (card Start, profile panel, team deploy,
+            // channel add, project, template, team-mention provision) funnels
+            // through here, so this is where sync-received definitions are
+            // refused a second identity — see the ensure fn for the why.
+            crate::managed_agents::ensure_persona_not_remote_origin(&personas, persona_id)?;
         }
         let keys = Keys::generate();
         let pubkey = keys.public_key().to_hex();

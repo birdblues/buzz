@@ -9,6 +9,12 @@ type AgentIdentityCardProps = {
   ariaLabel: string;
   avatar?: ReactNode;
   avatarUrl?: string | null;
+  /**
+   * Optional small marker in the card's top-left corner (e.g. the
+   * remote-origin cloud). Width is capped so it can never collide with the
+   * top-right `actions` slot — same contract as `TeamIdentityCard`.
+   */
+  cornerBadge?: ReactNode;
   footerAccessory?: ReactNode;
   dataTestId: string;
   label: string;
@@ -28,6 +34,7 @@ export function AgentIdentityCard({
   ariaLabel,
   avatar,
   avatarUrl,
+  cornerBadge,
   dataTestId,
   footerAccessory,
   label,
@@ -71,6 +78,12 @@ export function AgentIdentityCard({
             ))}
         </div>
       </div>
+
+      {cornerBadge ? (
+        <div className="absolute top-3 left-3 z-30 max-w-[calc(100%-4rem)]">
+          {cornerBadge}
+        </div>
+      ) : null}
 
       {actions ? (
         <div className="absolute top-3 right-3 z-40">{actions}</div>

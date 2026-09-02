@@ -275,6 +275,34 @@ pub fn ensure_persona_is_active(
     Ok(())
 }
 
+/// Refuse to mint a new local identity from a definition that first reached
+/// this device through sync. The agent it describes already answers from the
+/// device that created it — a second identity here would answer every mention
+/// twice (the original dual-machine duplicate-reply bug). This is the single
+/// boundary every creation surface converges on (Agents card, profile panel,
+/// team deploy, channel add, project create, channel template, team-mention
+/// auto-provision), so the refusal cannot be bypassed by a UI path we forgot.
+/// Duplicating the persona creates a NEW local definition and is the
+/// sanctioned way to run a copy on this device.
+pub fn ensure_persona_not_remote_origin(
+    personas: &[AgentDefinition],
+    persona_id: &str,
+) -> Result<(), String> {
+    let persona = personas
+        .iter()
+        .find(|candidate| candidate.id == persona_id)
+        .ok_or_else(|| format!("agent {persona_id} not found"))?;
+
+    if persona.remote_origin {
+        return Err(format!(
+            "{} was created on another device and already runs there. Duplicate it to run a copy on this device.",
+            persona.display_name
+        ));
+    }
+
+    Ok(())
+}
+
 pub fn ensure_persona_ids_are_active(
     personas: &[AgentDefinition],
     persona_ids: &[String],

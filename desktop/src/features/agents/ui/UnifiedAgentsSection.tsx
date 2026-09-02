@@ -24,6 +24,7 @@ import {
 import { IdentityCardSkeleton } from "@/shared/ui/identity-card-skeleton";
 import { AgentIdentityCard } from "./AgentIdentityCard";
 import { AgentRuntimeAvatarControl } from "./AgentRuntimeAvatarControl";
+import { OtherSetupAgentMarker } from "./OtherSetupAgentMarker";
 import { CreateIdentityCard } from "./CreateIdentityCard";
 import { PersonaActionsMenu } from "./PersonaActionsMenu";
 import { buildUnifiedGroups } from "./unifiedAgentGroups";
@@ -330,7 +331,13 @@ function AgentPersonaCard({
             isStarting={startingPersonaIds.has(persona.id)}
             label={title}
             startTestId={`persona-runtime-start-${persona.id}`}
-            onStart={() => onStartPersona(persona)}
+            // A sync-received definition gets no Start affordance: it would
+            // mint a NEW local identity for an agent already answering from
+            // the device that created it. The backend refuses the create
+            // regardless; omitting the handler removes the invitation.
+            onStart={
+              persona.remoteOrigin ? undefined : () => onStartPersona(persona)
+            }
           />
         )
       }
@@ -355,23 +362,24 @@ function AgentPersonaCard({
         // explicit-pubkey path via the avatar control below.
         onOpenPersonaProfile(persona);
       }}
+      cornerBadge={
+        !agent && persona.remoteOrigin ? (
+          // Definition synced from another of the owner's devices — provenance
+          // marker, not an action. Suppressed once a local instance exists
+          // (the card then represents that deliberately set up instance).
+          // Shares the pubkey-scoped marker's glyph and wording so both
+          // provenance axes read the same on a card.
+          <OtherSetupAgentMarker
+            className="h-6 w-6 items-center justify-center text-muted-foreground"
+            testId={`persona-remote-origin-${persona.id}`}
+          />
+        ) : null
+      }
       statusBadge={
         agent?.personaOrphaned ? (
           <Badge className="gap-1" variant="warning">
             <AlertTriangle className="h-3 w-3" />
             Configuration missing
-          </Badge>
-        ) : !agent && persona.remoteOrigin ? (
-          // Definition synced from another of the owner's devices. Starting
-          // it here mints a NEW local identity — the badge is the "are you
-          // sure this isn't already running elsewhere?" cue. Once an instance
-          // exists on this device the card represents that instance and the
-          // provenance cue is noise.
-          <Badge
-            data-testid={`persona-remote-origin-${persona.id}`}
-            variant="secondary"
-          >
-            From another device
           </Badge>
         ) : null
       }

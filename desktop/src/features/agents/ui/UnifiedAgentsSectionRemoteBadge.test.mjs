@@ -1,11 +1,12 @@
 /**
  * A persona definition that first reached this device via inbound sync
- * (`remoteOrigin`) renders a "From another device" badge on its
- * definition-only card — the cue that Start would mint a NEW local identity
- * for an agent that already answers from the device that created it. The
- * badge must NOT appear on locally created definitions, nor on cards backed
- * by a local instance (the card then represents the instance, which was
- * deliberately set up here).
+ * (`remoteOrigin`) renders a small cloud provenance marker in the card's
+ * top-left corner AND loses the avatar Start affordance — starting it here
+ * would mint a NEW local identity for an agent that already answers from the
+ * device that created it (the backend refuses the create regardless; the UI
+ * just removes the invitation). Locally created definitions keep their Start
+ * control and show no cloud; a card backed by a local instance shows no cloud
+ * either (the instance was deliberately set up here).
  */
 
 import assert from "node:assert/strict";
@@ -26,6 +27,7 @@ let screen;
 let createElement;
 let QueryClient;
 let QueryClientProvider;
+let TooltipProvider;
 let UnifiedAgentsSection;
 
 const ipcHandlers = new Map();
@@ -48,6 +50,9 @@ function persona(overrides = {}) {
 function baseProps(overrides = {}) {
   return {
     defaultModel: "gpt-x",
+    // Presence availability is read for every card; personas with no instance
+    // have no pubkey to look up, so unknown is the honest fixture value.
+    getAvailability: () => undefined,
     actionErrorMessage: null,
     actionNoticeMessage: null,
     agents: [],
@@ -87,7 +92,11 @@ function renderSection(props) {
     createElement(
       QueryClientProvider,
       { client },
-      createElement(UnifiedAgentsSection, props),
+      createElement(
+        TooltipProvider,
+        null,
+        createElement(UnifiedAgentsSection, props),
+      ),
     ),
   );
 }
@@ -123,6 +132,7 @@ before(async () => {
   ({ QueryClient, QueryClientProvider } = await import(
     "@tanstack/react-query"
   ));
+  ({ TooltipProvider } = await import("@/shared/ui/tooltip.tsx"));
   ({ UnifiedAgentsSection } = await import("./UnifiedAgentsSection.tsx"));
 });
 
@@ -154,18 +164,32 @@ function installIpc() {
   );
 }
 
-test("remote-origin definition card shows the From-another-device badge", async () => {
+test("remote-origin definition card shows the cloud and no Start affordance", async () => {
   installIpc();
 
   await act(async () => {
-    renderSection(baseProps({ personas: [persona({ remoteOrigin: true })] }));
+    renderSection(
+      baseProps({
+        // URL avatar fixture: the no-badge frame must render the URL branch
+        // too, not just the initials fallback.
+        personas: [
+          persona({ remoteOrigin: true, avatarUrl: "https://x/a.png" }),
+        ],
+      }),
+    );
   });
 
-  const badge = screen.getByTestId("persona-remote-origin-persona-1");
-  assert.equal(badge.textContent, "From another device");
+  const cloud = screen.getByTestId("persona-remote-origin-persona-1");
+  // Shares `OtherSetupAgentMarker`'s wording with the pubkey-scoped marker.
+  assert.equal(cloud.getAttribute("aria-label"), "Not managed on this device");
+  assert.equal(
+    screen.queryByTestId("persona-runtime-start-persona-1"),
+    null,
+    "remote definition must not offer a Start control",
+  );
 });
 
-test("locally created definition card has no remote badge", async () => {
+test("locally created definition card keeps Start and has no cloud", async () => {
   installIpc();
 
   await act(async () => {
@@ -173,9 +197,13 @@ test("locally created definition card has no remote badge", async () => {
   });
 
   assert.equal(screen.queryByTestId("persona-remote-origin-persona-1"), null);
+  assert.ok(
+    screen.getByTestId("persona-runtime-start-persona-1"),
+    "local definition keeps its Start control",
+  );
 });
 
-test("instance-backed card suppresses the remote badge", async () => {
+test("instance-backed card suppresses the cloud", async () => {
   installIpc();
 
   await act(async () => {

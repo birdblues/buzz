@@ -1,7 +1,8 @@
 use super::{
     built_in_persona_records, ensure_persona_ids_are_active, ensure_persona_is_active,
-    merge_personas, migrate_retired_personas, validate_persona_activation_change,
-    validate_persona_deletion, BUILT_IN_PERSONAS, RETIRED_PERSONAS,
+    ensure_persona_not_remote_origin, merge_personas, migrate_retired_personas,
+    validate_persona_activation_change, validate_persona_deletion, BUILT_IN_PERSONAS,
+    RETIRED_PERSONAS,
 };
 use crate::managed_agents::discovery::{default_agent_command, effective_agent_command};
 use crate::managed_agents::AgentDefinition;
@@ -177,6 +178,26 @@ fn ensure_persona_is_active_rejects_inactive_personas() {
     let err = ensure_persona_is_active(&[persona], "builtin:fizz").unwrap_err();
 
     assert_eq!(err, "Fizz is not in My Agents.");
+}
+
+#[test]
+fn ensure_persona_not_remote_origin_rejects_synced_definitions() {
+    let mut persona = custom_persona("custom:remote", "문어");
+    persona.remote_origin = true;
+
+    let err = ensure_persona_not_remote_origin(&[persona], "custom:remote").unwrap_err();
+
+    assert_eq!(
+        err,
+        "문어 was created on another device and already runs there. Duplicate it to run a copy on this device."
+    );
+}
+
+#[test]
+fn ensure_persona_not_remote_origin_allows_local_definitions() {
+    let persona = custom_persona("custom:local", "Alpha");
+
+    assert!(ensure_persona_not_remote_origin(&[persona], "custom:local").is_ok());
 }
 
 #[test]
