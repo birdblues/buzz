@@ -276,6 +276,13 @@ export type RelayAgent = {
   status: "online" | "away" | "offline" | "unknown";
   respondTo: RespondToMode | null;
   respondToAllowlist: string[];
+  /**
+   * Definition this agent instantiates, from its owner-signed kind:30177
+   * projection. Null on the legacy directory path. Builtin definition ids are
+   * identical across owners, so NEVER trust this without also checking that
+   * `ownerPubkey` is the current user.
+   */
+  personaId: string | null;
 };
 
 export type ManagedAgentRuntimeLifecycle =

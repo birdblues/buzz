@@ -65,6 +65,11 @@ fn relay_agents_from_legacy_events(events: &[Event]) -> Vec<RelayAgentInfo> {
             agent.owner_pubkey = None;
             // Channel membership is authoritative only in relay-signed kind:39002.
             agent.channel_ids.clear();
+            // A definition link is only meaningful alongside a verified owner,
+            // which this path just cleared. Anything the legacy content
+            // claimed here would be an unowned agent asserting one of the
+            // viewer's definition ids.
+            agent.persona_id = None;
             Some(agent)
         })
         .collect()
@@ -168,6 +173,7 @@ fn relay_agent_from_managed_policy(agent_pubkey: &str, event: &Event) -> Option<
         status: "unknown".to_string(),
         respond_to: Some(content.respond_to),
         respond_to_allowlist: content.respond_to_allowlist,
+        persona_id: content.persona_id,
     })
 }
 

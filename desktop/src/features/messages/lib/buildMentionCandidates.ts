@@ -164,8 +164,19 @@ export function buildMentionCandidates({
           : null,
     });
   }
+  const viewerPubkey = currentPubkey ? normalizePubkey(currentPubkey) : null;
   for (const agent of relayAgents ?? []) {
     const pubkey = normalizePubkey(agent.pubkey);
+    // The directory's definition link is only trustworthy for OUR agents: it
+    // retains other owners' agents that share a channel, and builtin
+    // definition ids are identical across owners — so an unowned agent would
+    // otherwise claim one of our team's definitions.
+    const ownedPersonaId =
+      viewerPubkey !== null &&
+      agent.ownerPubkey !== null &&
+      normalizePubkey(agent.ownerPubkey) === viewerPubkey
+        ? agent.personaId
+        : null;
     addCandidate({
       kind: "identity",
       pubkey,
@@ -179,6 +190,7 @@ export function buildMentionCandidates({
           agent.channelIds.includes(mentionChannelId)),
       personaId:
         managedAgentPersonaIdsByPubkey.get(pubkey) ??
+        ownedPersonaId ??
         (activePersonaById.has(pubkey) ? pubkey : undefined),
       ownerPubkey: agent.ownerPubkey,
       isAgent: true,

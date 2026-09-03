@@ -931,6 +931,7 @@ type RawRelayAgent = {
   status: PresenceStatus | "unknown";
   respond_to?: "owner-only" | "allowlist" | "anyone";
   respond_to_allowlist?: string[];
+  persona_id?: string | null;
 };
 
 type RawManagedAgent = {

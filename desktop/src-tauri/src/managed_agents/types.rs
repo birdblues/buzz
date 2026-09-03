@@ -237,6 +237,14 @@ pub struct RelayAgentInfo {
     pub respond_to: Option<RespondTo>,
     #[serde(default)]
     pub respond_to_allowlist: Vec<String>,
+    /// Definition this agent instantiates, from its kind:30177 projection.
+    /// Only the owner-verified managed-policy path can supply it; the legacy
+    /// kind:10100 directory carries no definition link. Consumers MUST also
+    /// check `owner_pubkey` before trusting it — builtin definition ids are
+    /// identical across owners, so an unowned agent's id would otherwise
+    /// collide with the viewer's own definitions.
+    #[serde(default)]
+    pub persona_id: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ManagedAgentRecord {

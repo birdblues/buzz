@@ -12,6 +12,7 @@ type RawRelayAgent = {
   status: RelayAgent["status"];
   respond_to?: RelayAgent["respondTo"];
   respond_to_allowlist?: string[];
+  persona_id?: string | null;
 };
 
 export async function revalidateRelayAgents(
@@ -33,5 +34,6 @@ export async function revalidateRelayAgents(
     status: agent.status,
     respondTo: agent.respond_to ?? null,
     respondToAllowlist: agent.respond_to_allowlist ?? [],
+    personaId: agent.persona_id ?? null,
   }));
 }
