@@ -228,4 +228,9 @@ abstract final class NostrFilters {
   /// User status (NIP-38, kind:30315).
   static NostrFilter userStatus(String pubkey) =>
       NostrFilter(kinds: [30315], authors: [pubkey], limit: 1);
+
+  /// The owner's agent team (kind:30176) and managed-agent (kind:30177)
+  /// projections, for team mention resolution.
+  static NostrFilter ownedAgentTeams(String pubkey) =>
+      NostrFilter(kinds: [30176, 30177], authors: [pubkey], limit: 1000);
 }

@@ -13,6 +13,11 @@ class MentionCandidate {
   final String? role;
   final String? ownerPubkey;
 
+  /// Resolved member candidates when this candidate is an agent team.
+  /// A team is never sent as itself: selecting it expands into these
+  /// members, so [pubkey] is empty and must never reach a message tag.
+  final List<MentionCandidate>? teamMembers;
+
   const MentionCandidate({
     required this.pubkey,
     this.displayName,
@@ -22,7 +27,10 @@ class MentionCandidate {
     this.isMember = false,
     this.role,
     this.ownerPubkey,
+    this.teamMembers,
   });
+
+  bool get isTeam => teamMembers != null;
 
   String get label {
     final name = displayName?.trim();
@@ -31,11 +39,11 @@ class MentionCandidate {
   }
 }
 
-/// Group rank: channel members, then people, then other agents.
-/// Mirrors desktop's `getMentionCandidateGroupRank` (personas are a
-/// desktop-only concept; their slot between members and people is unused
-/// here so numbering stays aligned).
+/// Group rank: channel members, then teams (desktop's persona/team slot),
+/// then people, then other agents. Mirrors desktop's
+/// `getMentionCandidateGroupRank`.
 int _groupRank(MentionCandidate candidate) {
+  if (candidate.isTeam) return 1;
   if (candidate.isMember) return 0;
   if (!candidate.isAgent) return 2;
   return 3;

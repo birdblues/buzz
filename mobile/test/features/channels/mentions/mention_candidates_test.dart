@@ -1,6 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:buzz/features/channels/channel_management_provider.dart';
+import 'package:buzz/features/channels/mentions/agent_teams_provider.dart';
 import 'package:buzz/features/channels/mentions/mention_candidates.dart';
+import 'package:buzz/features/channels/mentions/mention_ranking.dart';
 import 'package:buzz/shared/profile/user_profile.dart';
 import 'package:buzz/shared/mentions/agent_identity_provider.dart';
 
@@ -279,6 +281,158 @@ void main() {
 
       expect(candidates, hasLength(1));
       expect(candidates.single.isMember, isTrue);
+    });
+  });
+
+  group('buildTeamMentionCandidates', () {
+    final agentA = 'ca'.padRight(64, '0');
+    final agentB = 'cb'.padRight(64, '0');
+
+    MentionCandidate agentCandidate(String pubkey, String name) =>
+        MentionCandidate(pubkey: pubkey, displayName: name, isAgent: true);
+
+    OwnedAgentTeams teams({
+      List<AgentTeamRecord> teams = const [],
+      Map<String, List<String>> agents = const {},
+      Map<String, String> names = const {},
+    }) => OwnedAgentTeams(
+      teams: teams,
+      agentPubkeysByPersonaId: agents,
+      agentNamesByPubkey: names,
+    );
+
+    test('resolves a team whose every persona maps to a live candidate', () {
+      final result = buildTeamMentionCandidates(
+        teams(
+          teams: const [
+            AgentTeamRecord(
+              id: 'team-1',
+              name: 'Nom Trio',
+              personaIds: ['p-a', 'p-b'],
+            ),
+          ],
+          agents: {
+            'p-a': [agentA],
+            'p-b': [agentB],
+          },
+        ),
+        [agentCandidate(agentA, 'Alpha'), agentCandidate(agentB, 'Beta')],
+      );
+
+      expect(result, hasLength(1));
+      final team = result.single;
+      expect(team.isTeam, isTrue);
+      expect(team.label, 'Nom Trio');
+      expect(team.isAgent, isTrue);
+      expect(
+        [for (final member in team.teamMembers!) member.pubkey],
+        [agentA, agentB],
+      );
+    });
+
+    test('drops a team when a persona resolves to no owned agent', () {
+      final result = buildTeamMentionCandidates(
+        teams(
+          teams: const [
+            AgentTeamRecord(
+              id: 'team-1',
+              name: 'Nom Trio',
+              personaIds: ['p-a', 'p-missing'],
+            ),
+          ],
+          agents: {
+            'p-a': [agentA],
+            // p-missing has a managed-agent pubkey but neither a candidate
+            // nor a 30177 name to synthesize one from.
+            'p-missing': [agentB],
+          },
+        ),
+        [agentCandidate(agentA, 'Alpha')],
+      );
+
+      expect(result, isEmpty);
+    });
+
+    test('synthesizes non-candidate members from their 30177 names', () {
+      final result = buildTeamMentionCandidates(
+        teams(
+          teams: const [
+            AgentTeamRecord(
+              id: 'team-1',
+              name: 'Nom Trio',
+              personaIds: ['p-a', 'p-b'],
+            ),
+          ],
+          agents: {
+            'p-a': [agentA],
+            'p-b': [agentB],
+          },
+          names: {agentB: 'Beta'},
+        ),
+        [agentCandidate(agentA, 'Alpha')],
+      );
+
+      expect(result, hasLength(1));
+      final members = result.single.teamMembers!;
+      expect([for (final m in members) m.label], ['Alpha', 'Beta']);
+      expect(members.last.isAgent, isTrue);
+      expect(members.last.pubkey, agentB);
+    });
+
+    test('drops a team with unknown or empty member lists', () {
+      final result = buildTeamMentionCandidates(
+        teams(
+          teams: const [
+            AgentTeamRecord(id: 'team-1', name: 'No Members', personaIds: []),
+            AgentTeamRecord(id: 'team-2', name: 'Unknown Members'),
+          ],
+          agents: {},
+        ),
+        [agentCandidate(agentA, 'Alpha')],
+      );
+
+      expect(result, isEmpty);
+    });
+
+    test('drops a team whose member labels collide', () {
+      final result = buildTeamMentionCandidates(
+        teams(
+          teams: const [
+            AgentTeamRecord(
+              id: 'team-1',
+              name: 'Twins',
+              personaIds: ['p-a', 'p-b'],
+            ),
+          ],
+          agents: {
+            'p-a': [agentA],
+            'p-b': [agentB],
+          },
+        ),
+        [agentCandidate(agentA, 'Same'), agentCandidate(agentB, 'same')],
+      );
+
+      expect(result, isEmpty);
+    });
+
+    test('never treats a human candidate as a team member', () {
+      final result = buildTeamMentionCandidates(
+        teams(
+          teams: const [
+            AgentTeamRecord(
+              id: 'team-1',
+              name: 'Nom Trio',
+              personaIds: ['p-a'],
+            ),
+          ],
+          agents: {
+            'p-a': [agentA],
+          },
+        ),
+        [MentionCandidate(pubkey: agentA, displayName: 'Human')],
+      );
+
+      expect(result, isEmpty);
     });
   });
 }

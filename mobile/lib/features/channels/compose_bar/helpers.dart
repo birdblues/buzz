@@ -307,8 +307,10 @@ void _insertTriggerAtCursor(
 }
 
 bool hasMention(String text, String name) {
+  // `(` is a valid prefix so team-expanded mentions — `TeamName(@a @b)` —
+  // count their first member.
   final pattern = RegExp(
-    '(?:^|\\s|[*_]{1,3}|\\|\\|)@${RegExp.escape(name)}(?=\\|\\||[\\s,;.!?:)\\]}*_]|\$)',
+    '(?:^|[\\s(]|[*_]{1,3}|\\|\\|)@${RegExp.escape(name)}(?=\\|\\||[\\s,;.!?:)\\]}*_]|\$)',
     caseSensitive: false,
   );
   return pattern.hasMatch(text);
@@ -571,7 +573,11 @@ class _OutgoingMentions {
 
   _OutgoingMentions(List<MentionCandidate> selectedMentions)
     : pubkeys = LinkedHashSet<String>.from(
-        selectedMentions.map((candidate) => candidate.pubkey.toLowerCase()),
+        selectedMentions
+            .map((candidate) => candidate.pubkey.toLowerCase())
+            // A placeholder candidate (a team, or a record with a broken
+            // d-tag) has no pubkey; it must never become a `p` tag.
+            .where((pubkey) => pubkey.isNotEmpty),
       ).toList();
 
   void demote(Iterable<String> demoted) {
