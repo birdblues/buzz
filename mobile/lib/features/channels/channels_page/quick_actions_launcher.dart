@@ -69,11 +69,7 @@ class ChannelQuickActionsLauncher extends HookConsumerWidget {
 
     Future<void> openChannel(Channel channel) async {
       if (!context.mounted) return;
-      await Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => ChannelDetailPage(channel: channel),
-        ),
-      );
+      await openChannelDetail(context, channel: channel);
     }
 
     Future<void> selectQuickAction(_QuickAction action) async {

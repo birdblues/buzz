@@ -3,6 +3,8 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:camera/camera.dart';
+
+import 'avatar_capture_orientation.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -84,6 +86,7 @@ class ImageAvatarCapture extends HookConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    final windowOrientation = MediaQuery.orientationOf(context);
     final lifecycle = ref.watch(appLifecycleProvider);
     final controller = useState<CameraController?>(null);
     final controllerRef = useRef<CameraController?>(null);
@@ -181,7 +184,7 @@ class ImageAvatarCapture extends HookConsumerWidget {
             return;
           }
           await next.initialize();
-          await next.lockCaptureOrientation(DeviceOrientation.portraitUp);
+          await lockAvatarCaptureOrientation(next, windowOrientation);
           if (disposed || generation != cameraGeneration.value) {
             if (identical(candidateRef.value, next)) candidateRef.value = null;
             await reservation.dispose(next.dispose);
@@ -311,7 +314,7 @@ class ImageAvatarCapture extends HookConsumerWidget {
         if (!context.mounted) return;
         await active.setDescription(matches.first);
         if (context.mounted) selectedLens.value = nextLens;
-        await active.lockCaptureOrientation(DeviceOrientation.portraitUp);
+        await lockAvatarCaptureOrientation(active, windowOrientation);
       } on CameraException {
         if (context.mounted) error.value = 'Could not switch cameras.';
       } finally {

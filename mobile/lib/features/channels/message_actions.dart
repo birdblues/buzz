@@ -35,7 +35,7 @@ import 'recent_emoji_provider.dart';
 import '../../shared/read_state/message_read_state.dart';
 import '../../shared/read_state/read_state_format.dart';
 import '../../shared/read_state/read_state_provider.dart';
-import 'thread_detail_page.dart';
+import 'channel_navigation.dart';
 import 'thread_follows/thread_follows_provider.dart';
 import 'timeline_message.dart';
 
@@ -572,17 +572,14 @@ class _FastActionsRow extends ConsumerWidget {
           label: 'Reply',
           onTap: () {
             Navigator.of(context).pop();
-            Navigator.of(pageContext).push(
-              MaterialPageRoute<void>(
-                builder: (_) => ThreadDetailPage(
-                  threadHead: message,
-                  allMessages: messages,
-                  channelId: channelId,
-                  currentPubkey: currentPubkey,
-                  isMember: isMember,
-                  isArchived: isArchived,
-                ),
-              ),
+            openThreadDetail(
+              pageContext,
+              threadHead: message,
+              allMessages: messages,
+              channelId: channelId,
+              currentPubkey: currentPubkey,
+              isMember: isMember,
+              isArchived: isArchived,
             );
           },
         ),

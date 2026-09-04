@@ -22,6 +22,7 @@ import '../../shared/widgets/message_author_meta.dart';
 import '../../shared/widgets/modal_presentation.dart';
 import '../channels/channel.dart';
 import '../channels/channel_detail_page.dart';
+import '../channels/channel_navigation.dart';
 import '../channels/channel_management_provider.dart';
 import '../channels/channels_provider.dart';
 import '../channels/dm_channel_labels.dart';
@@ -257,16 +258,13 @@ class ActivityPage extends HookConsumerWidget {
           : thread.parentId;
 
       if (!context.mounted) return;
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => ChannelDetailPage(
-            channel: resolvedChannel,
-            initialMessageId: target.id,
-            initialThreadRootId: threadRootId,
-            initialThreadRouteBehavior:
-                InitialThreadRouteBehavior.replaceCurrentRoute,
-          ),
-        ),
+      openChannelDetail(
+        context,
+        channel: resolvedChannel,
+        initialMessageId: target.id,
+        initialThreadRootId: threadRootId,
+        initialThreadRouteBehavior:
+            InitialThreadRouteBehavior.replaceCurrentRoute,
       );
     }
 
@@ -280,15 +278,12 @@ class ActivityPage extends HookConsumerWidget {
         );
         return;
       }
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => ChannelDetailPage(
-            channel: channel,
-            initialThreadRootId: draft.threadHeadId,
-            initialThreadRouteBehavior:
-                InitialThreadRouteBehavior.replaceCurrentRoute,
-          ),
-        ),
+      openChannelDetail(
+        context,
+        channel: channel,
+        initialThreadRootId: draft.threadHeadId,
+        initialThreadRouteBehavior:
+            InitialThreadRouteBehavior.replaceCurrentRoute,
       );
     }
 
@@ -311,13 +306,10 @@ class ActivityPage extends HookConsumerWidget {
         );
         return;
       }
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => ChannelDetailPage(
-            channel: channel,
-            initialMessageId: target.eventId,
-          ),
-        ),
+      openChannelDetail(
+        context,
+        channel: channel,
+        initialMessageId: target.eventId,
       );
     }
 

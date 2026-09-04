@@ -80,6 +80,11 @@ void main() {
   testWidgets('animated capture releases a failed orientation-lock candidate', (
     tester,
   ) async {
+    // The portrait lock only applies to portrait windows; landscape windows
+    // (the iPad shell) leave the capture orientation alone.
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
     final platform = _TestCameraPlatform(failLockForCameraIds: {1});
     final previousPlatform = CameraPlatform.instance;
     CameraPlatform.instance = platform;

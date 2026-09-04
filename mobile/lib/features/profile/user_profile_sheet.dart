@@ -15,7 +15,7 @@ import '../../shared/widgets/buzz_action_tile.dart';
 import '../../shared/widgets/modal_presentation.dart';
 import '../../shared/widgets/progressive_animated_avatar.dart';
 import '../channels/channel.dart';
-import '../channels/channel_detail_page.dart';
+import '../channels/channel_navigation.dart';
 import '../channels/channel_management_provider.dart';
 import '../channels/message_content.dart';
 import 'presence_cache_provider.dart';
@@ -31,11 +31,7 @@ void showUserProfileSheet(BuildContext context, String pubkey) {
     builder: (_) => UserProfileSheet(pubkey: pubkey),
   ).then((channel) {
     if (channel == null || !context.mounted) return;
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => ChannelDetailPage(channel: channel),
-      ),
-    );
+    openChannelDetail(context, channel: channel);
   });
 }
 

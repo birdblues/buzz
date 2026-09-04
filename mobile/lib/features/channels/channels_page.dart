@@ -12,6 +12,7 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../shared/auth/auth.dart';
+import '../../shared/layout/layout_mode.dart';
 import '../../shared/community/community_icon_provider.dart';
 import '../../shared/relay/relay.dart';
 import '../../shared/theme/theme.dart';
@@ -36,6 +37,7 @@ import '../pairing/pairing_provider.dart';
 import 'channel.dart';
 import 'channel_actions_sheet.dart';
 import 'channel_detail_page.dart';
+import 'channel_navigation.dart';
 import 'channel_management_provider.dart';
 import 'dm_channel_labels.dart';
 import 'ephemeral_channel_display.dart';
@@ -51,6 +53,7 @@ import '../../shared/read_state/read_state_format.dart';
 import '../../shared/read_state/read_state_provider.dart';
 import '../../shared/read_state/read_state_time.dart';
 import 'unread_badge/observed_unread_event.dart';
+import 'wide_shell/wide_shell_provider.dart';
 
 part 'channels_page/body.dart';
 part 'channels_page/browse_channels_sheet.dart';
@@ -163,10 +166,19 @@ class ChannelsPage extends HookConsumerWidget {
     required this.settingsPageBuilder,
     required this.onSettingsTransitionProgress,
     this.tabReselection,
+    this.pinnedHeader,
+    this.pinnedHeaderHeight = 0,
     super.key,
-  });
+  }) : assert(pinnedHeader == null || pinnedHeaderHeight > 0);
 
   final WidgetBuilder settingsPageBuilder;
+
+  /// Content pinned below the community header, above the scrolling list.
+  /// The wide shell uses it for its Activity/Search navigation rows.
+  final Widget? pinnedHeader;
+
+  /// Height reserved for [pinnedHeader].
+  final double pinnedHeaderHeight;
 
   /// Reports Settings route progress so its foreground and Home's background
   /// render from the same timeline.
@@ -188,10 +200,12 @@ class ChannelsPage extends HookConsumerWidget {
       fontWeight: FontWeight.w600,
       color: navigationPrimaryForeground(context),
     );
+    final topSectionBottomHeight =
+        _kTopSectionBottomPadding + pinnedHeaderHeight;
     final topSectionHeight = frostedAppBarHeight(
       context,
       titleStyle: headerTitleStyle,
-      bottomHeight: _kTopSectionBottomPadding,
+      bottomHeight: topSectionBottomHeight,
     );
     final channelsScrollController = useScrollController();
     final reducedMotion = MediaQuery.disableAnimationsOf(context);
@@ -257,11 +271,7 @@ class ChannelsPage extends HookConsumerWidget {
     final channels = cachedChannels.value;
     Future<void> openChannel(Channel channel) async {
       if (!context.mounted) return;
-      await Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => ChannelDetailPage(channel: channel),
-        ),
-      );
+      await openChannelDetail(context, channel: channel);
     }
 
     // Only surface fetch errors while the relay is stably connected. During a
@@ -361,8 +371,10 @@ class ChannelsPage extends HookConsumerWidget {
             ),
           ),
         ],
-        bottomHeight: _kTopSectionBottomPadding,
-        bottom: const SizedBox.expand(),
+        bottomHeight: topSectionBottomHeight,
+        bottom: pinnedHeader == null
+            ? const SizedBox.expand()
+            : Align(alignment: Alignment.topCenter, child: pinnedHeader),
       ),
       body: _ChannelsBody(
         channels: channels,

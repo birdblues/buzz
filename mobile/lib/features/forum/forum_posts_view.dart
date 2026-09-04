@@ -15,6 +15,7 @@ import 'forum_models.dart';
 import 'forum_post_card.dart';
 import 'forum_provider.dart';
 import 'forum_thread_page.dart';
+import '../channels/channel_navigation.dart';
 
 /// Main forum view — replaces the old _ForumPlaceholder.
 ///
@@ -166,16 +167,11 @@ class ForumPostsView extends HookConsumerWidget {
   }
 
   void _openThread(BuildContext context, ForumPost post) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => ForumThreadPage(
-          channelId: channel.id,
-          postEventId: post.eventId,
-          currentPubkey: currentPubkey,
-          isMember: channel.isMember,
-          isArchived: channel.isArchived,
-        ),
-      ),
+    openForumThread(
+      context,
+      channel: channel,
+      postEventId: post.eventId,
+      currentPubkey: currentPubkey,
     );
   }
 }

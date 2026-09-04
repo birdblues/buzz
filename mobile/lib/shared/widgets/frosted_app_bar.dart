@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../layout/pane_scope.dart';
 import '../theme/theme.dart';
 import 'buzz_navigation_metrics.dart';
 import 'directional_transition_scope.dart';
@@ -176,6 +177,13 @@ class FrostedAppBar extends StatelessWidget {
     final paintsBottomDivider =
         showBottomDivider && (scrollUnder?.isScrolledUnder ?? true);
     final canPop = Navigator.canPop(context);
+    // Inside a wide-shell pane, the pane supplies its own chrome: a leading
+    // control at the pane root (where no back button is implied, so pages
+    // leave `leading` null) and a trailing control on every route.
+    final paneScope = PaneScope.maybeOf(context);
+    final paneLeading = canPop ? null : paneScope?.headerLeading;
+    final paneTrailing = paneScope?.headerTrailing;
+    final effectiveActions = [...actions, ?paneTrailing];
     final effectiveTitleStyle = _effectiveTitleStyle(context, titleStyle);
     final barContentHeight = _barContentHeight(
       context,
@@ -211,7 +219,7 @@ class FrostedAppBar extends StatelessWidget {
                         tooltip: 'Back',
                       ),
                     )
-            : null);
+            : paneLeading);
 
     final titleRow = SizedBox(
       height: barContentHeight,
@@ -240,7 +248,7 @@ class FrostedAppBar extends StatelessWidget {
                                   ? Grid.gutter - horizontalInset
                                   : 0,
                               right:
-                                  actions.isEmpty &&
+                                  effectiveActions.isEmpty &&
                                       horizontalInset < Grid.gutter
                                   ? Grid.gutter - horizontalInset
                                   : 0,
@@ -248,9 +256,12 @@ class FrostedAppBar extends StatelessWidget {
                             child: title!,
                           ),
                   ),
-            actions: actions.isEmpty
+            actions: effectiveActions.isEmpty
                 ? null
-                : Row(mainAxisSize: MainAxisSize.min, children: actions),
+                : Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: effectiveActions,
+                  ),
             centered: centerTitle,
           ),
         ),
