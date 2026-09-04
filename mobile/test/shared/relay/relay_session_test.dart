@@ -1192,6 +1192,66 @@ void main() {
     session.debugDispose();
   });
 
+  // The relay shares one admission window between subscription frames and
+  // events, so a replay that spends the whole budget makes the relay refuse
+  // the next message the person sends inside that window.
+  test('replay leaves admission budget for the person using the app', () async {
+    final replayDelays = <Duration>[];
+    final replayDelayCompleters = <Completer<void>>[];
+    var clock = DateTime(2026);
+    final socket = _RecordingRelaySocket();
+    final session = RelaySessionNotifier(
+      now: () => clock,
+      replayDelay: (duration) {
+        replayDelays.add(duration);
+        final completer = Completer<void>();
+        replayDelayCompleters.add(completer);
+        return completer.future;
+      },
+    );
+    session.debugAttachSocketForTest(socket);
+
+    for (var i = 0; i < 56; i++) {
+      final subscribe = session.subscribe(
+        _filterForChannel('channel-$i'),
+        (_) {},
+      );
+      session.debugHandleMessage(['EOSE', 'l-${i + 1}']);
+      await subscribe;
+    }
+    socket.messages.clear();
+
+    final replay = session.debugReplayLiveSubscriptions();
+    await Future<void>.delayed(Duration.zero);
+
+    // Batches keep their 50 ms spacing until the window's share is spent.
+    while (_reqs(socket).length < 40) {
+      expect(replayDelays.last, const Duration(milliseconds: 50));
+      replayDelayCompleters.last.complete();
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(_reqs(socket), hasLength(40));
+
+    // The batch after the share waits for the next admission window instead
+    // of the usual 50 ms, leaving the rest of the budget for the person.
+    expect(replayDelays.last, const Duration(milliseconds: 50));
+    replayDelayCompleters.last.complete();
+    await Future<void>.delayed(Duration.zero);
+    expect(_reqs(socket), hasLength(40));
+    expect(replayDelays.last, const Duration(seconds: 5));
+
+    clock = clock.add(const Duration(seconds: 5));
+    replayDelayCompleters.last.complete();
+    await Future<void>.delayed(Duration.zero);
+    expect(_reqs(socket), hasLength(48));
+
+    replayDelayCompleters.last.complete();
+    await Future<void>.delayed(Duration.zero);
+    expect(_reqs(socket), hasLength(56));
+    await replay;
+    session.debugDispose();
+  });
+
   test('active rate-limit gate does not delay a new live subscribe', () async {
     final gateTimers = <_ManualTimer>[];
     final gate = RelayRateLimitGate(
@@ -1388,7 +1448,7 @@ void main() {
   // keyed by one — nothing settled, so the publish could only time out. The
   // gate arming that used to depend on the NOTICE has to happen here too.
   test(
-    'a rate-limited OK rejection fails the publish and arms the gate',
+    'a rate-limited OK rejection past the retry budget fails and arms the gate',
     () async {
       final gateTimers = <_ManualTimer>[];
       final gate = RelayRateLimitGate(
@@ -1403,11 +1463,13 @@ void main() {
       session.debugAttachSocketForTest(_RecordingRelaySocket());
 
       final publish = session.publish(_event());
+      // A hint this long means the quota is genuinely spent, so the send is
+      // surfaced instead of being retried on the user's behalf.
       session.debugHandleMessage([
         'OK',
         'event-1',
         false,
-        'rate-limited: quota exceeded; retry in 4s',
+        'rate-limited: quota exceeded; retry in 45s',
       ]);
 
       await expectLater(publish, throwsA(isA<Exception>()));
@@ -1418,7 +1480,7 @@ void main() {
             'back-pressure now arrives on the OK channel — without arming here '
             'the client fails the send and retries into the same quota',
       );
-      expect(gateTimers.single.duration, const Duration(seconds: 4));
+      expect(gateTimers.single.duration, const Duration(seconds: 45));
     },
   );
 
@@ -1443,7 +1505,7 @@ void main() {
         'OK',
         'event-a',
         false,
-        'rate-limited: quota exceeded; retry in 4s',
+        'rate-limited: quota exceeded; retry in 45s',
       ]);
       await expectLater(firstPublish, throwsA(isA<Exception>()));
 
@@ -1525,6 +1587,134 @@ void main() {
       isFalse,
       reason: 'only `rate-limited:` rejections signal back-pressure',
     );
+  });
+
+  group('rate-limited publish retry', () {
+    ({
+      RelaySessionNotifier session,
+      _RecordingRelaySocket socket,
+      List<_ManualTimer> timers,
+    })
+    attach() {
+      final timers = <_ManualTimer>[];
+      final socket = _RecordingRelaySocket();
+      final session = RelaySessionNotifier(
+        retryTimerFactory: (duration, callback) {
+          final timer = _ManualTimer(duration, callback);
+          timers.add(timer);
+          return timer;
+        },
+      );
+      session.debugAttachSocketForTest(socket);
+      return (session: session, socket: socket, timers: timers);
+    }
+
+    List<List<dynamic>> sentEvents(_RecordingRelaySocket socket) =>
+        socket.messages.where((message) => message.first == 'EVENT').toList();
+
+    // The relay shares one websocket burst quota between subscription frames
+    // and events, so a send that lands in a window the reconnect replay
+    // already filled is refused for pacing, not for anything about the
+    // message. Surfacing that as a failed send made the first message after a
+    // reconnect fail while an immediate manual resend succeeded.
+    test('a short back-pressure hint is retried instead of surfaced', () async {
+      final harness = attach();
+      final publish = harness.session.publish(_event());
+      await Future<void>.delayed(Duration.zero);
+      expect(sentEvents(harness.socket), hasLength(1));
+
+      harness.session.debugHandleMessage([
+        'OK',
+        'event-1',
+        false,
+        'rate-limited: quota exceeded; retry in 0s',
+      ]);
+      await Future<void>.delayed(Duration.zero);
+      expect(sentEvents(harness.socket), hasLength(1));
+      // `retry in 0s` counts whole seconds: it means "under a second", so an
+      // instant resend would land in the window that just refused this one.
+      expect(harness.timers.single.duration.inMilliseconds, greaterThan(0));
+
+      harness.timers.single.fire();
+      await Future<void>.delayed(Duration.zero);
+      expect(sentEvents(harness.socket), hasLength(2));
+
+      harness.session.debugHandleMessage(['OK', 'event-1', true, '']);
+      await expectLater(publish, completes);
+    });
+
+    test('the retry is bounded to one attempt', () async {
+      final harness = attach();
+      final publish = harness.session.publish(_event());
+      await Future<void>.delayed(Duration.zero);
+
+      harness.session.debugHandleMessage([
+        'OK',
+        'event-1',
+        false,
+        'rate-limited: quota exceeded; retry in 0s',
+      ]);
+      await Future<void>.delayed(Duration.zero);
+      harness.timers.single.fire();
+      await Future<void>.delayed(Duration.zero);
+
+      harness.session.debugHandleMessage([
+        'OK',
+        'event-1',
+        false,
+        'rate-limited: quota exceeded; retry in 0s',
+      ]);
+
+      await expectLater(
+        publish,
+        throwsA(
+          isA<Exception>().having(
+            (error) => error.toString(),
+            'message',
+            contains('rate-limited'),
+          ),
+        ),
+      );
+      expect(sentEvents(harness.socket), hasLength(2));
+      expect(harness.timers, hasLength(1));
+    });
+
+    test('a hint past the retry budget is surfaced immediately', () async {
+      final harness = attach();
+      final publish = harness.session.publish(_event());
+      await Future<void>.delayed(Duration.zero);
+
+      harness.session.debugHandleMessage([
+        'OK',
+        'event-1',
+        false,
+        'rate-limited: quota exceeded; retry in 45s',
+      ]);
+
+      await expectLater(publish, throwsA(isA<Exception>()));
+      expect(harness.timers, isEmpty);
+      expect(sentEvents(harness.socket), hasLength(1));
+    });
+
+    test('a reconnect while waiting fails the publish', () async {
+      final harness = attach();
+      final publish = harness.session.publish(_event());
+      await Future<void>.delayed(Duration.zero);
+
+      harness.session.debugHandleMessage([
+        'OK',
+        'event-1',
+        false,
+        'rate-limited: quota exceeded; retry in 0s',
+      ]);
+      await Future<void>.delayed(Duration.zero);
+
+      harness.session.debugSupersedeConnection();
+      harness.timers.single.fire();
+
+      await expectLater(publish, throwsA(isA<Exception>()));
+      expect(sentEvents(harness.socket), hasLength(1));
+    });
   });
 }
 

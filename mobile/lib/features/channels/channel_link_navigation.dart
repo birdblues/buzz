@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 import 'channel.dart';
-import 'channel_detail_page.dart';
+import 'channel_navigation.dart';
 import 'channels_provider.dart';
 
 void openChannelLink({
@@ -30,9 +30,5 @@ void openChannelLink({
     return;
   }
 
-  Navigator.of(context).push(
-    MaterialPageRoute<void>(
-      builder: (_) => ChannelDetailPage(channel: targetChannel!),
-    ),
-  );
+  openChannelDetail(context, channel: targetChannel);
 }

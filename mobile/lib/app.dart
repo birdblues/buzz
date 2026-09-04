@@ -14,7 +14,7 @@ import 'features/channels/channel.dart';
 import 'features/channels/channel_management_provider.dart';
 import 'features/channels/channels_provider.dart';
 import 'features/channels/unread_badge/unread_badge_provider.dart';
-import 'features/home/home_page.dart';
+import 'features/home/adaptive_home.dart';
 import 'features/invites/invite_create_page.dart';
 import 'features/invites/invite_join_provider.dart';
 import 'features/pairing/pairing_page.dart';
@@ -383,7 +383,7 @@ class App extends HookConsumerWidget {
         error: (_, _) => const PairingPage(),
         data: (state) => switch (state.status) {
           AuthStatus.authenticated => DeepLinkDispatcher(
-            child: HomePage(
+            child: AdaptiveHome(
               settingsPageBuilder: _buildSettingsPage,
               hasUnreadInbox: hasUnreadInbox,
             ),

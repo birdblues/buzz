@@ -110,9 +110,10 @@ class _SystemMessageRow extends HookConsumerWidget {
       color: Colors.transparent,
       borderRadius: BorderRadius.circular(Radii.md),
       clipBehavior: Clip.antiAlias,
-      child: MessageLongPressInkWell(
+      child: MessageGestureInkWell(
         key: ValueKey('system-message-row-${message.id}'),
-        onLongPress: openReactionPopover,
+        onDoubleTap: openReactionPopover,
+        selectable: false,
         borderRadius: BorderRadius.circular(Radii.md),
         highlightColor: context.colors.primary.withValues(alpha: 0.1),
         child: Padding(
@@ -566,17 +567,14 @@ class _ThreadSummaryRow extends ConsumerWidget {
 
     return GestureDetector(
       onTap: () {
-        Navigator.of(context).push(
-          MaterialPageRoute<void>(
-            builder: (_) => ThreadDetailPage(
-              threadHead: message,
-              allMessages: allMessages,
-              channelId: channelId,
-              currentPubkey: currentPubkey,
-              isMember: isMember,
-              isArchived: isArchived,
-            ),
-          ),
+        openThreadDetail(
+          context,
+          threadHead: message,
+          allMessages: allMessages,
+          channelId: channelId,
+          currentPubkey: currentPubkey,
+          isMember: isMember,
+          isArchived: isArchived,
         );
       },
       child: Padding(

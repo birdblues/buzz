@@ -310,6 +310,13 @@ class AppTheme {
       ),
 
       // Bottom sheet: match dialog radius
+      // Message text selection (long press on a message) shares the
+      // composer's selection colours.
+      textSelectionTheme: TextSelectionThemeData(
+        selectionColor: scheme.primary.withValues(alpha: 0.35),
+        selectionHandleColor: scheme.primary,
+        cursorColor: scheme.primary,
+      ),
       bottomSheetTheme: BottomSheetThemeData(
         backgroundColor: scheme.surface,
         elevation: 0,

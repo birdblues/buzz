@@ -7,7 +7,7 @@ import 'package:nostr/nostr.dart' as nostr;
 import '../../shared/clipboard_utils.dart';
 import '../../shared/theme/theme.dart';
 import '../../shared/widgets/avatar_image.dart';
-import '../channels/channel_detail_page.dart';
+import '../channels/channel_navigation.dart';
 import '../channels/channel_management_provider.dart';
 import '../channels/message_content.dart';
 import '../../shared/profile/user_cache_provider.dart';
@@ -215,11 +215,7 @@ class NoteCard extends HookConsumerWidget {
                             .read(channelActionsProvider)
                             .openDm(pubkeys: [note.pubkey]);
                         if (!context.mounted) return;
-                        Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => ChannelDetailPage(channel: channel),
-                          ),
-                        );
+                        openChannelDetail(context, channel: channel);
                       },
                     ),
                   ],

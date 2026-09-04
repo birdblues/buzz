@@ -9,6 +9,7 @@ import '../invites/invite_join_provider.dart';
 import '../invites/invite_join_sheet.dart';
 import 'channel.dart';
 import 'channel_detail_page.dart';
+import 'channel_navigation.dart';
 import 'channels_provider.dart';
 
 /// Routes pending `buzz://message` deep links into the channel view.
@@ -142,18 +143,20 @@ class _DeepLinkDispatcherState extends ConsumerState<DeepLinkDispatcher> {
   }
 
   void _pushChannel(Channel channel, BuzzDeepLink link) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) =>
-            widget.destinationBuilder?.call(channel, link) ??
-            ChannelDetailPage(
-              channel: channel,
-              initialMessageId: link is MessageDeepLink ? link.messageId : null,
-              initialThreadRootId: link is MessageDeepLink
-                  ? link.threadRootId
-                  : null,
-            ),
-      ),
+    final destinationBuilder = widget.destinationBuilder;
+    if (destinationBuilder != null) {
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => destinationBuilder(channel, link),
+        ),
+      );
+      return;
+    }
+    openChannelDetail(
+      context,
+      channel: channel,
+      initialMessageId: link is MessageDeepLink ? link.messageId : null,
+      initialThreadRootId: link is MessageDeepLink ? link.threadRootId : null,
     );
   }
 

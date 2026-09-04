@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
@@ -162,6 +163,13 @@ Widget _buildThreadPage({
       ),
     ),
   );
+}
+
+Future<void> _doubleTap(WidgetTester tester, Finder finder) async {
+  await tester.tap(finder);
+  await tester.pump(const Duration(milliseconds: 50));
+  await tester.tap(finder);
+  await tester.pump();
 }
 
 void main() {
@@ -371,6 +379,7 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.tap(find.byType(ForumPostCard));
+      await tester.pump(kDoubleTapTimeout);
       expect(tapped, isTrue);
     });
 
@@ -405,6 +414,7 @@ void main() {
       );
 
       await tester.tapAt(tester.getCenter(preview));
+      await tester.pump(kDoubleTapTimeout);
       await tester.pumpAndSettle();
 
       expect(tapped, isTrue);
@@ -414,17 +424,17 @@ void main() {
       );
     });
 
-    testWidgets('long press opens action sheet with Copy text', (tester) async {
+    testWidgets('double tap opens action sheet with Copy text', (tester) async {
       await tester.pumpWidget(_buildPostCard(post: _makePost()));
       await tester.pumpAndSettle();
 
-      await tester.longPress(find.byType(ForumPostCard));
+      await _doubleTap(tester, find.byType(ForumPostCard));
       await tester.pumpAndSettle();
 
       expect(find.text('Copy text'), findsOneWidget);
     });
 
-    testWidgets('long press shows Delete only for own posts', (tester) async {
+    testWidgets('double tap shows Delete only for own posts', (tester) async {
       // Own post — Delete should appear.
       await tester.pumpWidget(
         _buildPostCard(
@@ -435,7 +445,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.longPress(find.byType(ForumPostCard));
+      await _doubleTap(tester, find.byType(ForumPostCard));
       await tester.pumpAndSettle();
       expect(find.text('Delete post'), findsOneWidget);
 
@@ -453,7 +463,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.longPress(find.byType(ForumPostCard));
+      await _doubleTap(tester, find.byType(ForumPostCard));
       await tester.pumpAndSettle();
       expect(find.text('Delete post'), findsNothing);
     });
@@ -469,8 +479,8 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // Long press → action sheet.
-      await tester.longPress(find.byType(ForumPostCard));
+      // Double tap → action sheet.
+      await _doubleTap(tester, find.byType(ForumPostCard));
       await tester.pumpAndSettle();
 
       // Tap Delete post.

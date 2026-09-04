@@ -23,6 +23,7 @@ import 'avatar_background_grid.dart';
 import 'camera_disposal_barrier.dart';
 import 'avatar_editor_option_button.dart';
 import 'animated_avatar_orientation.dart';
+import 'avatar_capture_orientation.dart';
 import 'profile_avatar_draft.dart';
 
 part 'animated_avatar_capture/review_controls.dart';
@@ -63,6 +64,7 @@ class AnimatedAvatarCapture extends HookConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final windowOrientation = MediaQuery.orientationOf(context);
     final controller = useState<CameraController?>(null);
     final controllerRef = useRef<CameraController?>(null);
     final controllerDisposal = useRef(
@@ -175,7 +177,7 @@ class AnimatedAvatarCapture extends HookConsumerWidget {
             return;
           }
           await next.initialize();
-          await next.lockCaptureOrientation(DeviceOrientation.portraitUp);
+          await lockAvatarCaptureOrientation(next, windowOrientation);
           if (disposed) {
             if (identical(candidateRef.value, next)) candidateRef.value = null;
             await reservation.dispose(next.dispose);

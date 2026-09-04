@@ -7,6 +7,7 @@ import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../../shared/layout/pane_scope.dart';
 import '../../shared/relay/app_lifecycle_provider.dart';
 import '../../shared/theme/theme.dart';
 import 'voice_note_recording.dart';
@@ -65,10 +66,14 @@ class VoiceNoteComposerRecorder extends HookConsumerWidget {
     }, [recorder, onCancel]);
 
     final route = ModalRoute.of(context);
+    // Inside a wide-shell pane the route belongs to the pane's navigator, so
+    // subscribe to that navigator's observer; the root observer never sees it.
+    final routeObserver =
+        PaneScope.maybeOf(context)?.routeObserver ?? voiceNoteRouteObserver;
     useEffect(() {
-      if (route != null) voiceNoteRouteObserver.subscribe(routeAware, route);
-      return () => voiceNoteRouteObserver.unsubscribe(routeAware);
-    }, [routeAware, route]);
+      if (route != null) routeObserver.subscribe(routeAware, route);
+      return () => routeObserver.unsubscribe(routeAware);
+    }, [routeAware, route, routeObserver]);
 
     Future<void> finish() async {
       if (!isStarted.value || isStopping.value || error.value != null) return;

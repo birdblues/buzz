@@ -3,6 +3,7 @@ import 'dart:collection';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart'
     show RenderParagraph, ScrollDirection, SemanticsAction;
@@ -196,6 +197,14 @@ NostrEvent _edit({
   content: content,
   sig: '',
 );
+
+/// Opens a message row's actions the way users do now: a double tap.
+Future<void> _doubleTap(WidgetTester tester, Finder finder) async {
+  await tester.tap(finder);
+  await tester.pump(const Duration(milliseconds: 50));
+  await tester.tap(finder);
+  await tester.pump();
+}
 
 Widget _buildTestable({
   required List<NostrEvent> messages,
@@ -508,6 +517,8 @@ void main() {
         );
 
         await tester.tap(find.byKey(const ValueKey('message-row-bot-message')));
+        // A single tap is delivered once a double tap has been ruled out.
+        await tester.pump(kDoubleTapTimeout);
         await tester.pumpAndSettle();
         expect(
           avatarIn(
@@ -3050,7 +3061,8 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.longPress(
+      await _doubleTap(
+        tester,
         find.byKey(const ValueKey('system-message-row-reaction-target')),
       );
       await tester.pumpAndSettle();
@@ -3114,7 +3126,8 @@ void main() {
         reactionRect.center.dx,
         reactionRect.top + Grid.half + Grid.quarter,
       );
-      await tester.longPress(
+      await _doubleTap(
+        tester,
         find.byKey(const ValueKey('system-message-row-reacted-system-message')),
       );
       await tester.pumpAndSettle();
@@ -3168,7 +3181,8 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.longPress(
+      await _doubleTap(
+        tester,
         find.byKey(const ValueKey('system-message-row-reaction-only-blur')),
       );
       await tester.pumpAndSettle();
@@ -3186,7 +3200,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(messageActionBackdropActive.value, isFalse);
 
-      await tester.longPress(
+      await _doubleTap(
+        tester,
         find.byKey(const ValueKey('message-row-full-action-blur')),
       );
       await tester.pumpAndSettle();
@@ -3311,7 +3326,8 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.longPress(
+      await _doubleTap(
+        tester,
         find.byKey(const ValueKey('system-message-row-left-growth-target')),
       );
       await tester.pump();
@@ -3335,7 +3351,7 @@ void main() {
       expect(messageActionBackdropActive.value, isFalse);
     });
 
-    testWidgets('long press survives a message rebuild during the hold', (
+    testWidgets('double tap survives a message rebuild between taps', (
       tester,
     ) async {
       final userCache = _FakeUserCacheNotifier({
@@ -3361,14 +3377,14 @@ void main() {
       final target = find.byKey(
         const ValueKey('system-message-row-rebuild-target'),
       );
-      final gesture = await tester.startGesture(tester.getCenter(target));
-      await tester.pump(const Duration(milliseconds: 250));
+      await tester.tap(target);
+      await tester.pump(const Duration(milliseconds: 100));
       userCache.replace(
         const UserProfile(pubkey: 'alice', displayName: 'Alice Updated'),
       );
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 300));
-      await gesture.up();
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.tap(target);
       await tester.pumpAndSettle();
 
       expect(
@@ -3383,7 +3399,195 @@ void main() {
       expect(messageActionBackdropActive.value, isFalse);
     });
 
-    testWidgets('long press works over nested rich message content', (
+    testWidgets(
+      'long press selects the word under the finger and Copy puts it on the '
+      'clipboard',
+      (tester) async {
+        String? copied;
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          (call) async {
+            if (call.method == 'Clipboard.setData') {
+              copied =
+                  (call.arguments as Map<Object?, Object?>)['text'] as String?;
+            }
+            return null;
+          },
+        );
+        addTearDown(
+          () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+            SystemChannels.platform,
+            null,
+          ),
+        );
+        await tester.pumpWidget(
+          _buildTestable(
+            messages: [
+              _textMsg(
+                id: 'select-me',
+                pubkey: 'alice',
+                content: 'hello brave world',
+              ),
+            ],
+            users: const {
+              'alice': UserProfile(pubkey: 'alice', displayName: 'Alice'),
+            },
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final body = findRichText('hello brave world');
+        await tester.longPressAt(tester.getTopLeft(body) + const Offset(6, 6));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Copy'), findsOneWidget, reason: 'selection toolbar');
+        expect(
+          find.byKey(const ValueKey('message-action-reaction-tray')),
+          findsNothing,
+          reason: 'a long press no longer opens the actions',
+        );
+
+        await tester.tap(find.text('Copy'));
+        await tester.pumpAndSettle();
+        expect(copied, 'hello');
+      },
+    );
+
+    testWidgets('a tap on another row or a scroll clears the selection', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _buildTestable(
+          messages: [
+            // Enough history that a drag really scrolls the list.
+            for (var index = 0; index < 30; index++)
+              _textMsg(
+                id: 'filler-$index',
+                pubkey: 'alice',
+                content: 'filler $index',
+                createdAt: 900 + index,
+              ),
+            _textMsg(id: 'first', pubkey: 'alice', content: 'alpha beta'),
+            _textMsg(
+              id: 'second',
+              pubkey: 'alice',
+              content: 'gamma delta',
+              createdAt: 1001,
+            ),
+          ],
+          users: const {
+            'alice': UserProfile(pubkey: 'alice', displayName: 'Alice'),
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final first = findRichText('alpha beta');
+      await tester.longPressAt(tester.getTopLeft(first) + const Offset(6, 6));
+      await tester.pumpAndSettle();
+      expect(find.text('Copy'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('message-row-second')));
+      await tester.pumpAndSettle();
+      expect(find.text('Copy'), findsNothing);
+      await tester.pump(kDoubleTapTimeout);
+      await tester.pumpAndSettle();
+
+      await tester.longPressAt(tester.getTopLeft(first) + const Offset(6, 6));
+      await tester.pumpAndSettle();
+      expect(find.text('Copy'), findsOneWidget);
+
+      await tester.drag(
+        find.byKey(const ValueKey('channel-message-list')),
+        const Offset(0, 120),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Copy'), findsNothing);
+    });
+
+    testWidgets('a long press on media opens the actions', (tester) async {
+      tester.view.physicalSize = const Size(400, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      const firstImage = 'https://example.com/media/first.png';
+      const secondImage = 'https://example.com/media/second.png';
+      await tester.pumpWidget(
+        _buildTestable(
+          messages: [
+            _textMsg(
+              id: 'media-target',
+              pubkey: 'alice',
+              content:
+                  'Gallery\n'
+                  '![First]($firstImage)\n'
+                  '![Second]($secondImage)',
+              extraTags: const [
+                ['imeta', 'url $firstImage', 'm image/png'],
+                ['imeta', 'url $secondImage', 'm image/png'],
+              ],
+            ),
+          ],
+          users: const {
+            'alice': UserProfile(pubkey: 'alice', displayName: 'Alice'),
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.longPress(
+        find.byKey(const ValueKey('message-media-carousel-item:$firstImage')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('message-action-reaction-tray')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('message-media-image-viewer')),
+        findsNothing,
+      );
+      expect(find.text('Copy'), findsNothing);
+
+      Navigator.of(
+        tester.element(find.byKey(const ValueKey('message-action-surface'))),
+      ).pop();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets(
+      'a long press on a reaction pill opens the reaction details, not a '
+      'selection',
+      (tester) async {
+        await tester.pumpWidget(
+          _buildTestable(
+            messages: [
+              _textMsg(id: 'reacted', pubkey: 'alice', content: 'nice one'),
+              _reaction(id: 'r1', targetId: 'reacted', pubkey: 'bob'),
+            ],
+            users: const {
+              'alice': UserProfile(pubkey: 'alice', displayName: 'Alice'),
+              'bob': UserProfile(pubkey: 'bob', displayName: 'Bob'),
+            },
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.longPress(find.byKey(const ValueKey('reaction-pill-👍')));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(BottomSheet), findsOneWidget);
+        expect(find.text('Bob'), findsOneWidget);
+        expect(find.text('Copy'), findsNothing);
+        expect(
+          find.byKey(const ValueKey('message-action-reaction-tray')),
+          findsNothing,
+        );
+      },
+    );
+
+    testWidgets('double tap works over nested rich message content', (
       tester,
     ) async {
       tester.view.physicalSize = const Size(400, 800);
@@ -3416,9 +3620,8 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.longPress(
-        find.byKey(const ValueKey('message-media-carousel')),
-      );
+      // Media taps open the viewer, so the double tap lands on the body text.
+      await _doubleTap(tester, findRichText('Gallery'));
       await tester.pumpAndSettle();
 
       expect(

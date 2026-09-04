@@ -8,6 +8,7 @@ import '../../shared/widgets/avatar_image.dart';
 import '../../shared/widgets/modal_presentation.dart';
 import '../../shared/custom_emoji/custom_emoji_render.dart';
 import '../../shared/emoji/emoji_burst.dart';
+import '../../shared/layout/pane_scope.dart';
 import '../../shared/emoji/emoji_data_provider.dart';
 import '../../shared/emoji/native_emoji_glyph.dart';
 import '../../shared/emoji/positive_emoji.dart';
@@ -17,6 +18,7 @@ import 'channel_management_provider.dart';
 import 'emoji_picker.dart';
 import 'recent_emoji_provider.dart';
 import 'timeline_message.dart';
+import 'wide_shell/wide_shell_provider.dart';
 
 /// Pill geometry, ported from desktop's `REACTION_PILL_BASE_CLASSES` in
 /// `desktop/src/features/messages/ui/MessageReactions.tsx`: a fully-rounded
@@ -218,6 +220,14 @@ class _ReactionPill extends HookConsumerWidget {
         // after popping back — the burst has to play where the user is looking.
         final route = ModalRoute.of(context);
         if (route != null && !route.isCurrent) return;
+        // In the wide shell the thread is a sibling pane, so both copies are
+        // current; let the auxiliary pane's copy play the burst.
+        final aux = ref.read(wideShellProvider).aux;
+        if (PaneScope.maybeOf(context)?.kind == PaneKind.main &&
+            aux is WideAuxThread &&
+            aux.threadHead.id == messageId) {
+          return;
+        }
         if (!ref.read(pendingReactionBurstProvider.notifier).claim(target)) {
           return;
         }

@@ -1,6 +1,10 @@
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../layout/layout_mode.dart';
+import '../layout/pane_scope.dart';
 import '../theme/theme.dart';
 import 'buzz_sheet_header.dart';
 import 'buzz_titled_sheet_layout.dart';
@@ -62,6 +66,19 @@ Future<T?> showBuzzModalBottomSheet<T>({
       sheetTheme.bottomSheetTheme.backgroundColor ??
       sheetTheme.colorScheme.surface;
   final reduceMotion = MediaQuery.disableAnimationsOf(context);
+  // Sheets opened from inside a wide-shell pane present on the root navigator:
+  // callers capture the root navigator's context and later `pop(true)` it to
+  // close the sheet, which only closes the sheet when the sheet lives there.
+  // The wide layout also caps sheet width so it floats centred like a dialog.
+  final presentsOnRoot = useRootNavigator || PaneScope.maybeOf(context) != null;
+  final effectiveConstraints = LayoutModeScope.isWide(context)
+      ? (constraints ?? const BoxConstraints()).copyWith(
+          maxWidth: math.min(
+            constraints?.maxWidth ?? double.infinity,
+            kWideSheetMaxWidth,
+          ),
+        )
+      : constraints;
 
   return showModalBottomSheet<T>(
     context: context,
@@ -86,11 +103,11 @@ Future<T?> showBuzzModalBottomSheet<T>({
     elevation: elevation,
     shape: shape,
     clipBehavior: clipBehavior,
-    constraints: constraints,
+    constraints: effectiveConstraints,
     barrierColor: barrierColor,
     isScrollControlled: isScrollControlled,
     scrollControlDisabledMaxHeightRatio: scrollControlDisabledMaxHeightRatio,
-    useRootNavigator: useRootNavigator,
+    useRootNavigator: presentsOnRoot,
     isDismissible: isDismissible,
     enableDrag: enableDrag,
     // The shared header owns the handle so Android does not reserve a second

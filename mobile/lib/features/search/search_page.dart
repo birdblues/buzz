@@ -15,12 +15,12 @@ import '../../shared/widgets/frosted_scaffold.dart';
 import '../../shared/widgets/message_author_meta.dart';
 import '../channels/channel.dart';
 import '../channels/channel_detail_page.dart';
+import '../channels/channel_navigation.dart';
 import '../channels/channel_management_provider.dart';
 import '../channels/channels_provider.dart';
 import '../channels/small_avatar.dart';
 import '../channels/message_content.dart';
 import '../channels/date_formatters.dart';
-import '../forum/forum_thread_page.dart';
 import '../profile/profile_provider.dart';
 import '../../shared/profile/user_cache_provider.dart';
 import '../../shared/profile/user_profile.dart';
@@ -696,11 +696,7 @@ class _ChannelsSection extends StatelessWidget {
                 : null,
             onTap: () {
               onResultSelected();
-              Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => ChannelDetailPage(channel: channel),
-                ),
-              );
+              openChannelDetail(context, channel: channel);
             },
           ),
       ],
@@ -748,11 +744,7 @@ class _PeopleSection extends ConsumerWidget {
                   .read(channelActionsProvider)
                   .openDm(pubkeys: [user.pubkey]);
               if (!context.mounted) return;
-              await Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => ChannelDetailPage(channel: channel),
-                ),
-              );
+              await openChannelDetail(context, channel: channel);
             },
           ),
       ],
@@ -943,23 +935,14 @@ class _MessageTile extends ConsumerWidget {
     if (channel == null) return;
 
     if (hit.kind == 45001) {
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => ForumThreadPage(
-            channelId: channel.id,
-            postEventId: hit.eventId,
-            currentPubkey: currentPubkey,
-            isMember: channel.isMember,
-            isArchived: channel.isArchived,
-          ),
-        ),
+      openForumThread(
+        context,
+        channel: channel,
+        postEventId: hit.eventId,
+        currentPubkey: currentPubkey,
       );
     } else {
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => ChannelDetailPage(channel: channel),
-        ),
-      );
+      openChannelDetail(context, channel: channel);
     }
   }
 }

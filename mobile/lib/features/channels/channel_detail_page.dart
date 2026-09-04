@@ -63,7 +63,7 @@ import 'mobile_huddle_controller.dart';
 import 'members_sheet.dart';
 import 'message_actions.dart';
 import 'message_action_backdrop_state.dart';
-import 'message_long_press_region.dart';
+import 'message_gesture_region.dart';
 import 'message_content.dart';
 import '../../shared/read_state/deferred_read_state_update.dart';
 import '../../shared/read_state/read_state_format.dart';
@@ -75,7 +75,7 @@ import 'send_message_provider.dart';
 import '../profile/user_profile_sheet.dart';
 import 'small_avatar.dart';
 import 'sticky_date_header.dart';
-import 'thread_detail_page.dart';
+import 'channel_navigation.dart';
 import 'timeline_message.dart';
 
 part 'channel_detail_page/message_list.dart';
@@ -611,7 +611,7 @@ class ChannelDetailPage extends HookConsumerWidget {
                           .assignments[resolvedChannel.id],
                     );
                     if (shouldClose == true && context.mounted) {
-                      Navigator.of(context).pop();
+                      closeChannelDetail(context);
                     }
                   },
                 ),
@@ -645,7 +645,7 @@ class ChannelDetailPage extends HookConsumerWidget {
                           .assignments[resolvedChannel.id],
                     );
                     if (shouldClose == true && context.mounted) {
-                      Navigator.of(context).pop();
+                      closeChannelDetail(context);
                     }
                   },
                   tooltip: 'Channel actions',
