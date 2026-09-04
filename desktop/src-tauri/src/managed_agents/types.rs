@@ -49,9 +49,22 @@ pub struct AgentDefinition {
     /// inbound 30175 insert (created on another device, or a fresh-store
     /// backfill) rather than a local create. Never part of the 30175 event
     /// content, never published; the inbound merge only patches listed
-    /// content fields, so this survives every remote edit. Drives the
-    /// "From another device" card badge and excludes the persona from the
-    /// mention launcher candidates — nothing else consults it.
+    /// content fields, so this survives every remote edit.
+    ///
+    /// Consumers, all of which refuse to mint a SECOND identity for a
+    /// definition whose agent already answers elsewhere:
+    /// - `ensure_persona_not_remote_origin` refuses the create outright
+    ///   (`managed_agents/personas.rs`) — the only backend gate.
+    /// - The Agents card and profile panel drop the Start affordance and show
+    ///   the "From another device" marker.
+    /// - The mention launcher and team-mention resolution drop the candidate.
+    ///
+    /// It is a one-shot fact: a definition that predates this field, or whose
+    /// first-seen moment was missed, stays `false` forever — the inbound merge
+    /// branch deliberately never patches it. The frontend therefore pairs it
+    /// with a relay-derived signal (owner-verified kind:30177 carrying the same
+    /// `persona_id`) that covers exactly that gap; this flag alone is not a
+    /// sufficient guard.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub remote_origin: bool,
     /// Whether this persona is discoverable in the currently active community.
