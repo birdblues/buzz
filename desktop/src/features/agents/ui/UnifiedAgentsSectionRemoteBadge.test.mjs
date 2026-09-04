@@ -67,6 +67,7 @@ function baseProps(overrides = {}) {
     onRestartAgent: () => {},
     onStartAgent: () => {},
     onStartPersona: () => {},
+    personaIdsOwnedElsewhere: new Set(),
     personas: [],
     personasError: null,
     personaFeedbackErrorMessage: null,
@@ -200,6 +201,38 @@ test("locally created definition card keeps Start and has no cloud", async () =>
   assert.ok(
     screen.getByTestId("persona-runtime-start-persona-1"),
     "local definition keeps its Start control",
+  );
+});
+
+test("relay-confirmed remote instance hides Start on an unmarked definition", async () => {
+  // The incident: a definition authored locally (or synced before
+  // `remoteOrigin` existed) carries no marker, yet its agent is already set up
+  // on another device. Pressing Start would mint a SECOND identity and the
+  // agent would answer every mention twice.
+  //
+  // Deliberately isolated from the `remoteOrigin` half — this persona sets no
+  // marker, so dropping the `personaIdsOwnedElsewhere` term fails THIS test
+  // while "remote-origin definition card shows the cloud and no Start
+  // affordance" still passes, and vice versa.
+  installIpc();
+
+  await act(async () => {
+    renderSection(
+      baseProps({
+        personas: [persona()],
+        personaIdsOwnedElsewhere: new Set(["persona-1"]),
+      }),
+    );
+  });
+
+  assert.equal(
+    screen.queryByTestId("persona-runtime-start-persona-1"),
+    null,
+    "a definition owned on another device must not offer Start",
+  );
+  assert.ok(
+    screen.getByTestId("persona-remote-origin-persona-1"),
+    "the card explains why with the same marker remoteOrigin uses",
   );
 });
 

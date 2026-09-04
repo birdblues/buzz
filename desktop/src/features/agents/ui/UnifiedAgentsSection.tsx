@@ -49,6 +49,8 @@ type UnifiedAgentsSectionProps = {
   onRestartAgent: (pubkey: string) => void;
   onStartAgent: (pubkey: string) => void;
   onStartPersona: (persona: AgentPersona) => void;
+  /** Definitions with an owner-verified instance on another device. */
+  personaIdsOwnedElsewhere: ReadonlySet<string>;
   personas: AgentPersona[];
   personasError: Error | null;
   personaFeedbackErrorMessage: string | null;
@@ -90,6 +92,7 @@ export function UnifiedAgentsSection(props: UnifiedAgentsSectionProps) {
     onRestartAgent,
     onStartAgent,
     onStartPersona,
+    personaIdsOwnedElsewhere,
     personas,
     personasError,
     personaFeedbackErrorMessage,
@@ -175,6 +178,7 @@ export function UnifiedAgentsSection(props: UnifiedAgentsSectionProps) {
                   onRestartAgent={onRestartAgent}
                   onStartAgent={onStartAgent}
                   onStartPersona={onStartPersona}
+                  personaIdsOwnedElsewhere={personaIdsOwnedElsewhere}
                 />
               );
             })}
@@ -242,6 +246,7 @@ function AgentPersonaCard({
   isBestie,
   getAvailability,
   persona,
+  personaIdsOwnedElsewhere,
   restartingAgentPubkey,
   startingAgentPubkey,
   startingPersonaIds,
@@ -260,6 +265,8 @@ function AgentPersonaCard({
   isBestie: boolean;
   getAvailability: AgentAvailabilityReader;
   persona: AgentPersona;
+  /** Definitions with an owner-verified instance on another device. */
+  personaIdsOwnedElsewhere: ReadonlySet<string>;
   restartingAgentPubkey: string | null;
   startingAgentPubkey: string | null;
   startingPersonaIds: ReadonlySet<string>;
@@ -331,12 +338,18 @@ function AgentPersonaCard({
             isStarting={startingPersonaIds.has(persona.id)}
             label={title}
             startTestId={`persona-runtime-start-${persona.id}`}
-            // A sync-received definition gets no Start affordance: it would
-            // mint a NEW local identity for an agent already answering from
-            // the device that created it. The backend refuses the create
-            // regardless; omitting the handler removes the invitation.
+            // A definition whose agent already answers elsewhere gets no
+            // Start affordance: it would mint a NEW local identity and the
+            // agent would reply to every mention twice. `remoteOrigin` marks
+            // sync-received definitions; `personaIdsOwnedElsewhere` adds the
+            // relay-confirmed case a locally authored definition cannot carry.
+            // Omitting the handler removes the invitation — the same condition
+            // is re-checked in `handleStartPersona`, because hiding an
+            // affordance is not a gate.
             onStart={
-              persona.remoteOrigin ? undefined : () => onStartPersona(persona)
+              persona.remoteOrigin || personaIdsOwnedElsewhere.has(persona.id)
+                ? undefined
+                : () => onStartPersona(persona)
             }
           />
         )
@@ -363,9 +376,11 @@ function AgentPersonaCard({
         onOpenPersonaProfile(persona);
       }}
       cornerBadge={
-        !agent && persona.remoteOrigin ? (
-          // Definition synced from another of the owner's devices — provenance
-          // marker, not an action. Suppressed once a local instance exists
+        !agent &&
+        (persona.remoteOrigin || personaIdsOwnedElsewhere.has(persona.id)) ? (
+          // The agent this definition describes is set up on another of the
+          // owner's devices — provenance marker, not an action. Suppressed
+          // once a local instance exists
           // (the card then represents that deliberately set up instance).
           // Shares the pubkey-scoped marker's glyph and wording so both
           // provenance axes read the same on a card.
