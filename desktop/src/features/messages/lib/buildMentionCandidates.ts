@@ -20,6 +20,9 @@ import {
   mentionCandidateLabel,
 } from "./mentionCandidates";
 
+/** Shared empty default so an omitted `ownedPersonaIds` allocates nothing. */
+const EMPTY_OWNED_PERSONA_IDS: ReadonlySet<string> = new Set<string>();
+
 /** Directories and rosters the mention picker merges into one candidate list. */
 export type BuildMentionCandidatesInput = {
   activeAgentPubkeys: ReadonlySet<string>;
@@ -38,6 +41,13 @@ export type BuildMentionCandidatesInput = {
   members: readonly ChannelMember[] | undefined;
   mentionChannelId: string | null;
   mentionableAgentPubkeys: ReadonlySet<string>;
+  /**
+   * Definitions that already have an instance the viewer owns, local or on
+   * another device. Optional so existing callers keep working; the empty
+   * default reproduces the pre-signal behaviour. See the launcher filter below
+   * for why it gates candidacy.
+   */
+  ownedPersonaIds?: ReadonlySet<string>;
   personaNameByPubkey: ReadonlyMap<string, string>;
   profiles: UserProfileLookup | undefined;
   relayAgentDirectoryReady: boolean;
@@ -69,6 +79,7 @@ export function buildMentionCandidates({
   members,
   mentionChannelId,
   mentionableAgentPubkeys,
+  ownedPersonaIds = EMPTY_OWNED_PERSONA_IDS,
   personaNameByPubkey,
   profiles,
   relayAgentDirectoryReady,
@@ -240,12 +251,18 @@ export function buildMentionCandidates({
   const personaCandidates: MentionCandidate[] = activePersonas
     .filter((persona) => !managedAgentPersonaIds.has(persona.id))
     // Selecting a launcher candidate mints a NEW local agent identity, so a
-    // definition that arrived via device sync must not offer one here — the
-    // agent it describes already answers from the device that created it, and
-    // a second identity would answer every mention twice. Team mention
-    // resolution and the Agents screen are unaffected (they read the full
-    // persona list).
-    .filter((persona) => !persona.remoteOrigin)
+    // definition whose agent already answers from somewhere must not offer one
+    // here — a second identity would answer every mention twice. There is no
+    // confirmation step on this path: the pick IS the mint.
+    //
+    // Two independent signals, mirroring `findTeamMemberTarget`:
+    // `remoteOrigin` marks definitions that arrived by device sync, and
+    // `ownedPersonaIds` additionally covers a locally authored (or builtin)
+    // definition whose only instance lives on another device, which carries no
+    // such marker. Either alone leaves the other case open.
+    .filter(
+      (persona) => !persona.remoteOrigin && !ownedPersonaIds.has(persona.id),
+    )
     .map((persona) => ({
       kind: "persona" as const,
       personaId: persona.id,

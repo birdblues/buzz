@@ -131,6 +131,52 @@ test("remote-origin personas never offer a launcher candidate", () => {
   );
 });
 
+test("a persona whose only instance runs elsewhere offers no launcher candidate", () => {
+  // The incident this pins: a definition authored locally (or synced before
+  // `remoteOrigin` existed) carries no marker, yet its agent already answers
+  // from another device. Selecting a launcher candidate IS the mint — there is
+  // no confirmation step on this path — so the relay-derived `ownedPersonaIds`
+  // has to gate candidacy on its own.
+  //
+  // Deliberately isolated from the `remoteOrigin` half: `elsewhere` sets no
+  // marker, so removing the `ownedPersonaIds` term fails THIS test while
+  // "remote-origin personas never offer a launcher candidate" still passes,
+  // and removing the `remoteOrigin` term fails that one while this passes.
+  const activePersonas = [
+    { id: "planner", displayName: "Planner", avatarUrl: null, isActive: true },
+    {
+      id: "elsewhere",
+      displayName: "Elsewhere",
+      avatarUrl: null,
+      isActive: true,
+    },
+  ];
+
+  const candidates = buildMentionCandidates(
+    input({ activePersonas, ownedPersonaIds: new Set(["elsewhere"]) }),
+  );
+  assert.deepEqual(
+    candidates.map((candidate) => candidate.personaId),
+    ["planner"],
+  );
+});
+
+test("omitting ownedPersonaIds keeps every launcher candidate", () => {
+  // The parameter is optional so existing callers are unchanged; the empty
+  // default must not suppress anything. Guards against a default that
+  // accidentally filters (e.g. an inverted check).
+  const activePersonas = [
+    { id: "planner", displayName: "Planner", avatarUrl: null, isActive: true },
+    { id: "second", displayName: "Second", avatarUrl: null, isActive: true },
+  ];
+
+  const candidates = buildMentionCandidates(input({ activePersonas }));
+  assert.deepEqual(
+    candidates.map((candidate) => candidate.personaId),
+    ["planner", "second"],
+  );
+});
+
 test("global search results join only while global search is enabled", () => {
   const userSearchResults = [
     {

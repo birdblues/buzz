@@ -230,6 +230,7 @@ export function AgentsView() {
                   : null
               }
               isActionPending={isActionPending}
+              personaIdsOwnedElsewhere={agents.personaIdsOwnedElsewhere}
               isAgentsLoading={agents.managedAgentsQuery.isLoading}
               startingAgentPubkey={agents.startingAgentPubkey}
               restartingAgentPubkey={agents.restartingAgentPubkey}

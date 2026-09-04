@@ -237,6 +237,31 @@ export function useMentions(
       }),
     [managedAgentPubkeys, members, profiles, relayAgentsQuery.data],
   );
+  // Definitions that already have an instance we own, from BOTH the local
+  // store and the relay directory — the latter reports our agents even when
+  // they run on another device or sit outside this channel. Both the launcher
+  // filter and team resolution use this to refuse minting a duplicate
+  // instance, so it is computed before the candidate list that consumes it.
+  const ownedPersonaIds = React.useMemo(() => {
+    const owned = new Set(managedAgentPersonaIds);
+    const viewer = currentPubkey?.toLowerCase() ?? null;
+    for (const agent of relayAgentsQuery.data ?? []) {
+      if (!agent.personaId || viewer === null) continue;
+      // An archived instance is retired, not running — it must not suppress
+      // the definition, or an archive-only definition becomes unmentionable
+      // with no way back.
+      if (isArchivedDiscovery(agent.pubkey)) continue;
+      if (agent.ownerPubkey?.toLowerCase() === viewer) {
+        owned.add(agent.personaId);
+      }
+    }
+    return owned;
+  }, [
+    currentPubkey,
+    isArchivedDiscovery,
+    managedAgentPersonaIds,
+    relayAgentsQuery.data,
+  ]);
   const mentionCandidates = React.useMemo<MentionCandidate[]>(
     () =>
       buildMentionCandidates({
@@ -255,6 +280,7 @@ export function useMentions(
         members,
         mentionChannelId,
         mentionableAgentPubkeys,
+        ownedPersonaIds,
         personaNameByPubkey,
         profiles,
         relayAgentDirectoryReady,
@@ -279,6 +305,7 @@ export function useMentions(
       members,
       mentionChannelId,
       mentionableAgentPubkeys,
+      ownedPersonaIds,
       personaNameByPubkey,
       profiles,
       relayAgentDirectoryReady,
@@ -290,30 +317,6 @@ export function useMentions(
     () => getAdmittedAgentPubkeys(mentionCandidates),
     [mentionCandidates],
   );
-  // Definitions that already have an instance we own, from BOTH the local
-  // store and the relay directory — the latter reports our agents even when
-  // they run on another device or sit outside this channel. Team resolution
-  // uses this only to refuse minting a duplicate instance.
-  const ownedPersonaIds = React.useMemo(() => {
-    const owned = new Set(managedAgentPersonaIds);
-    const viewer = currentPubkey?.toLowerCase() ?? null;
-    for (const agent of relayAgentsQuery.data ?? []) {
-      if (!agent.personaId || viewer === null) continue;
-      // An archived instance is retired, not running — it must not suppress
-      // the definition, or an archive-only definition becomes unmentionable
-      // with no way back.
-      if (isArchivedDiscovery(agent.pubkey)) continue;
-      if (agent.ownerPubkey?.toLowerCase() === viewer) {
-        owned.add(agent.personaId);
-      }
-    }
-    return owned;
-  }, [
-    currentPubkey,
-    isArchivedDiscovery,
-    managedAgentPersonaIds,
-    relayAgentsQuery.data,
-  ]);
   const mentionCandidatesWithTeams = React.useMemo(
     () => [
       ...mentionCandidates,
