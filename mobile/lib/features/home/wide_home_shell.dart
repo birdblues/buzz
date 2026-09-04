@@ -55,6 +55,13 @@ class WideHomeShell extends HookConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final shell = ref.watch(wideShellProvider);
     final notifier = ref.read(wideShellProvider.notifier);
+    final auxContent = shell.aux;
+    // Keep the last thread mounted while its pane animates closed.
+    final retainedAux = useState<({WideAuxContent content, String key})?>(null);
+    if (auxContent != null && shell.auxPaneKey != retainedAux.value?.key) {
+      retainedAux.value = (content: auxContent, key: shell.auxPaneKey!);
+    }
+    final auxKey = shell.auxPaneKey ?? retainedAux.value?.key;
     // One navigator key and depth notifier per pane instance. A global key
     // shared across instances would move the old navigator, and its stale
     // initial route, into the re-keyed pane instead of mounting fresh content;
@@ -64,17 +71,16 @@ class WideHomeShell extends HookConsumerWidget {
       shell.mainPaneKey,
     ]);
     final auxNavigatorKey = useMemoized(GlobalKey<NavigatorState>.new, [
-      shell.auxPaneKey,
+      auxKey,
     ]);
     final mainDepth = useMemoized(() => ValueNotifier<int>(0), [
       shell.mainPaneKey,
     ]);
-    final auxDepth = useMemoized(() => ValueNotifier<int>(0), [
-      shell.auxPaneKey,
-    ]);
+    final auxDepth = useMemoized(() => ValueNotifier<int>(0), [auxKey]);
     useListenable(mainDepth);
     useListenable(auxDepth);
-    final auxContent = shell.aux;
+    final reducedMotion = MediaQuery.disableAnimationsOf(context);
+    final motion = reducedMotion ? Duration.zero : _kSidebarMotionDuration;
     final canPopShell =
         auxDepth.value <= 1 && auxContent == null && mainDepth.value <= 1;
 
@@ -107,7 +113,16 @@ class WideHomeShell extends HookConsumerWidget {
                 ? 0.0
                 : kWideSidebarWidth;
             final contentWidth = constraints.maxWidth - sidebarWidth;
-            final auxFocused = auxContent != null && shell.auxFocused;
+            final auxOpen = auxContent != null;
+            final auxFocused = auxOpen && shell.auxFocused;
+            final sideWidth = wideAuxPaneWidthFor(contentWidth);
+            final focusWidth = contentWidth - kWideAuxFocusGutter;
+            final auxTargetWidth = !auxOpen
+                ? 0.0
+                : auxFocused
+                ? focusWidth
+                : sideWidth;
+            final retained = retainedAux.value;
             return Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -119,61 +134,70 @@ class WideHomeShell extends HookConsumerWidget {
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Expanded(
-                            child: ConstrainedBox(
-                              constraints: const BoxConstraints(
-                                minWidth: kWideMainPaneMinWidth,
-                              ),
-                              child: _MainPane(
-                                navigatorKey: mainNavigatorKey,
-                                depth: mainDepth,
-                              ),
-                            ),
+                      // The main pane yields room to a side panel and reclaims
+                      // it under a focus drawer, both animated.
+                      AnimatedPadding(
+                        duration: motion,
+                        curve: _kSidebarMotionCurve,
+                        padding: EdgeInsets.only(
+                          right: auxOpen && !auxFocused ? sideWidth : 0,
+                        ),
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(
+                            minWidth: kWideMainPaneMinWidth,
                           ),
-                          if (auxContent != null && !auxFocused)
-                            _AuxPane(
-                              content: auxContent,
-                              paneKey: shell.auxPaneKey!,
-                              navigatorKey: auxNavigatorKey,
-                              depth: auxDepth,
-                              width: wideAuxPaneWidthFor(contentWidth),
-                              focused: false,
-                            ),
-                        ],
+                          child: _MainPane(
+                            navigatorKey: mainNavigatorKey,
+                            depth: mainDepth,
+                          ),
+                        ),
                       ),
-                      // Focus mode: the thread slides over the channel as a
-                      // wide drawer, leaving a strip of the timeline visible
-                      // under a scrim (desktop's focus thread drawer).
-                      if (auxContent != null && auxFocused) ...[
-                        Positioned.fill(
-                          child: GestureDetector(
-                            key: const ValueKey('wide-aux-focus-scrim'),
-                            behavior: HitTestBehavior.opaque,
-                            onTap: notifier.toggleAuxFocus,
-                            child: ColoredBox(
-                              color: context.colors.scrim.withValues(
-                                alpha: 0.32,
+                      // Focus mode: a scrim over the strip of channel left
+                      // visible beside the drawer; tapping it docks the
+                      // thread back as a side panel.
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          ignoring: !auxFocused,
+                          child: AnimatedOpacity(
+                            duration: motion,
+                            curve: _kSidebarMotionCurve,
+                            opacity: auxFocused ? 1 : 0,
+                            child: GestureDetector(
+                              key: const ValueKey('wide-aux-focus-scrim'),
+                              behavior: HitTestBehavior.opaque,
+                              onTap: notifier.toggleAuxFocus,
+                              child: ColoredBox(
+                                color: context.colors.scrim.withValues(
+                                  alpha: 0.32,
+                                ),
                               ),
                             ),
                           ),
                         ),
+                      ),
+                      if (retained != null)
                         Positioned(
                           top: 0,
                           bottom: 0,
                           right: 0,
-                          child: _AuxPane(
-                            content: auxContent,
-                            paneKey: shell.auxPaneKey!,
+                          child: _AuxDrawer(
+                            content: retained.content,
+                            paneKey: retained.key,
                             navigatorKey: auxNavigatorKey,
                             depth: auxDepth,
-                            width: contentWidth - kWideAuxFocusGutter,
-                            focused: true,
+                            width: auxTargetWidth,
+                            // Content keeps its final width while the drawer
+                            // reveals it, like the sidebar.
+                            contentWidth: auxFocused ? focusWidth : sideWidth,
+                            focused: auxFocused,
+                            duration: motion,
+                            onMotionEnd: () {
+                              if (ref.read(wideShellProvider).aux == null) {
+                                retainedAux.value = null;
+                              }
+                            },
                           ),
                         ),
-                      ],
                     ],
                   ),
                 ),
@@ -182,20 +206,6 @@ class WideHomeShell extends HookConsumerWidget {
           },
         ),
       ),
-    );
-  }
-}
-
-/// A hairline between shell columns.
-class _PaneDivider extends StatelessWidget {
-  const _PaneDivider();
-
-  @override
-  Widget build(BuildContext context) {
-    return VerticalDivider(
-      width: 1,
-      thickness: 1,
-      color: context.colors.outlineVariant.withValues(alpha: 0.5),
     );
   }
 }

@@ -494,33 +494,59 @@ void _focusTests() {
     await tester.pumpAndSettle();
 
     expect(find.byType(ThreadDetailPage), findsOneWidget);
-    final contentWidth = 1194 - kWideSidebarWidth;
-    final sideWidth = tester.getSize(find.byType(ThreadDetailPage)).width;
-    expect(sideWidth, wideAuxPaneWidthFor(contentWidth));
-    expect(sideWidth, greaterThan(kWideAuxPaneWidth));
-    expect(find.byKey(const ValueKey('wide-aux-focus-scrim')), findsNothing);
-    expect(find.byType(ChannelDetailPage), findsOneWidget);
+    const contentWidth = 1194 - kWideSidebarWidth;
+    double drawerWidth() =>
+        tester.getSize(find.byKey(const ValueKey('wide-aux-drawer'))).width;
+    bool scrimActive() => !tester
+        .widget<IgnorePointer>(
+          find
+              .ancestor(
+                of: find.byKey(const ValueKey('wide-aux-focus-scrim')),
+                matching: find.byType(IgnorePointer),
+              )
+              .first,
+        )
+        .ignoring;
+
+    final sideWidth = wideAuxPaneWidthFor(contentWidth);
+    expect(drawerWidth(), sideWidth);
+    expect(sideWidth, closeTo(contentWidth * kWideAuxPaneFraction, 1));
+    expect(scrimActive(), isFalse);
+    // The channel yields exactly the panel's width.
+    expect(
+      tester.getSize(find.byType(ChannelDetailPage)).width,
+      contentWidth - sideWidth,
+    );
 
     await tester.tap(find.byKey(const ValueKey('wide-aux-focus')));
+    await tester.pump();
+    // Mid-animation the drawer is between the two widths.
+    await tester.pump(const Duration(milliseconds: 80));
+    expect(drawerWidth(), greaterThan(sideWidth));
+    expect(drawerWidth(), lessThan(contentWidth - kWideAuxFocusGutter));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const ValueKey('wide-aux-focus-scrim')), findsOneWidget);
-    expect(
-      tester.getSize(find.byType(ThreadDetailPage)).width,
-      contentWidth - kWideAuxFocusGutter,
-    );
-    // The channel stays mounted beneath the drawer.
+    expect(scrimActive(), isTrue);
+    expect(drawerWidth(), contentWidth - kWideAuxFocusGutter);
+    // The channel stays mounted and reclaims the full row under the drawer.
     expect(find.byType(ChannelDetailPage), findsOneWidget);
+    expect(tester.getSize(find.byType(ChannelDetailPage)).width, contentWidth);
     expect(container.read(wideShellProvider).auxFocused, isTrue);
 
-    // Tapping the visible strip of the channel returns to the side panel.
+    // Tapping the visible strip of the channel docks the thread again.
     await tester.tapAt(const Offset(kWideSidebarWidth + 20, 400));
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('wide-aux-focus-scrim')), findsNothing);
-    expect(tester.getSize(find.byType(ThreadDetailPage)).width, sideWidth);
+    expect(scrimActive(), isFalse);
+    expect(drawerWidth(), sideWidth);
 
     await tester.tap(find.byKey(const ValueKey('wide-aux-close')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 80));
+    // Closing slides the drawer shut with the thread still mounted.
+    expect(find.byType(ThreadDetailPage), findsOneWidget);
+    expect(drawerWidth(), lessThan(sideWidth));
     await tester.pumpAndSettle();
     expect(find.byType(ThreadDetailPage), findsNothing);
+    expect(find.byKey(const ValueKey('wide-aux-drawer')), findsNothing);
   });
 }

@@ -31,7 +31,7 @@ const double kWideAuxPaneMaxWidth = 720;
 
 /// Share of the content area (window minus sidebar) the auxiliary pane takes
 /// when it is not focused.
-const double kWideAuxPaneFraction = 0.42;
+const double kWideAuxPaneFraction = 0.55;
 
 /// Strip of the main pane left visible beside a focused auxiliary pane, so
 /// the channel it belongs to stays in view (desktop's focus thread drawer).

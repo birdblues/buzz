@@ -5,14 +5,17 @@ part of '../wide_home_shell.dart';
 /// Membership, archive state, and the current pubkey are derived live rather
 /// than taken from the request, so the composer follows changes made while
 /// the pane is open.
-class _AuxPane extends ConsumerWidget {
-  const _AuxPane({
+class _AuxDrawer extends ConsumerWidget {
+  const _AuxDrawer({
     required this.content,
     required this.paneKey,
     required this.navigatorKey,
     required this.depth,
     required this.width,
+    required this.contentWidth,
     required this.focused,
+    required this.duration,
+    required this.onMotionEnd,
   });
 
   final WideAuxContent content;
@@ -20,11 +23,21 @@ class _AuxPane extends ConsumerWidget {
   final GlobalKey<NavigatorState> navigatorKey;
   final ValueNotifier<int> depth;
 
-  /// Column width; the whole content area when [focused].
+  /// Animated column width: 0 when closed, the side-panel share when docked,
+  /// the content area minus the gutter when focused.
   final double width;
 
-  /// Whether the pane currently hides the main pane.
+  /// Width the content is laid out at; stays fixed while [width] animates.
+  final double contentWidth;
+
+  /// Whether the drawer currently covers the main pane.
   final bool focused;
+
+  /// Motion duration for width, chrome, and scrim changes.
+  final Duration duration;
+
+  /// Called when a width animation settles; the host drops a closed thread.
+  final VoidCallback onMotionEnd;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -99,39 +112,35 @@ class _AuxPane extends ConsumerWidget {
       child: page,
     );
 
-    if (focused) {
-      return SizedBox(
-        width: width,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: context.colors.surface,
-            borderRadius: const BorderRadius.horizontal(
-              left: Radius.circular(Radii.container),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: context.colors.shadow.withValues(alpha: 0.24),
-                blurRadius: 32,
-                offset: const Offset(-8, 0),
-              ),
-            ],
-          ),
-          child: ClipRRect(
-            borderRadius: const BorderRadius.horizontal(
-              left: Radius.circular(Radii.container),
-            ),
-            child: pane,
-          ),
+    final radius = Radius.circular(focused ? Radii.container : 0);
+    final divider = context.colors.outlineVariant.withValues(alpha: 0.5);
+    return AnimatedContainer(
+      key: const ValueKey('wide-aux-drawer'),
+      duration: duration,
+      curve: _kSidebarMotionCurve,
+      onEnd: onMotionEnd,
+      width: width,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: context.colors.surface,
+        borderRadius: BorderRadius.horizontal(left: radius),
+        border: Border(
+          left: BorderSide(color: focused ? Colors.transparent : divider),
         ),
-      );
-    }
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const _PaneDivider(),
-        SizedBox(width: width, child: pane),
-      ],
+        boxShadow: [
+          BoxShadow(
+            color: context.colors.shadow.withValues(alpha: focused ? 0.24 : 0),
+            blurRadius: 32,
+            offset: const Offset(-8, 0),
+          ),
+        ],
+      ),
+      child: OverflowBox(
+        alignment: Alignment.centerRight,
+        minWidth: contentWidth,
+        maxWidth: contentWidth,
+        child: pane,
+      ),
     );
   }
 }
