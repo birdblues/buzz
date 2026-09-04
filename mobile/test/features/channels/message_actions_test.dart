@@ -2,7 +2,7 @@ import 'dart:ui' as ui;
 
 import 'package:buzz/features/channels/channel_management_provider.dart';
 import 'package:buzz/features/channels/message_actions.dart';
-import 'package:buzz/features/channels/message_long_press_region.dart';
+import 'package:buzz/features/channels/message_gesture_region.dart';
 import 'package:buzz/shared/read_state/read_state_provider.dart';
 import 'package:buzz/features/channels/thread_follows/thread_follows_provider.dart';
 import 'package:buzz/features/channels/timeline_message.dart';
@@ -10,7 +10,9 @@ import 'package:buzz/shared/reminders/reminder_service.dart';
 import 'package:buzz/shared/relay/relay.dart';
 import 'package:buzz/shared/theme/theme.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:nostr/nostr.dart' as nostr;
@@ -350,67 +352,86 @@ class _FakeChannelActions extends ChannelActions {
 }
 
 void main() {
+  setUp(resetMessageGestureStateForTesting);
+
+  Future<void> doubleTap(WidgetTester tester, Finder finder) async {
+    await tester.tap(finder);
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(finder);
+    await tester.pump();
+  }
+
+  Widget gestureHost({
+    ScrollController? scrollController,
+    required List<Widget> rows,
+  }) {
+    return MaterialApp(
+      home: Scaffold(
+        body: SingleChildScrollView(
+          controller: scrollController,
+          child: Column(children: [...rows, const SizedBox(height: 900)]),
+        ),
+      ),
+    );
+  }
+
   testWidgets(
-    'message long press keeps taps and scrolling while repeated holds win',
+    'double tap opens actions, a single tap waits out the timeout, nested '
+    'taps stay immediate, and scrolling still works',
     (tester) async {
       var parentTaps = 0;
       var nestedTaps = 0;
-      var longPresses = 0;
+      var actions = 0;
       final scrollController = ScrollController();
       addTearDown(scrollController.dispose);
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: SingleChildScrollView(
-              controller: scrollController,
-              child: Column(
-                children: [
-                  Material(
-                    child: MessageLongPressInkWell(
-                      key: const ValueKey('parent-gesture-target'),
-                      onTap: () => parentTaps += 1,
-                      onLongPress: (_) => longPresses += 1,
-                      child: const SizedBox(height: 80, width: 300),
-                    ),
-                  ),
-                  Material(
-                    child: MessageLongPressInkWell(
-                      onLongPress: (_) => longPresses += 1,
-                      child: GestureDetector(
-                        key: const ValueKey('nested-gesture-target'),
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () => nestedTaps += 1,
-                        child: const SizedBox(height: 80, width: 300),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 900),
-                ],
+        gestureHost(
+          scrollController: scrollController,
+          rows: [
+            Material(
+              child: MessageGestureInkWell(
+                key: const ValueKey('parent-gesture-target'),
+                onTap: () => parentTaps += 1,
+                onDoubleTap: (_) => actions += 1,
+                child: const SizedBox(height: 80, width: 300),
               ),
             ),
-          ),
+            Material(
+              child: MessageGestureInkWell(
+                onDoubleTap: (_) => actions += 1,
+                child: GestureDetector(
+                  key: const ValueKey('nested-gesture-target'),
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => nestedTaps += 1,
+                  child: const SizedBox(height: 80, width: 300),
+                ),
+              ),
+            ),
+          ],
         ),
       );
 
-      await tester.tap(find.byKey(const ValueKey('parent-gesture-target')));
+      final parent = find.byKey(const ValueKey('parent-gesture-target'));
+      await tester.tap(parent);
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(parentTaps, 0, reason: 'a single tap waits for a second one');
+      await tester.pump(kDoubleTapTimeout);
+      expect(parentTaps, 1);
+      expect(actions, 0);
+
+      await doubleTap(tester, parent);
+      expect(actions, 1);
+      await tester.pump(kDoubleTapTimeout * 2);
+      expect(parentTaps, 1, reason: 'the double tap swallowed its taps');
+
       await tester.tap(find.byKey(const ValueKey('nested-gesture-target')));
       await tester.pump();
-      expect(parentTaps, 1);
-      expect(nestedTaps, 1);
+      expect(nestedTaps, 1, reason: 'nested controls are never delayed');
+      await tester.pump(kDoubleTapTimeout);
+      expect(actions, 1);
 
-      for (var index = 0; index < 5; index++) {
-        await tester.longPress(
-          find.byKey(const ValueKey('nested-gesture-target')),
-        );
-        await tester.pump();
-        expect(longPresses, index + 1);
-        expect(nestedTaps, 1);
-      }
-
-      final drag = await tester.startGesture(
-        tester.getCenter(find.byKey(const ValueKey('parent-gesture-target'))),
-      );
+      final drag = await tester.startGesture(tester.getCenter(parent));
       await drag.moveBy(const Offset(0, -30));
       await tester.pump();
       await drag.moveBy(const Offset(0, -70));
@@ -419,79 +440,359 @@ void main() {
       await drag.up();
       await tester.pumpAndSettle();
 
-      expect(longPresses, 5);
+      expect(actions, 1);
+      expect(parentTaps, 1);
       expect(scrollController.offset, greaterThan(0));
     },
   );
 
-  testWidgets('iOS message long press recognizes at 200 ms', (tester) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
-    try {
-      var longPresses = 0;
-
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: Material(
-              child: MessageLongPressInkWell(
-                key: const ValueKey('ios-long-press-target'),
-                onLongPress: (_) => longPresses += 1,
-                child: const SizedBox(width: 240, height: 80),
-              ),
+  testWidgets('a second press held past the timeout is still a double tap', (
+    tester,
+  ) async {
+    var taps = 0;
+    var actions = 0;
+    await tester.pumpWidget(
+      gestureHost(
+        rows: [
+          Material(
+            child: MessageGestureInkWell(
+              key: const ValueKey('held-target'),
+              onTap: () => taps += 1,
+              onDoubleTap: (_) => actions += 1,
+              child: const SizedBox(height: 80, width: 300),
             ),
           ),
-        ),
-      );
+        ],
+      ),
+    );
+    final target = find.byKey(const ValueKey('held-target'));
 
-      final gesture = await tester.startGesture(
-        tester.getCenter(find.byKey(const ValueKey('ios-long-press-target'))),
-      );
-      await tester.pump(const Duration(milliseconds: 199));
-      expect(longPresses, 0);
-      await tester.pump(const Duration(milliseconds: 2));
-      expect(longPresses, 1);
-      await gesture.up();
-    } finally {
-      debugDefaultTargetPlatformOverride = null;
-    }
+    await tester.tap(target);
+    await tester.pump(const Duration(milliseconds: 250));
+    final second = await tester.startGesture(tester.getCenter(target));
+    await tester.pump(const Duration(milliseconds: 150));
+    expect(taps, 0, reason: 'the second press stops the single-tap clock');
+    await second.up();
+    await tester.pump();
+
+    expect(actions, 1);
+    await tester.pump(kDoubleTapTimeout * 2);
+    expect(taps, 0);
   });
 
   testWidgets(
-    'message long press captures the content inside the ink surface',
+    'a pending single tap is cancelled by a far tap, another row, a nested '
+    'control, or a scroll',
     (tester) async {
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetDevicePixelRatio);
-      MessageLongPressDetails? longPressDetails;
-      ui.Image? snapshot;
-      addTearDown(() => snapshot?.dispose());
-
+      var tapsA = 0;
+      var tapsB = 0;
+      var nestedTaps = 0;
+      var actions = 0;
+      final scrollController = ScrollController();
+      addTearDown(scrollController.dispose);
       await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: Material(
-              child: MessageLongPressInkWell(
-                key: const ValueKey('snapshot-gesture-target'),
-                onLongPressDetails: (details) => longPressDetails = details,
-                child: const SizedBox(width: 240, height: 80),
+        gestureHost(
+          scrollController: scrollController,
+          rows: [
+            Material(
+              child: MessageGestureInkWell(
+                key: const ValueKey('row-a'),
+                onTap: () => tapsA += 1,
+                onDoubleTap: (_) => actions += 1,
+                child: Row(
+                  children: [
+                    const SizedBox(height: 80, width: 200),
+                    GestureDetector(
+                      key: const ValueKey('row-a-nested'),
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => nestedTaps += 1,
+                      child: const SizedBox(height: 80, width: 100),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
+            Material(
+              child: MessageGestureInkWell(
+                key: const ValueKey('row-b'),
+                onTap: () => tapsB += 1,
+                onDoubleTap: (_) => actions += 1,
+                child: const SizedBox(height: 80, width: 300),
+              ),
+            ),
+          ],
+        ),
+      );
+      final rowA = find.byKey(const ValueKey('row-a'));
+      final rowB = find.byKey(const ValueKey('row-b'));
+      final rowATopLeft = tester.getTopLeft(rowA);
+
+      // Same row, beyond the double-tap slop: only the second tap survives.
+      await tester.tapAt(rowATopLeft + const Offset(10, 40));
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tapAt(rowATopLeft + const Offset(180, 40));
+      await tester.pump(kDoubleTapTimeout * 2);
+      expect(tapsA, 1);
+      expect(actions, 0);
+
+      // Another row cancels the first row's tap.
+      await tester.tapAt(rowATopLeft + const Offset(10, 40));
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tap(rowB);
+      await tester.pump(kDoubleTapTimeout * 2);
+      expect(tapsA, 1);
+      expect(tapsB, 1);
+
+      // A nested control inside the same row cancels it too.
+      await tester.tapAt(rowATopLeft + const Offset(180, 40));
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tap(find.byKey(const ValueKey('row-a-nested')));
+      await tester.pump();
+      expect(nestedTaps, 1);
+      await tester.pump(kDoubleTapTimeout * 2);
+      expect(tapsA, 1);
+      expect(actions, 0);
+
+      // A scroll that starts on the row cancels it.
+      await tester.tapAt(rowATopLeft + const Offset(10, 40));
+      await tester.pump(const Duration(milliseconds: 50));
+      final drag = await tester.startGesture(
+        rowATopLeft + const Offset(10, 40),
+      );
+      await drag.moveBy(const Offset(0, -30));
+      await tester.pump();
+      await drag.moveBy(const Offset(0, -70));
+      await tester.pump();
+      await drag.up();
+      await tester.pumpAndSettle();
+      await tester.pump(kDoubleTapTimeout * 2);
+      expect(tapsA, 1);
+      expect(scrollController.offset, greaterThan(0));
+    },
+  );
+
+  testWidgets(
+    'a long press selects the word under the finger; a tap dismisses it and '
+    'a second tap opens the actions',
+    (tester) async {
+      var taps = 0;
+      var actions = 0;
+      final selections = <String?>[];
+      await tester.pumpWidget(
+        gestureHost(
+          rows: [
+            Material(
+              child: MessageGestureInkWell(
+                key: const ValueKey('selectable-target'),
+                onTap: () => taps += 1,
+                onDoubleTap: (_) => actions += 1,
+                onSelectionChanged: (content) =>
+                    selections.add(content?.plainText),
+                child: const SizedBox(
+                  width: 300,
+                  height: 120,
+                  child: Align(
+                    alignment: Alignment.topLeft,
+                    child: Text('hello world', key: ValueKey('body-text')),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       );
 
-      await tester.longPress(
-        find.byKey(const ValueKey('snapshot-gesture-target')),
+      expect(find.byType(SelectableRegion), findsOneWidget);
+      final textTopLeft = tester.getTopLeft(
+        find.byKey(const ValueKey('body-text')),
       );
-      expect(longPressDetails, isNotNull);
+      await tester.longPressAt(textTopLeft + const Offset(8, 8));
+      await tester.pumpAndSettle();
 
-      final capture = longPressDetails!.captureSnapshot();
+      expect(selections.last, 'hello');
+      expect(actions, 0);
+      expect(taps, 0);
+
+      // A tap away from the text only dismisses the selection.
+      final target = find.byKey(const ValueKey('selectable-target'));
+      final rowBottom = tester.getBottomLeft(target) + const Offset(150, -10);
+      await tester.tapAt(rowBottom);
       await tester.pump();
-      snapshot = await capture;
+      expect(selections.last, isNull);
+      await tester.pump(kDoubleTapTimeout * 2);
+      expect(taps, 0, reason: 'the dismissing tap is not a single tap');
 
-      expect(snapshot.width, 240);
-      expect(snapshot.height, 80);
+      // A tap followed quickly by another is a double tap even right after
+      // dismissing a selection.
+      await tester.longPressAt(textTopLeft + const Offset(8, 8));
+      await tester.pumpAndSettle();
+      expect(selections.last, 'hello');
+      await tester.tapAt(rowBottom);
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tapAt(rowBottom);
+      await tester.pump();
+      expect(actions, 1);
+      await tester.pump(kDoubleTapTimeout * 2);
+      expect(taps, 0);
     },
   );
+
+  testWidgets('a double tap clears the selection before delivering details', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final events = <String>[];
+    MessageGestureDetails? details;
+    ui.Image? snapshot;
+    addTearDown(() => snapshot?.dispose());
+    await tester.pumpWidget(
+      gestureHost(
+        rows: [
+          Material(
+            child: MessageGestureInkWell(
+              key: const ValueKey('clearing-target'),
+              onDoubleTapDetails: (value) {
+                events.add('details');
+                details = value;
+              },
+              onSelectionChanged: (content) =>
+                  events.add('selection:${content?.plainText}'),
+              child: const SizedBox(
+                width: 240,
+                // Tall enough that the selection toolbar, shown below the
+                // text, leaves room to tap the row itself.
+                height: 200,
+                child: Align(
+                  alignment: Alignment.topLeft,
+                  child: Text('hello world', key: ValueKey('clearing-text')),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    final textTopLeft = tester.getTopLeft(
+      find.byKey(const ValueKey('clearing-text')),
+    );
+    await tester.longPressAt(textTopLeft + const Offset(8, 8));
+    await tester.pumpAndSettle();
+    expect(events, ['selection:hello']);
+
+    // Tap below the text so the selection toolbar overlay is not hit.
+    final target = find.byKey(const ValueKey('clearing-target'));
+    final tapPoint = tester.getBottomLeft(target) + const Offset(200, -8);
+    await tester.tapAt(tapPoint);
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tapAt(tapPoint);
+    await tester.pumpAndSettle();
+
+    expect(events, ['selection:hello', 'selection:null', 'details']);
+    final capture = details!.captureSnapshot();
+    await tester.pump();
+    snapshot = await capture;
+    expect(snapshot.width, 240);
+    expect(snapshot.height, 200);
+  });
+
+  testWidgets('selectable: false registers no selection area', (tester) async {
+    await tester.pumpWidget(
+      gestureHost(
+        rows: [
+          Material(
+            child: MessageGestureInkWell(
+              selectable: false,
+              onDoubleTap: (_) {},
+              child: const SizedBox(height: 80, width: 300, child: Text('x')),
+            ),
+          ),
+        ],
+      ),
+    );
+    expect(find.byType(SelectableRegion), findsNothing);
+  });
+
+  testWidgets('the row exposes a Message actions semantics action', (
+    tester,
+  ) async {
+    var actions = 0;
+    final handle = tester.ensureSemantics();
+    await tester.pumpWidget(
+      gestureHost(
+        rows: [
+          Material(
+            child: MessageGestureInkWell(
+              key: const ValueKey('semantics-target'),
+              onDoubleTap: (_) => actions += 1,
+              child: const SizedBox(height: 80, width: 300),
+            ),
+          ),
+        ],
+      ),
+    );
+    final semantics = tester.getSemantics(
+      find.byKey(const ValueKey('semantics-target')),
+    );
+    final labels = semantics
+        .getSemanticsData()
+        .customSemanticsActionIds!
+        .map((id) => CustomSemanticsAction.getAction(id)?.label)
+        .toList();
+    expect(labels, ['Message actions']);
+    tester.binding.performSemanticsAction(
+      SemanticsActionEvent(
+        type: SemanticsAction.customAction,
+        viewId: tester.view.viewId,
+        nodeId: semantics.id,
+        arguments: semantics
+            .getSemanticsData()
+            .customSemanticsActionIds!
+            .single,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(actions, 1);
+    handle.dispose();
+  });
+
+  testWidgets('a double tap captures the content inside the ink surface', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetDevicePixelRatio);
+    MessageGestureDetails? details;
+    ui.Image? snapshot;
+    addTearDown(() => snapshot?.dispose());
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Material(
+            child: MessageGestureInkWell(
+              key: const ValueKey('snapshot-gesture-target'),
+              onDoubleTapDetails: (value) => details = value,
+              child: const SizedBox(width: 240, height: 80),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await doubleTap(
+      tester,
+      find.byKey(const ValueKey('snapshot-gesture-target')),
+    );
+    expect(details, isNotNull);
+
+    final capture = details!.captureSnapshot();
+    await tester.pump();
+    snapshot = await capture;
+
+    expect(snapshot.width, 240);
+    expect(snapshot.height, 80);
+  });
 
   testWidgets('message snapshot bounds very tall raster dimensions', (
     tester,
@@ -500,7 +801,7 @@ void main() {
     tester.view.physicalSize = const Size(800, 5000);
     addTearDown(tester.view.resetDevicePixelRatio);
     addTearDown(tester.view.resetPhysicalSize);
-    MessageLongPressDetails? longPressDetails;
+    MessageGestureDetails? details;
     ui.Image? snapshot;
     addTearDown(() => snapshot?.dispose());
 
@@ -508,9 +809,9 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: Material(
-            child: MessageLongPressInkWell(
+            child: MessageGestureInkWell(
               key: const ValueKey('tall-snapshot-gesture-target'),
-              onLongPressDetails: (details) => longPressDetails = details,
+              onDoubleTapDetails: (value) => details = value,
               child: const SizedBox(width: 240, height: 4096),
             ),
           ),
@@ -518,12 +819,13 @@ void main() {
       ),
     );
 
-    await tester.longPress(
+    await doubleTap(
+      tester,
       find.byKey(const ValueKey('tall-snapshot-gesture-target')),
     );
-    expect(longPressDetails, isNotNull);
+    expect(details, isNotNull);
 
-    final capture = longPressDetails!.captureSnapshot();
+    final capture = details!.captureSnapshot();
     await tester.pump();
     snapshot = await capture;
 
@@ -537,7 +839,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetDevicePixelRatio);
     final snapshotKey = GlobalKey();
-    MessageLongPressDetails? longPressDetails;
+    MessageGestureDetails? details;
     ui.Image? snapshot;
     addTearDown(() => snapshot?.dispose());
 
@@ -545,10 +847,10 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: Material(
-            child: MessageLongPressInkWell(
+            child: MessageGestureInkWell(
               key: const ValueKey('separate-snapshot-gesture-target'),
               snapshotKey: snapshotKey,
-              onLongPressDetails: (details) => longPressDetails = details,
+              onDoubleTapDetails: (value) => details = value,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -569,11 +871,11 @@ void main() {
       ),
     );
 
-    await tester.longPress(find.byKey(const ValueKey('attached-reactions')));
-    expect(longPressDetails, isNotNull);
-    expect(longPressDetails!.anchorRect.height, 80);
+    await doubleTap(tester, find.byKey(const ValueKey('attached-reactions')));
+    expect(details, isNotNull);
+    expect(details!.anchorRect.height, 80);
 
-    final capture = longPressDetails!.captureSnapshot();
+    final capture = details!.captureSnapshot();
     await tester.pump();
     snapshot = await capture;
 

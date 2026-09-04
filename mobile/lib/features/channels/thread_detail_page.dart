@@ -39,7 +39,7 @@ import 'local_message_send_transition.dart';
 import '../profile/user_profile_sheet.dart';
 import 'message_actions.dart';
 import 'message_action_backdrop_state.dart';
-import 'message_long_press_region.dart';
+import 'message_gesture_region.dart';
 import 'message_content.dart';
 import 'reaction_row.dart';
 import '../../shared/read_state/read_state_format.dart';

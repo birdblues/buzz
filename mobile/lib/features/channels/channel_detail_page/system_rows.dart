@@ -110,9 +110,10 @@ class _SystemMessageRow extends HookConsumerWidget {
       color: Colors.transparent,
       borderRadius: BorderRadius.circular(Radii.md),
       clipBehavior: Clip.antiAlias,
-      child: MessageLongPressInkWell(
+      child: MessageGestureInkWell(
         key: ValueKey('system-message-row-${message.id}'),
-        onLongPress: openReactionPopover,
+        onDoubleTap: openReactionPopover,
+        selectable: false,
         borderRadius: BorderRadius.circular(Radii.md),
         highlightColor: context.colors.primary.withValues(alpha: 0.1),
         child: Padding(

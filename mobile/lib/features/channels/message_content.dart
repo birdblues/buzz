@@ -27,6 +27,7 @@ import '../../shared/emoji/emoji_data_provider.dart';
 import '../../shared/emoji/emoji_only.dart';
 import 'channels_provider.dart';
 import 'media_viewer_page.dart';
+import 'message_gesture_region.dart';
 import 'message_content/link_normalizer.dart';
 import 'message_media.dart';
 import 'voice_note_attachment.dart';
@@ -309,15 +310,17 @@ class MessageContent extends HookConsumerWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         if (trailingGallery.content.trim().isNotEmpty) markdown,
-        _MessageImageCarousel(
-          key: ValueKey(
-            trailingGallery.items.map((item) => item.url).join('\u0000'),
+        _MessageMediaShell(
+          child: _MessageImageCarousel(
+            key: ValueKey(
+              trailingGallery.items.map((item) => item.url).join('\u0000'),
+            ),
+            items: trailingGallery.items,
+            leadingOverflow: mediaCarouselLeadingOverflow,
+            trailingOverflow: mediaCarouselTrailingOverflow,
+            onReply: onMediaReply,
+            onMore: onMediaMore,
           ),
-          items: trailingGallery.items,
-          leadingOverflow: mediaCarouselLeadingOverflow,
-          trailingOverflow: mediaCarouselTrailingOverflow,
-          onReply: onMediaReply,
-          onMore: onMediaMore,
         ),
       ],
     );
@@ -326,29 +329,35 @@ class MessageContent extends HookConsumerWidget {
   Widget _buildMedia(BuildContext context, String imageUrl, ImetaEntry? imeta) {
     final mediaKind = classifyMediaUrl(imageUrl, imeta: imeta);
     if (mediaKind == MessageMediaKind.audio) {
-      return Padding(
-        padding: const EdgeInsets.only(top: Grid.half),
-        child: VoiceNoteAttachment.remote(
-          url: imageUrl,
-          duration: Duration(
-            milliseconds: ((imeta?.duration ?? 0) * 1000).round(),
+      return _MessageMediaShell(
+        child: Padding(
+          padding: const EdgeInsets.only(top: Grid.half),
+          child: VoiceNoteAttachment.remote(
+            url: imageUrl,
+            duration: Duration(
+              milliseconds: ((imeta?.duration ?? 0) * 1000).round(),
+            ),
           ),
         ),
       );
     }
     if (mediaKind == MessageMediaKind.video) {
-      return _MessageVideoPreview(
-        url: imageUrl,
-        imeta: imeta,
-        onReply: onMediaReply,
+      return _MessageMediaShell(
+        child: _MessageVideoPreview(
+          url: imageUrl,
+          imeta: imeta,
+          onReply: onMediaReply,
+        ),
       );
     }
-    return _MessageImagePreview(
-      url: imageUrl,
-      imeta: imeta,
-      semanticLabel: imeta?.alt ?? 'Message image',
-      onReply: onMediaReply,
-      onMore: onMediaMore,
+    return _MessageMediaShell(
+      child: _MessageImagePreview(
+        url: imageUrl,
+        imeta: imeta,
+        semanticLabel: imeta?.alt ?? 'Message image',
+        onReply: onMediaReply,
+        onMore: onMediaMore,
+      ),
     );
   }
 
@@ -732,75 +741,98 @@ class _MessageCodeBlock extends HookWidget {
       () => highlightCode(code, name, codeTheme, codeBaseStyle),
       [code, name, isDark],
     );
-    return Container(
-      margin: const EdgeInsets.only(top: Grid.half),
-      decoration: BoxDecoration(
-        color: context.colors.surfaceContainerHighest.withValues(alpha: 0.6),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: context.colors.outline.withValues(alpha: 0.7),
+    // The block has its own Copy button; keep its label and code out of the
+    // row's text selection so a long press over it selects nothing partial.
+    return SelectionContainer.disabled(
+      child: Container(
+        margin: const EdgeInsets.only(top: Grid.half),
+        decoration: BoxDecoration(
+          color: context.colors.surfaceContainerHighest.withValues(alpha: 0.6),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: context.colors.outline.withValues(alpha: 0.7),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (name.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(
+                  left: Grid.twelve,
+                  top: Grid.half + Grid.quarter,
+                ),
+                child: Text(
+                  name,
+                  style: context.textTheme.labelSmall?.copyWith(
+                    color: context.colors.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            Stack(
+              children: [
+                Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    Grid.twelve,
+                    name.isEmpty ? Grid.half + Grid.quarter : Grid.quarter,
+                    44,
+                    Grid.half + Grid.quarter,
+                  ),
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: RichText(
+                      softWrap: false,
+                      text: TextSpan(style: codeBaseStyle, children: codeSpans),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  top: 0,
+                  right: Grid.quarter,
+                  child: SizedBox(
+                    width: 28,
+                    height: 28,
+                    child: IconButton(
+                      onPressed: handleCopy,
+                      padding: EdgeInsets.zero,
+                      visualDensity: VisualDensity.compact,
+                      style: IconButton.styleFrom(
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      icon: Icon(
+                        isCopied.value ? LucideIcons.check : LucideIcons.copy,
+                        size: 14,
+                        color: isCopied.value
+                            ? context.colors.primary
+                            : context.colors.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (name.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(
-                left: Grid.twelve,
-                top: Grid.half + Grid.quarter,
-              ),
-              child: Text(
-                name,
-                style: context.textTheme.labelSmall?.copyWith(
-                  color: context.colors.onSurfaceVariant,
-                ),
-              ),
-            ),
-          Stack(
-            children: [
-              Padding(
-                padding: EdgeInsets.fromLTRB(
-                  Grid.twelve,
-                  name.isEmpty ? Grid.half + Grid.quarter : Grid.quarter,
-                  44,
-                  Grid.half + Grid.quarter,
-                ),
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: RichText(
-                    softWrap: false,
-                    text: TextSpan(style: codeBaseStyle, children: codeSpans),
-                  ),
-                ),
-              ),
-              Positioned(
-                top: 0,
-                right: Grid.quarter,
-                child: SizedBox(
-                  width: 28,
-                  height: 28,
-                  child: IconButton(
-                    onPressed: handleCopy,
-                    padding: EdgeInsets.zero,
-                    visualDensity: VisualDensity.compact,
-                    style: IconButton.styleFrom(
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                    icon: Icon(
-                      isCopied.value ? LucideIcons.check : LucideIcons.copy,
-                      size: 14,
-                      color: isCopied.value
-                          ? context.colors.primary
-                          : context.colors.onSurfaceVariant,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
+    );
+  }
+}
+
+/// Media has no text to select: keep it out of the row's selection and let a
+/// long press on it open the row's actions instead.
+class _MessageMediaShell extends StatelessWidget {
+  final Widget child;
+
+  const _MessageMediaShell({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return SelectionContainer.disabled(
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onLongPress: MessageGestureScope.maybeOf(context)?.openActions,
+        child: child,
       ),
     );
   }

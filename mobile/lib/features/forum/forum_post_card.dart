@@ -12,12 +12,14 @@ import '../channels/message_content.dart';
 import '../../shared/profile/user_cache_provider.dart';
 import '../profile/user_profile_sheet.dart';
 import '../../shared/profile/user_profile.dart';
+import '../channels/message_gesture_region.dart';
 import 'forum_models.dart';
 
 /// Card displaying a forum post preview in the posts list.
 ///
-/// Long-press opens an action sheet (copy, delete) matching the stream
-/// message pattern from channel_detail_page.dart.
+/// Double-tap opens an action sheet (copy, delete) matching the stream
+/// message pattern from channel_detail_page.dart; a long press selects the
+/// preview text.
 class ForumPostCard extends HookConsumerWidget {
   final ForumPost post;
   final String? currentPubkey;
@@ -93,9 +95,11 @@ class ForumPostCard extends HookConsumerWidget {
         : post.content;
     final summary = post.threadSummary;
 
-    return GestureDetector(
+    return MessageGestureInkWell(
       onTap: onTap,
-      onLongPress: () => _showActions(context),
+      onDoubleTap: (_) => _showActions(context),
+      highlightColor: Colors.transparent,
+      borderRadius: BorderRadius.circular(Radii.lg),
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.all(Grid.twelve),
@@ -110,58 +114,60 @@ class ForumPostCard extends HookConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Author row
-            Row(
-              children: [
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () => showUserProfileSheet(context, post.pubkey),
-                  child: _PostAvatar(
-                    profile: profile,
-                    pubkey: post.pubkey,
-                    isAgent: isAgent,
-                  ),
-                ),
-                const SizedBox(width: Grid.xxs),
-                Expanded(
-                  child: GestureDetector(
+            SelectionContainer.disabled(
+              child: Row(
+                children: [
+                  GestureDetector(
                     behavior: HitTestBehavior.opaque,
                     onTap: () => showUserProfileSheet(context, post.pubkey),
+                    child: _PostAvatar(
+                      profile: profile,
+                      pubkey: post.pubkey,
+                      isAgent: isAgent,
+                    ),
+                  ),
+                  const SizedBox(width: Grid.xxs),
+                  Expanded(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => showUserProfileSheet(context, post.pubkey),
+                      child: Text(
+                        displayName,
+                        maxLines: 1,
+                        style: messageUsernameTextStyle,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: Grid.xxs),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: Grid.xxl),
                     child: Text(
-                      displayName,
+                      formatRelativeTime(post.createdAt),
                       maxLines: 1,
-                      style: messageUsernameTextStyle,
                       overflow: TextOverflow.ellipsis,
+                      style: messageTimestampTextStyle.copyWith(
+                        color: context.colors.onSurfaceVariant,
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(width: Grid.xxs),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: Grid.xxl),
-                  child: Text(
-                    formatRelativeTime(post.createdAt),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: messageTimestampTextStyle.copyWith(
-                      color: context.colors.onSurfaceVariant,
+                  const SizedBox(width: Grid.half),
+                  SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: IconButton(
+                      onPressed: () => _showActions(context),
+                      icon: Icon(
+                        LucideIcons.ellipsis,
+                        size: 16,
+                        color: context.colors.onSurfaceVariant,
+                      ),
+                      padding: EdgeInsets.zero,
+                      visualDensity: VisualDensity.compact,
                     ),
                   ),
-                ),
-                const SizedBox(width: Grid.half),
-                SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: IconButton(
-                    onPressed: () => _showActions(context),
-                    icon: Icon(
-                      LucideIcons.ellipsis,
-                      size: 16,
-                      color: context.colors.onSurfaceVariant,
-                    ),
-                    padding: EdgeInsets.zero,
-                    visualDensity: VisualDensity.compact,
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
             const SizedBox(height: Grid.xxs),
 
@@ -192,39 +198,41 @@ class ForumPostCard extends HookConsumerWidget {
             // Thread summary
             if (summary != null && summary.replyCount > 0) ...[
               const SizedBox(height: Grid.xxs),
-              Row(
-                children: [
-                  Icon(
-                    LucideIcons.messageSquare,
-                    size: 14,
-                    color: context.colors.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: Grid.half),
-                  Text(
-                    '${summary.replyCount} ${summary.replyCount == 1 ? 'reply' : 'replies'}',
-                    style: context.textTheme.labelSmall?.copyWith(
+              SelectionContainer.disabled(
+                child: Row(
+                  children: [
+                    Icon(
+                      LucideIcons.messageSquare,
+                      size: 14,
                       color: context.colors.onSurfaceVariant,
                     ),
-                  ),
-                  if (summary.lastReplyAt != null) ...[
                     const SizedBox(width: Grid.half),
                     Text(
-                      '\u00b7',
-                      style: context.textTheme.labelSmall?.copyWith(
-                        color: context.colors.onSurfaceVariant.withValues(
-                          alpha: 0.5,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: Grid.half),
-                    Text(
-                      'last ${formatRelativeTime(summary.lastReplyAt!)}',
+                      '${summary.replyCount} ${summary.replyCount == 1 ? 'reply' : 'replies'}',
                       style: context.textTheme.labelSmall?.copyWith(
                         color: context.colors.onSurfaceVariant,
                       ),
                     ),
+                    if (summary.lastReplyAt != null) ...[
+                      const SizedBox(width: Grid.half),
+                      Text(
+                        '\u00b7',
+                        style: context.textTheme.labelSmall?.copyWith(
+                          color: context.colors.onSurfaceVariant.withValues(
+                            alpha: 0.5,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: Grid.half),
+                      Text(
+                        'last ${formatRelativeTime(summary.lastReplyAt!)}',
+                        style: context.textTheme.labelSmall?.copyWith(
+                          color: context.colors.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ],
           ],

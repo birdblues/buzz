@@ -75,7 +75,7 @@ class _ThreadMessage extends HookConsumerWidget {
       agentMentionPubkeys: agentMentionPubkeys,
     );
 
-    void openMessageActions(MessageLongPressDetails details) {
+    void openMessageActions(MessageGestureDetails details) {
       showMessageActions(
         context: context,
         ref: ref,
@@ -135,9 +135,9 @@ class _ThreadMessage extends HookConsumerWidget {
           // trailing gutter. InkWell still clips its ink to [borderRadius],
           // while leaving overflowing message content visible.
           clipBehavior: Clip.none,
-          child: MessageLongPressInkWell(
+          child: MessageGestureInkWell(
             key: ValueKey('thread-message-row-${message.id}'),
-            onLongPressDetails: openMessageActions,
+            onDoubleTapDetails: openMessageActions,
             borderRadius: BorderRadius.circular(Radii.md),
             highlightColor: context.colors.primary.withValues(alpha: 0.1),
             snapshotKey: messageSnapshotKey,
@@ -155,13 +155,18 @@ class _ThreadMessage extends HookConsumerWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         if (showAuthor)
-                          GestureDetector(
-                            onTap: () =>
-                                showUserProfileSheet(context, message.pubkey),
-                            child: _Avatar(
-                              profile: profile,
-                              pubkey: message.pubkey,
-                              isAgent: isAgent,
+                          SelectionContainer.disabled(
+                            child: GestureDetector(
+                              onTap: () =>
+                                  showUserProfileSheet(context, message.pubkey),
+                              onLongPress: MessageGestureScope.maybeOf(
+                                context,
+                              )?.openActions,
+                              child: _Avatar(
+                                profile: profile,
+                                pubkey: message.pubkey,
+                                isAgent: isAgent,
+                              ),
                             ),
                           )
                         else
@@ -176,54 +181,67 @@ class _ThreadMessage extends HookConsumerWidget {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 if (showAuthor)
-                                  Padding(
-                                    padding: const EdgeInsets.only(
-                                      bottom: Grid.quarter,
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        Expanded(
-                                          child: MessageAuthorMeta(
-                                            displayName: displayName,
-                                            username: messageUsernameLabel(
-                                              profile,
-                                            ),
-                                            timestamp: formatMessageTime(
-                                              message.createdAt,
-                                            ),
-                                            nameColor: context.colors.onSurface,
-                                            metadataColor:
-                                                context.colors.onSurfaceVariant,
-                                            onAuthorTap: () =>
-                                                showUserProfileSheet(
-                                                  context,
-                                                  message.pubkey,
-                                                ),
-                                            displayNameKey: ValueKey(
-                                              'thread-message-author-${message.id}',
-                                            ),
-                                            usernameKey: ValueKey(
-                                              'thread-message-username-${message.id}',
-                                            ),
-                                            timestampKey: ValueKey(
-                                              'thread-message-timestamp-${message.id}',
-                                            ),
-                                          ),
+                                  SelectionContainer.disabled(
+                                    child: GestureDetector(
+                                      behavior: HitTestBehavior.translucent,
+                                      onLongPress: MessageGestureScope.maybeOf(
+                                        context,
+                                      )?.openActions,
+                                      child: Padding(
+                                        padding: const EdgeInsets.only(
+                                          bottom: Grid.quarter,
                                         ),
-                                        if (message.edited) ...[
-                                          const SizedBox(width: Grid.half),
-                                          Text(
-                                            '(edited)',
-                                            style: context.textTheme.labelSmall
-                                                ?.copyWith(
-                                                  color: context
-                                                      .colors
-                                                      .onSurfaceVariant,
-                                                  fontStyle: FontStyle.italic,
+                                        child: Row(
+                                          children: [
+                                            Expanded(
+                                              child: MessageAuthorMeta(
+                                                displayName: displayName,
+                                                username: messageUsernameLabel(
+                                                  profile,
                                                 ),
-                                          ),
-                                        ],
-                                      ],
+                                                timestamp: formatMessageTime(
+                                                  message.createdAt,
+                                                ),
+                                                nameColor:
+                                                    context.colors.onSurface,
+                                                metadataColor: context
+                                                    .colors
+                                                    .onSurfaceVariant,
+                                                onAuthorTap: () =>
+                                                    showUserProfileSheet(
+                                                      context,
+                                                      message.pubkey,
+                                                    ),
+                                                displayNameKey: ValueKey(
+                                                  'thread-message-author-${message.id}',
+                                                ),
+                                                usernameKey: ValueKey(
+                                                  'thread-message-username-${message.id}',
+                                                ),
+                                                timestampKey: ValueKey(
+                                                  'thread-message-timestamp-${message.id}',
+                                                ),
+                                              ),
+                                            ),
+                                            if (message.edited) ...[
+                                              const SizedBox(width: Grid.half),
+                                              Text(
+                                                '(edited)',
+                                                style: context
+                                                    .textTheme
+                                                    .labelSmall
+                                                    ?.copyWith(
+                                                      color: context
+                                                          .colors
+                                                          .onSurfaceVariant,
+                                                      fontStyle:
+                                                          FontStyle.italic,
+                                                    ),
+                                              ),
+                                            ],
+                                          ],
+                                        ),
+                                      ),
                                     ),
                                   ),
                                 MessageContent(
@@ -286,20 +304,28 @@ class _ThreadMessage extends HookConsumerWidget {
                     ),
                   ),
                   if (isThreadHead || message.reactions.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(
-                        left: messageAvatarSize + messageAvatarContentGap,
-                      ),
-                      child: ReactionRow(
-                        messageId: message.id,
-                        reactions: message.reactions,
-                        onToggle: (emoji) =>
-                            toggleReaction(ref, message, emoji),
-                        showAddButton: isMember && !isArchived,
-                        onAddReaction: () => showAddReactionPicker(
-                          context: context,
-                          ref: ref,
-                          message: message,
+                    SelectionContainer.disabled(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.translucent,
+                        onLongPress: MessageGestureScope.maybeOf(
+                          context,
+                        )?.openActions,
+                        child: Padding(
+                          padding: const EdgeInsets.only(
+                            left: messageAvatarSize + messageAvatarContentGap,
+                          ),
+                          child: ReactionRow(
+                            messageId: message.id,
+                            reactions: message.reactions,
+                            onToggle: (emoji) =>
+                                toggleReaction(ref, message, emoji),
+                            showAddButton: isMember && !isArchived,
+                            onAddReaction: () => showAddReactionPicker(
+                              context: context,
+                              ref: ref,
+                              message: message,
+                            ),
+                          ),
                         ),
                       ),
                     ),
