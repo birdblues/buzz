@@ -75,6 +75,9 @@ async function renderEnsureReady(overrides = {}) {
     getManagedAgentsByPubkey: async () => new Map(),
     getPersonas: async () => [],
     memberPubkeys: new Set(),
+    // Nobody is live elsewhere unless a test says so. Injected so the pass
+    // still reaches no backend command.
+    getPresence: async () => ({}),
     ...overrides,
   };
   return renderHook(() => useEnsureAgentMentionsReady(options));
@@ -174,5 +177,53 @@ test("a non-member agent's wake queues through the attach seam instead of firing
     [],
     "no start may fire while the send is still preparing",
   );
+  rendered.unmount();
+});
+
+// ── cross-machine duplicate guard ───────────────────────────────────────────
+//
+// `status` only describes THIS machine. Without the presence check a mention
+// wakes a second harness for an agent already answering from another device,
+// and it replies twice.
+
+test("a member agent live on another device is not queued for a wake", async () => {
+  const rendered = await renderEnsureReady({
+    getManagedAgentsByPubkey: async () =>
+      new Map([[MEMBER_AGENT, managedAgent()]]),
+    memberPubkeys: new Set([MEMBER_AGENT]),
+    getPresence: async () => ({ [MEMBER_AGENT]: "online" }),
+  });
+
+  const result = await rendered.result.current([MEMBER_AGENT], CHANNEL_ID);
+
+  assert.deepEqual(result.agentsToWake, [], "no second harness here");
+  assert.deepEqual(
+    result.pubkeys,
+    [MEMBER_AGENT],
+    "the mention is still tagged so the remote harness sees the message",
+  );
+  rendered.unmount();
+});
+
+test("presence only suppresses the wake, never the membership write", async () => {
+  const attached = [];
+  const rendered = await renderEnsureReady({
+    getManagedAgentsByPubkey: async () =>
+      new Map([[OTHER_AGENT, managedAgent({ pubkey: OTHER_AGENT })]]),
+    memberPubkeys: new Set(),
+    getPresence: async () => ({ [OTHER_AGENT]: "away" }),
+    attachAgentToChannel: async (input) => {
+      attached.push(input.agent.pubkey);
+      // The attach offers the start seam; a live-elsewhere agent must decline
+      // it rather than skip the membership write.
+      input.detachedStart(input.agent);
+    },
+  });
+
+  const result = await rendered.result.current([OTHER_AGENT], CHANNEL_ID);
+
+  assert.deepEqual(attached, [OTHER_AGENT], "membership is still written");
+  assert.deepEqual(result.agentsToWake, [], "but nothing is queued to start");
+  assert.equal(result.wroteRelayState, true);
   rendered.unmount();
 });

@@ -4,6 +4,8 @@ import { toast } from "sonner";
 
 import { useMyRelayMembershipQuery } from "@/features/community-members/hooks";
 import { useIdentityQuery } from "@/shared/api/hooks";
+import { relayClient } from "@/shared/api/relayClient";
+import { KIND_IA_ARCHIVE_SNAPSHOT } from "@/shared/constants/kinds";
 import {
   archiveIdentity,
   listArchivedIdentities,
@@ -24,6 +26,75 @@ export function useArchivedIdentitiesQuery(enabled = true) {
     queryFn: listArchivedIdentities,
     staleTime: 30_000,
   });
+}
+
+/**
+ * Refresh the cached archive snapshot when the relay republishes it. Archival
+ * from another device or the CLI otherwise stays invisible until the 30-second
+ * staleTime plus a remount — discovery folding (autocomplete, member pickers)
+ * kept showing archived identities for minutes. Mounted once in AppShell.
+ */
+export function useArchiveSnapshotLiveRefresh(enabled: boolean): void {
+  const queryClient = useQueryClient();
+
+  React.useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
+    let isCancelled = false;
+    let dispose: (() => Promise<void>) | undefined;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const subscribe = () => {
+      void relayClient
+        .subscribeLive(
+          {
+            kinds: [KIND_IA_ARCHIVE_SNAPSHOT],
+            limit: 1,
+            since: Math.floor(Date.now() / 1_000) - 30,
+          },
+          () => {
+            if (!isCancelled) {
+              void queryClient.invalidateQueries({
+                queryKey: archivedIdentitiesQueryKey,
+              });
+            }
+          },
+        )
+        .then((nextDispose) => {
+          if (isCancelled) {
+            void nextDispose().catch(() => {});
+            return;
+          }
+          dispose = nextDispose;
+        })
+        .catch((error) => {
+          // staleTime alone is NOT polling — without this subscription the
+          // query only refetches on remount/focus/invalidate, so a transient
+          // startup WebSocket error would hide other devices' archive changes
+          // indefinitely. Keep retrying while mounted.
+          console.warn(
+            "Failed to subscribe to archive snapshot updates",
+            error,
+          );
+          if (!isCancelled) {
+            retryTimer = setTimeout(subscribe, 30_000);
+          }
+        });
+    };
+    subscribe();
+
+    return () => {
+      isCancelled = true;
+      if (retryTimer !== undefined) {
+        clearTimeout(retryTimer);
+      }
+      if (dispose) {
+        void dispose().catch(() => {});
+      }
+    };
+  }, [enabled, queryClient]);
 }
 
 /** `undefined` while the snapshot loads so callers can defer the flair. */

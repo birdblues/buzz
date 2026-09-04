@@ -75,9 +75,11 @@ test("edit save uses edit-target refs that resolve after edit-open", async () =>
     ),
   );
 
+  // A resolved ref carries its display name, so the edit re-emits the
+  // send-time name tag (rename resilience) instead of a bare reference.
   assert.deepEqual(saved, {
     content: "hello @Missing User",
-    tags: [["mention", UNRESOLVED_USER]],
+    tags: [["mention", UNRESOLVED_USER, "Missing User"]],
     mentionPubkeys: [],
     eventId: "event-id",
   });

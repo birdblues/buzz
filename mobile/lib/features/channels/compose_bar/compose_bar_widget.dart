@@ -242,6 +242,10 @@ class ComposeBar extends HookConsumerWidget {
 
     // Preload profiles for channel members, mentionable agents, and their
     // owners so @mention suggestions show names ("managed by …" included).
+    // Warm the owned-teams fetch here too — mentionCandidatesProvider is
+    // only watched once a mention query exists, and teams fetched on the
+    // first `@` would miss the first suggestion list.
+    ref.watch(ownedAgentTeamsProvider);
     final relayAgents = ref.watch(agentDirectoryProvider).asData?.value;
     final agentOwners = ref.watch(agentOwnersProvider).asData?.value;
     final agentMentionLabels = _agentMentionLabels(
@@ -380,12 +384,27 @@ class ComposeBar extends HookConsumerWidget {
     final channels = channelsAsync.asData?.value ?? <Channel>[];
     final channelSuggestions = filterChannels(channels, channelQuery.value);
 
-    // Insert a selected mention into the text field.
+    // Insert a selected mention into the text field. A team expands into its
+    // members — `TeamName(@a @b) ` — and registers each member so their
+    // pubkeys (never the team's placeholder) reach the send path. Mirrors
+    // desktop's `formatTeamMention`.
     void insertMention(MentionCandidate candidate) {
-      final name = candidate.label;
-      // Track the resolved candidate so we can pass its pubkey and prepare
-      // selected non-member agents at send time.
-      mentionMap.value[name] = candidate;
+      final String replacement;
+      if (candidate.teamMembers case final members?) {
+        for (final member in members) {
+          mentionMap.value[member.label] = member;
+        }
+        final memberTokens = [
+          for (final member in members) '@${member.label}',
+        ].join(' ');
+        replacement = '${candidate.label}($memberTokens) ';
+      } else {
+        final name = candidate.label;
+        // Track the resolved candidate so we can pass its pubkey and prepare
+        // selected non-member agents at send time.
+        mentionMap.value[name] = candidate;
+        replacement = '@$name ';
+      }
 
       final start = mentionStartIdx.value.clamp(0, controller.text.length);
       isModifyingText.value = true;
@@ -394,7 +413,7 @@ class ComposeBar extends HookConsumerWidget {
           controller,
           focusNode,
           start: start,
-          replacement: '@$name ',
+          replacement: replacement,
         );
       } finally {
         isModifyingText.value = false;

@@ -9,6 +9,7 @@ import {
   classifyWelcomeKickoffResolution,
   createWelcomeKickoffCoordinator,
   mergeKickoffEvents,
+  provisionWelcomeTeamUnlessComplete,
   resolveWelcomeAgentSet,
   selectWelcomeKickoffIntroTeammates,
   waitForWelcomeKickoffBeat,
@@ -467,4 +468,58 @@ test("merging the opener subtree never double-counts an already-visible reply", 
 test("merging with no subtree replies leaves the channel events untouched", () => {
   const channelEvents = [kickoffOpener];
   assert.equal(mergeKickoffEvents(channelEvents, []), channelEvents);
+});
+
+// The Welcome Team provisioning order. `ensureTeam` activates personas, mints
+// agents, and re-adds them to the channel — so a finished channel must never
+// reach it. Getting this backwards made removing the Welcome Team from Welcome
+// impossible: every effect run put it back and minted a new agent identity.
+
+test("a finished Welcome channel is never re-provisioned", async () => {
+  let ensureCalls = 0;
+
+  const team = await provisionWelcomeTeamUnlessComplete({
+    channelId: "welcome-1",
+    hasCloserMarker: async () => true,
+    ensureTeam: async () => {
+      ensureCalls += 1;
+      return ["lead", "honey", "pollen"];
+    },
+  });
+
+  assert.equal(team, null, "the caller must skip the rest of the kickoff");
+  assert.equal(
+    ensureCalls,
+    0,
+    "provisioning has side effects; it must not run after completion",
+  );
+});
+
+test("an unfinished channel still gets provisioned", async () => {
+  const team = await provisionWelcomeTeamUnlessComplete({
+    channelId: "welcome-1",
+    relayUrl: "ws://localhost:3000",
+    hasCloserMarker: async () => false,
+    ensureTeam: async () => ["lead", "honey", "pollen"],
+  });
+
+  assert.deepEqual(team, ["lead", "honey", "pollen"]);
+});
+
+test("the relay scope reaches provisioning unchanged", async () => {
+  // A wrong relay here provisions the team into the wrong community.
+  let seen;
+  await provisionWelcomeTeamUnlessComplete({
+    channelId: "welcome-1",
+    relayUrl: "ws://192.168.1.99:3000",
+    hasCloserMarker: async () => false,
+    ensureTeam: async (channelId, relayUrl) => {
+      seen = { channelId, relayUrl };
+      return [];
+    },
+  });
+  assert.deepEqual(seen, {
+    channelId: "welcome-1",
+    relayUrl: "ws://192.168.1.99:3000",
+  });
 });

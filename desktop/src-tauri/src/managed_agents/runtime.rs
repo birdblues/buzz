@@ -293,6 +293,8 @@ pub fn build_managed_agent_summary(
         .to_string();
 
     Ok(ManagedAgentSummary {
+        // Listing/refresh reads attempted no start.
+        start_outcome: None,
         pubkey: record.pubkey.clone(),
         name: record.name.clone(),
         persona_id: record.persona_id.clone(),
@@ -881,7 +883,7 @@ pub fn start_managed_agent_process(
     owner_hex: Option<&str>,
     workspace_relay: &crate::relay::ScopedWorkspaceRelay,
     replay_floor_unix: Option<u64>,
-) -> Result<(), String> {
+) -> Result<crate::managed_agents::StartOutcome, String> {
     let key = bound_runtime_key(record, workspace_relay)?;
     if let Some(runtime) = runtimes.get_mut(&key) {
         if runtime
@@ -890,7 +892,7 @@ pub fn start_managed_agent_process(
             .map_err(|error| format!("failed to inspect running process: {error}"))?
             .is_none()
         {
-            return Ok(());
+            return Ok(crate::managed_agents::StartOutcome::AlreadyLocal);
         }
 
         runtimes.remove(&key);
@@ -929,7 +931,7 @@ pub fn start_managed_agent_process(
     record.last_error_code = None;
 
     runtimes.insert(key, ManagedAgentPairRuntime::starting(process));
-    Ok(())
+    Ok(crate::managed_agents::StartOutcome::StartedLocal)
 }
 
 #[cfg(test)]

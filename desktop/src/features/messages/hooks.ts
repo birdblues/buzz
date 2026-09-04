@@ -45,6 +45,7 @@ import {
 } from "@/features/moderation/lib/timeoutStore";
 import { relayClient, setVisibleChannel } from "@/shared/api/relayClient";
 import { customEmojiQueryKey } from "@/features/custom-emoji/hooks";
+import { relayAgentsQueryKey } from "@/features/agents/hooks";
 import { channelsQueryKey } from "@/features/channels/hooks";
 import { reactionEmojiUrl } from "@/shared/api/customEmoji";
 import type { CustomEmoji } from "@/shared/lib/remarkCustomEmoji";
@@ -385,6 +386,12 @@ export function useChannelSubscription(channel: Channel | null) {
           void queryClient.invalidateQueries({
             queryKey: ["channels"],
             exact: true,
+          });
+          // The relay agent directory is scoped to channel memberships, so an
+          // agent joining or leaving changes mention eligibility immediately —
+          // without this it waits out the 5-minute discovery poll.
+          void queryClient.invalidateQueries({
+            queryKey: relayAgentsQueryKey,
           });
         }
       } catch {

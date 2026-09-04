@@ -116,7 +116,12 @@ export function useAutoRestartPolicy() {
           }
           await stopManagedAgent(agent.pubkey);
           clearActiveTurnsForAgentOnStop(agent.pubkey);
-          await startManagedAgent(agent.pubkey);
+          // The guard above already required `status === "running"`, so the
+          // stop above terminated a live LOCAL child. Relay presence can lag
+          // that by up to the Redis TTL, so bypass the cross-machine start
+          // guard here — otherwise a config-change restart on the machine that
+          // actually hosts the agent would be skipped as its own duplicate.
+          await startManagedAgent(agent.pubkey, { intent: "afterLocalStop" });
         } catch {
           // Failed attempt: edge stays consumed — badge-only until the
           // needsRestart edge cycles. No retry loops by design.

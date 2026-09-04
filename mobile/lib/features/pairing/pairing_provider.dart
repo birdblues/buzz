@@ -94,16 +94,26 @@ final identityExportClockProvider = Provider<DateTime Function()>((ref) {
 class PairingNotifier extends Notifier<PairingState> {
   final PairingSocketFactory _socketFactory;
   final PairingCredentialValidator? _credentialValidator;
+  final bool _allowPrivateNetworkRelay;
   PairingSocket? _socket;
   Timer? _sessionTimeout;
   Community? _identityExportCommunity;
   bool _identityExportBiometricOnly = false;
 
+  /// Development escape hatch for pairing with a relay on the local network:
+  /// true in debug builds, and in any build launched with
+  /// `--dart-define=BUZZ_ALLOW_PRIVATE_RELAY=true`. Never true in a normal
+  /// release build.
+  static const _defaultAllowPrivateNetworkRelay =
+      kDebugMode || bool.fromEnvironment('BUZZ_ALLOW_PRIVATE_RELAY');
+
   PairingNotifier({
     PairingSocketFactory? socketFactory,
     PairingCredentialValidator? credentialValidator,
+    bool allowPrivateNetworkRelay = _defaultAllowPrivateNetworkRelay,
   }) : _socketFactory = socketFactory ?? _createPairingSocket,
-       _credentialValidator = credentialValidator;
+       _credentialValidator = credentialValidator,
+       _allowPrivateNetworkRelay = allowPrivateNetworkRelay;
 
   static PairingSocket _createPairingSocket({
     required String wsUrl,
@@ -923,15 +933,20 @@ class PairingNotifier extends Notifier<PairingState> {
 
   void _validateRelayUrl(String url) {
     final uri = Uri.parse(url);
+    final host = uri.host.toLowerCase();
+    final ip = Uri.tryParse('http://$host')?.host ?? host;
+    // The development allowance is scoped to RFC1918 hosts specifically: it
+    // never relaxes anything for public hosts, and never admits link-local
+    // ranges such as 169.254.169.254.
+    final allowedPrivateRelay = _allowPrivateNetworkRelay && _isRfc1918Host(ip);
 
-    if (!kDebugMode && uri.scheme != 'https') {
+    if (!kDebugMode && !allowedPrivateRelay && uri.scheme != 'https') {
       throw const FormatException('Relay URL must use HTTPS');
     }
     if (uri.scheme != 'http' && uri.scheme != 'https') {
       throw FormatException('Invalid URL scheme: ${uri.scheme}');
     }
 
-    final host = uri.host.toLowerCase();
     if (host == 'localhost' || host == '127.0.0.1' || host == '::1') {
       if (!kDebugMode) {
         throw const FormatException('Relay URL cannot target localhost');
@@ -939,8 +954,7 @@ class PairingNotifier extends Notifier<PairingState> {
       return;
     }
 
-    final ip = Uri.tryParse('http://$host')?.host ?? host;
-    if (_isPrivateHost(ip)) {
+    if (!allowedPrivateRelay && _isPrivateHost(ip)) {
       throw const FormatException(
         'Relay URL cannot target private network addresses',
       );
@@ -948,19 +962,30 @@ class PairingNotifier extends Notifier<PairingState> {
   }
 
   static bool _isPrivateHost(String host) {
+    final octets = _ipv4Octets(host);
+    if (octets == null) return false;
+
+    final (a, b) = octets;
+    return _isRfc1918(a, b) || (a == 169 && b == 254);
+  }
+
+  static bool _isRfc1918Host(String host) {
+    final octets = _ipv4Octets(host);
+    if (octets == null) return false;
+
+    final (a, b) = octets;
+    return _isRfc1918(a, b);
+  }
+
+  static bool _isRfc1918(int a, int b) =>
+      a == 10 || (a == 172 && b >= 16 && b <= 31) || (a == 192 && b == 168);
+
+  static (int, int)? _ipv4Octets(String host) {
     final parts = host.split('.');
-    if (parts.length != 4) return false;
+    if (parts.length != 4) return null;
     final octets = parts.map(int.tryParse).toList();
-    if (octets.any((o) => o == null)) return false;
-
-    final a = octets[0]!;
-    final b = octets[1]!;
-
-    if (a == 10) return true;
-    if (a == 172 && b >= 16 && b <= 31) return true;
-    if (a == 192 && b == 168) return true;
-    if (a == 169 && b == 254) return true;
-    return false;
+    if (octets.any((o) => o == null)) return null;
+    return (octets[0]!, octets[1]!);
   }
 }
 

@@ -29,7 +29,12 @@ import 'package:buzz/shared/security/sensitive_action_authorizer.dart';
 ///     prefix, whitespace).
 ///   - Failure modes that return BEFORE any network call: invalid base64,
 ///     wrong shape (non-object, missing fields, missing nsec), and SSRF
-///     guards (private IPs, non-http schemes).
+///     guards (non-http schemes; private IPs when the private-network
+///     allowance is off).
+///   - The `allowPrivateNetworkRelay` development allowance: the default
+///     admits RFC1918 relay hosts in this debug test environment, an
+///     explicit `false` restores the unconditional rejection, and
+///     link-local ranges stay rejected even with the allowance on.
 ///   - `reset()` returning to idle from an error state.
 void main() {
   group('PairingNotifier', () {
@@ -139,7 +144,17 @@ void main() {
     });
 
     test('rejects private IP relay URLs (SSRF)', () async {
-      container = createContainer();
+      // Pin the release-build policy explicitly: private relay hosts are
+      // rejected whenever private-network relays are not allowed.
+      fakeAuth = FakeAuthNotifier();
+      container = ProviderContainer(
+        overrides: [
+          authProvider.overrideWith(() => fakeAuth),
+          pairingProvider.overrideWith(
+            () => PairingNotifier(allowPrivateNetworkRelay: false),
+          ),
+        ],
+      );
 
       for (final ip in [
         '10.0.0.1',
@@ -155,6 +170,55 @@ void main() {
         container.read(pairingProvider.notifier).reset();
       }
     });
+
+    test(
+      'debug default admits private IP relay URLs past validation',
+      () async {
+        // Under `flutter test` kDebugMode is true, so the default allowance
+        // is on and an RFC1918 relay must clear _validateRelayUrl. The
+        // payload omits nsec, so the flow stops at the credential check —
+        // before any network call — proving the URL validation itself
+        // passed. (This pins the debug default only; the release default
+        // depends on kDebugMode being false, which no test process can
+        // observe.)
+        container = createContainer();
+
+        final code = _encodePairingCode(relayUrl: 'http://192.168.1.99:3000');
+        await container.read(pairingProvider.notifier).pair(code);
+
+        final state = container.read(pairingProvider);
+        expect(state.status, PairingStatus.error);
+        expect(state.errorMessage, contains('missing nsec'));
+        expect(state.errorMessage, isNot(contains('private network')));
+      },
+    );
+
+    test(
+      'private-network allowance never admits link-local addresses',
+      () async {
+        // The allowance is scoped to RFC1918. Link-local (including the
+        // cloud metadata address) must stay rejected even with the flag
+        // forced on.
+        fakeAuth = FakeAuthNotifier();
+        container = ProviderContainer(
+          overrides: [
+            authProvider.overrideWith(() => fakeAuth),
+            pairingProvider.overrideWith(
+              () => PairingNotifier(allowPrivateNetworkRelay: true),
+            ),
+          ],
+        );
+
+        final code = _encodePairingCode(
+          relayUrl: 'http://169.254.169.254:3000',
+        );
+        await container.read(pairingProvider.notifier).pair(code);
+
+        final state = container.read(pairingProvider);
+        expect(state.status, PairingStatus.error);
+        expect(state.errorMessage, contains('private network'));
+      },
+    );
 
     test('rejects non-http/https schemes', () async {
       container = createContainer();

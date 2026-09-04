@@ -111,4 +111,21 @@ void main() {
 
     expect(rankedPubkeys([second, first], ''), ['9' * 64, '8' * 64]);
   });
+
+  test('teams rank between channel members and non-member people', () {
+    final person = candidate(pubkey: '6' * 64);
+    final team = MentionCandidate(
+      pubkey: '',
+      displayName: 'Brain Team',
+      isAgent: true,
+      teamMembers: [candidate(isAgent: true, pubkey: otherBrainPubkey)],
+    );
+    final channelMember = candidate(isMember: true, pubkey: channelBrainPubkey);
+
+    expect(rankedPubkeys([person, team, channelMember]), [
+      channelBrainPubkey,
+      '',
+      '6' * 64,
+    ]);
+  });
 }

@@ -2,6 +2,16 @@ import type { UserProfileSummary } from "@/shared/api/types";
 
 export const MENTION_REFERENCE_TAG = "mention";
 
+/**
+ * Reserved third element of a `mention` tag marking composer address-tray
+ * provenance — never a display name. Kept in sync with
+ * `agentAddressMention.mjs` and the backend tag validator.
+ */
+export const AGENT_ADDRESS_MENTION_MARKER = "agent-address";
+
+/** Backend cap for a send-time display name; longer names are not emitted. */
+export const MAX_MENTION_DISPLAY_NAME_CHARS = 128;
+
 export function getMentionTagPubkey(tag: string[]): string | null {
   if ((tag[0] !== "p" && tag[0] !== MENTION_REFERENCE_TAG) || !tag[1]) {
     return null;
@@ -81,6 +91,22 @@ export function resolveMentionProps(
     for (const alias of collectProfileAliases(profiles[pubkey])) {
       names.add(alias);
       pubkeysByName[alias.toLowerCase()] = pubkey;
+    }
+
+    // A `mention` tag may carry the display name the sender matched at send
+    // time. Profiles only expose CURRENT aliases, so after a rename the old
+    // name in the message body stops matching and the chip degrades to plain
+    // text. The send-time name keeps historical mentions rendering. (Only the
+    // custom `mention` tag — a `p` tag's third element is a relay URL — and
+    // never the reserved `agent-address` provenance marker.)
+    const sendTimeName =
+      tag[0] === MENTION_REFERENCE_TAG &&
+      tag[2] !== AGENT_ADDRESS_MENTION_MARKER
+        ? tag[2]?.trim()
+        : undefined;
+    if (sendTimeName) {
+      names.add(sendTimeName);
+      pubkeysByName[sendTimeName.toLowerCase()] ??= pubkey;
     }
   }
 

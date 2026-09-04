@@ -45,6 +45,15 @@ pub struct AgentDefinition {
     pub is_builtin: bool,
     #[serde(default = "default_record_active")]
     pub is_active: bool,
+    /// DEVICE-LOCAL fact: this definition first reached this device via an
+    /// inbound 30175 insert (created on another device, or a fresh-store
+    /// backfill) rather than a local create. Never part of the 30175 event
+    /// content, never published; the inbound merge only patches listed
+    /// content fields, so this survives every remote edit. Drives the
+    /// "From another device" card badge and excludes the persona from the
+    /// mention launcher candidates — nothing else consults it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub remote_origin: bool,
     /// Whether this persona is discoverable in the currently active community.
     ///
     /// This is a command/view projection only. Durable share state lives in
@@ -157,6 +166,7 @@ impl AgentDefinition {
             name_pool: self.name_pool,
             is_builtin: self.is_builtin,
             is_active: self.is_active,
+            remote_origin: self.remote_origin,
             // Catalog visibility is relay+owner scoped, not definition-global.
             shared: false,
             source_team: self.source_team,
@@ -194,6 +204,7 @@ impl ManagedAgentRecord {
             name_pool: self.name_pool.clone(),
             is_builtin: self.is_builtin,
             is_active: self.is_active,
+            remote_origin: self.remote_origin,
             // Projected by `list_personas` from the active retention scope.
             shared: false,
             source_team: self.source_team.clone(),
@@ -226,6 +237,14 @@ pub struct RelayAgentInfo {
     pub respond_to: Option<RespondTo>,
     #[serde(default)]
     pub respond_to_allowlist: Vec<String>,
+    /// Definition this agent instantiates, from its kind:30177 projection.
+    /// Only the owner-verified managed-policy path can supply it; the legacy
+    /// kind:10100 directory carries no definition link. Consumers MUST also
+    /// check `owner_pubkey` before trusting it — builtin definition ids are
+    /// identical across owners, so an unowned agent's id would otherwise
+    /// collide with the viewer's own definitions.
+    #[serde(default)]
+    pub persona_id: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ManagedAgentRecord {
@@ -412,6 +431,10 @@ pub struct ManagedAgentRecord {
     /// definition hidden from pickers. Defaults `true` for existing records.
     #[serde(default = "default_record_active")]
     pub is_active: bool,
+    /// Absorbed from `AgentDefinition.remote_origin` — device-local
+    /// "first seen via inbound sync" fact. See that field's doc.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub remote_origin: bool,
     /// Legacy process-global catalog visibility field.
     ///
     /// New writes omit it and definition views ignore it. It remains
@@ -510,8 +533,35 @@ pub struct ManagedAgentProcess {
     pub job: Option<crate::managed_agents::JobHandle>,
 }
 
+/// What a start request actually did.
+///
+/// Returned as a successful outcome rather than an error on purpose. Five
+/// call sites (mention send, project send, huddle add, welcome kickoff,
+/// channel attach) treat a failed start as "this agent is unusable" and abort
+/// the surrounding operation — for a mention that means the pubkey never gets
+/// tagged, so the agent running on the OTHER machine never sees the message.
+/// Reporting "it's already alive elsewhere" as success lets all of them carry
+/// on unchanged; only callers that assume "Ok means a local child exists"
+/// need to branch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StartOutcome {
+    /// A local harness was spawned by this call.
+    StartedLocal,
+    /// A local harness for this (agent, relay) pair was already running.
+    AlreadyLocal,
+    /// No local harness was started: the agent is already live on another
+    /// device, and a second one would answer every message twice.
+    RunningElsewhere,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ManagedAgentSummary {
+    /// Set only by the start commands; `None` on listing/refresh reads where
+    /// no start was attempted. Skipped on the wire when absent so existing
+    /// consumers are untouched.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_outcome: Option<StartOutcome>,
     pub pubkey: String,
     pub name: String,
     pub persona_id: Option<String>,

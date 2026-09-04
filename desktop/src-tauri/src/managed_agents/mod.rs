@@ -27,6 +27,7 @@ pub(crate) mod parallelism;
 mod persona_avatars;
 pub(crate) mod persona_events;
 mod personas;
+pub(crate) mod presence_guard;
 #[cfg(windows)]
 mod process_lifecycle;
 pub(crate) mod readiness;

@@ -83,6 +83,25 @@ abstract final class _MentionSuggestionInfo {
     required bool isDmChannel,
     required Map<String, UserProfile> userCache,
   }) {
+    if (candidate.teamMembers case final members?) {
+      return Row(
+        children: [
+          Icon(
+            LucideIcons.users,
+            size: 12,
+            color: context.colors.onSurfaceVariant,
+          ),
+          const SizedBox(width: Grid.half),
+          Text(
+            'team · ${members.length} agent${members.length == 1 ? '' : 's'}',
+            style: context.textTheme.labelSmall?.copyWith(
+              color: context.colors.onSurfaceVariant,
+            ),
+          ),
+        ],
+      );
+    }
+
     final ownerLabel = candidate.isAgent
         ? formatOwnerLabel(candidate.ownerPubkey, currentPubkey, userCache)
         : null;

@@ -14,7 +14,8 @@ use crate::{
         stop_managed_agent_workspace_pair, sync_managed_agent_processes, try_regenerate_nest,
         validate_provider_config, BackendKind, CreateManagedAgentRequest,
         CreateManagedAgentResponse, ManagedAgentRecord, ManagedAgentSummary, RelayMeshConfig,
-        DEFAULT_ACP_COMMAND, DEFAULT_AGENT_PARALLELISM, DEFAULT_AGENT_TURN_TIMEOUT_SECONDS,
+        StartIntent, StartOutcome, DEFAULT_ACP_COMMAND, DEFAULT_AGENT_PARALLELISM,
+        DEFAULT_AGENT_TURN_TIMEOUT_SECONDS,
     },
     relay::relay_ws_url_with_override,
     util::now_iso,
@@ -160,6 +161,10 @@ pub(super) async fn start_local_agent_pairs_with_preflight(
     summarize_from_disk(app, record, &runtimes)
 }
 
+// Two independent cross-cutting concerns ride this preflight — the publish-first
+// replay floor and the cross-machine start intent — and both have to reach the
+// spawn, so the argument list is one over the lint's threshold.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn start_local_agent_with_preflight(
     app: &AppHandle,
     state: &AppState,
@@ -168,6 +173,7 @@ pub(super) async fn start_local_agent_with_preflight(
     expected_relay_url: Option<&str>,
     expected_signer_pubkey: Option<&str>,
     replay_floor_unix: Option<u64>,
+    intent: StartIntent,
 ) -> Result<ManagedAgentSummary, String> {
     let record_snapshot = {
         let _store_guard = state
@@ -201,20 +207,76 @@ pub(super) async fn start_local_agent_with_preflight(
             &personas,
             &global,
         );
+    // Read the workspace relay ONCE and use that same value for both the
+    // presence probe and the scope bind below. Reading it twice would let a
+    // community switch landing in between authorize a spawn against relay B on
+    // the strength of relay A's presence answer. The probe and mesh preflight
+    // both await, so after them we re-read and require the relay to be
+    // unchanged — otherwise a switch during either would slip a spawn past
+    // `bind_expected_relay_scope` (the stale caller's expected relay still
+    // equals this stale read).
+    let observed_relay = relay_ws_url_with_override(state);
+
+    // Cross-machine guard. `record.status` only knows about THIS machine, so
+    // without this an agent hosted on another device gets a second harness
+    // here and answers every mention twice. Explicit / AfterLocalStop callers
+    // skip the probe entirely — see `StartIntent`.
+    if intent == StartIntent::Implicit {
+        let presence = crate::managed_agents::presence_guard::query_agent_presence(
+            state,
+            std::slice::from_ref(&pubkey.to_string()),
+            &observed_relay,
+        )
+        .await;
+        let decision = crate::managed_agents::presence_start_decision(
+            presence.get(&pubkey.to_lowercase()).copied(),
+            intent,
+        );
+        if decision == crate::managed_agents::StartDecision::SkipRunningElsewhere {
+            tracing::info!(
+                agent = %pubkey,
+                "agent is live on another device; skipping local start"
+            );
+            let _store_guard = state
+                .managed_agents_store_lock
+                .lock()
+                .map_err(|e| e.to_string())?;
+            let records = load_managed_agents(app)?;
+            let runtimes = state
+                .managed_agent_processes
+                .lock()
+                .map_err(|e| e.to_string())?;
+            let record = records
+                .iter()
+                .find(|record| record.pubkey == pubkey)
+                .ok_or_else(|| format!("agent {pubkey} not found"))?;
+            let mut summary = summarize_from_disk(app, record, &runtimes)?;
+            summary.start_outcome = Some(StartOutcome::RunningElsewhere);
+            return Ok(summary);
+        }
+    }
+
+    // Mesh preflight runs AFTER the presence skip on purpose: an agent that is
+    // live on another device needs no local spawn, so a mesh-llm build with no
+    // serve target on this machine must not fail the attach/mention flow for
+    // it. Only a start that will actually spawn here needs a mesh target.
     ensure_relay_mesh_for_record(app, mesh_model_id.as_deref(), allow_fresh_create_start).await?;
 
-    // The mesh preflight above is the suspension window Projects callbacks
-    // capture their scope against: a community switch during that await
-    // would otherwise spawn this pair keyed to the *new* workspace relay.
-    // Read the workspace relay ONCE, assert the caller's captured scope
-    // against that exact read, and hand the same bound value to the spawn
-    // below — the check is tied to its use, so a switch landing after this
-    // point can no longer retarget the spawn (it only changes state this
+    // The awaits above suspended; if a community switch landed meanwhile, the
+    // presence answer came from a relay this spawn would no longer target.
+    // Fail rather than proceed on cross-relay evidence.
+    if relay_ws_url_with_override(state) != observed_relay {
+        return Err("workspace relay changed while starting the agent; try again".to_string());
+    }
+
+    // `observed_relay` was read before the probe/mesh awaits and re-asserted
+    // unchanged just above, so it is current here. Assert the caller's
+    // captured scope against that read and hand the same bound value to the
+    // spawn below — the check is tied to its use, so a switch landing after
+    // this point can no longer retarget the spawn (it only changes state this
     // call no longer consults).
-    let workspace_relay_url = crate::relay::bind_expected_relay_scope(
-        expected_relay_url,
-        crate::relay::relay_ws_url_with_override(state),
-    )?;
+    let workspace_relay_url =
+        crate::relay::bind_expected_relay_scope(expected_relay_url, observed_relay)?;
     // Bind the active owner after the same final await as the relay. A
     // same-relay identity replacement during mesh preflight must not release
     // the stale preflight owner to spawn.
@@ -255,7 +317,7 @@ pub(super) async fn start_local_agent_with_preflight(
             }
         }
     }
-    start_managed_agent_process(
+    let start_outcome = start_managed_agent_process(
         app,
         record,
         &mut runtimes,
@@ -271,14 +333,16 @@ pub(super) async fn start_local_agent_with_preflight(
         .iter()
         .find(|record| record.pubkey == pubkey)
         .ok_or_else(|| format!("agent {pubkey} not found"))?;
-    build_managed_agent_summary(
+    let mut summary = build_managed_agent_summary(
         app,
         record,
         &runtimes,
         &personas,
         &load_teams(app).unwrap_or_default(),
         &crate::managed_agents::load_global_agent_config(app).unwrap_or_default(),
-    )
+    )?;
+    summary.start_outcome = Some(start_outcome);
+    Ok(summary)
 }
 
 pub(crate) use provider_deploy::deploy_to_provider;
@@ -399,6 +463,11 @@ pub async fn create_managed_agent(
         if let Some(persona_id) = requested_persona_id.as_deref() {
             let personas = load_personas(&app)?;
             ensure_persona_is_active(&personas, persona_id)?;
+            // Every creation surface (card Start, profile panel, team deploy,
+            // channel add, project, template, team-mention provision) funnels
+            // through here, so this is where sync-received definitions are
+            // refused a second identity — see the ensure fn for the why.
+            crate::managed_agents::ensure_persona_not_remote_origin(&personas, persona_id)?;
         }
         let keys = Keys::generate();
         let pubkey = keys.public_key().to_hex();
@@ -669,6 +738,7 @@ pub async fn create_managed_agent(
             name_pool: Vec::new(),
             is_builtin: false,
             is_active: true,
+            remote_origin: false,
             shared: false,
             source_team: None,
             source_team_persona_slug: None,
@@ -713,7 +783,21 @@ pub async fn create_managed_agent(
     // ── Phase 3b: local spawn (async preflight outside store lock) ───────────
     let mut spawn_error = None;
     let agent = if input.spawn_after_create && input.backend == BackendKind::Local {
-        match start_local_agent_with_preflight(&app, &state, &pubkey, true, None, None, None).await
+        // A key minted moments ago cannot be live anywhere else, so the probe
+        // can only ever answer "unknown" here. Implicit keeps the rule in one
+        // place rather than special-casing create. There is likewise no
+        // published message to replay past, so the floor stays `None`.
+        match start_local_agent_with_preflight(
+            &app,
+            &state,
+            &pubkey,
+            true,
+            None,
+            None,
+            None,
+            StartIntent::Implicit,
+        )
+        .await
         {
             Ok(agent) => agent,
             Err(error) => {
@@ -824,9 +908,19 @@ pub async fn start_managed_agent(
     expected_relay_url: Option<String>,
     expected_signer_pubkey: Option<String>,
     replay_floor_unix: Option<u64>,
+    // Why the start was requested. Absent means `implicit`, so any caller that
+    // has not been taught about the cross-machine guard gets the safe
+    // behaviour (skip when the agent already answers from another device).
+    intent: Option<String>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<ManagedAgentSummary, String> {
+    let start_intent = match intent.as_deref() {
+        None | Some("implicit") => StartIntent::Implicit,
+        Some("explicit") => StartIntent::Explicit,
+        Some("afterLocalStop") => StartIntent::AfterLocalStop,
+        Some(other) => return Err(format!("unknown start intent: {other}")),
+    };
     // Snapshot the workspace owner pubkey for the legacy auth_tag fallback.
     // Read outside the records lock to keep lock ordering simple.
     let owner_hex = workspace_owner_hex(&state)?;
@@ -924,6 +1018,7 @@ pub async fn start_managed_agent(
                 expected_relay_url.as_deref(),
                 expected_signer_pubkey.as_deref(),
                 replay_floor_unix,
+                start_intent,
             )
             .await
         }

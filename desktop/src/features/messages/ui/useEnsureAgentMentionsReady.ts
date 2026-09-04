@@ -1,5 +1,7 @@
 import * as React from "react";
 import { applyReusableAgentAccessPolicy } from "@/features/agents/channelAgents";
+import { getPresence as getPresenceFromRelay } from "@/shared/api/tauri";
+import type { PresenceLookup } from "@/shared/api/types";
 import type { AgentPersona, ManagedAgent } from "@/shared/api/types";
 import { normalizePubkey } from "@/shared/lib/pubkey";
 import {
@@ -7,6 +9,7 @@ import {
   getErrorMessage,
   isManagedAgentRunning,
   isProviderBackedAgent,
+  pubkeysLiveElsewhere,
   type QueuedAgentWake,
   uniqueNormalizedPubkeys,
 } from "./useMentionSendFlow.helpers";
@@ -51,6 +54,12 @@ type UseEnsureAgentMentionsReadyOptions = {
   getManagedAgentsByPubkey: () => Promise<Map<string, ManagedAgent>>;
   getPersonas: () => Promise<AgentPersona[]>;
   memberPubkeys: ReadonlySet<string>;
+  /**
+   * Relay presence for the mentioned pubkeys, used to skip waking an agent
+   * that already answers from another device. Defaults to the real relay
+   * query; injected only so tests can pin the skip without a backend.
+   */
+  getPresence?: (pubkeys: string[]) => Promise<PresenceLookup>;
 };
 
 /**
@@ -68,6 +77,7 @@ export function useEnsureAgentMentionsReady({
   getManagedAgentsByPubkey,
   getPersonas,
   memberPubkeys,
+  getPresence = getPresenceFromRelay,
 }: UseEnsureAgentMentionsReadyOptions): EnsureAgentMentionsReady {
   return React.useCallback(
     async (
@@ -84,10 +94,21 @@ export function useEnsureAgentMentionsReady({
           agentsToWake: [] as QueuedAgentWake[],
         };
       }
-      const [managedAgentsByPubkey, personas] = await Promise.all([
+      const normalizedMentions = uniqueNormalizedPubkeys(mentionPubkeys);
+      const [managedAgentsByPubkey, personas, presence] = await Promise.all([
         getManagedAgentsByPubkey(),
         getPersonas(),
+        // One batched lookup for the whole send. Failures resolve to an empty
+        // map, which reads as "unknown" and lets every wake proceed — a relay
+        // hiccup must never make agents unstartable.
+        getPresence(normalizedMentions).catch(() => ({})),
       ]);
+      // `status` only knows about THIS machine. Without this an agent already
+      // answering from another device gets a second harness here and replies
+      // twice. The backend applies the same guard; this skip also spares the
+      // round trip. Membership writes still run — only the wake is skipped,
+      // and the pubkey is still tagged so the remote harness sees the message.
+      const liveElsewhere = pubkeysLiveElsewhere(presence);
       for (const agent of preparedManagedAgents) {
         managedAgentsByPubkey.set(normalizePubkey(agent.pubkey), agent);
       }
@@ -100,7 +121,7 @@ export function useEnsureAgentMentionsReady({
       const pubkeys: string[] = [];
       let wroteRelayState = false;
       const agentsToWake: QueuedAgentWake[] = [];
-      for (const pubkey of uniqueNormalizedPubkeys(mentionPubkeys)) {
+      for (const pubkey of normalizedMentions) {
         const agent = managedAgentsByPubkey.get(pubkey);
         if (!agent) continue;
         try {
@@ -118,10 +139,11 @@ export function useEnsureAgentMentionsReady({
           }
           if (participants.has(pubkey)) {
             if (
-              (isProviderBackedAgent(readyAgent) &&
+              !liveElsewhere.has(pubkey) &&
+              ((isProviderBackedAgent(readyAgent) &&
                 readyAgent.status !== "deployed") ||
-              (!isProviderBackedAgent(readyAgent) &&
-                !isManagedAgentRunning(readyAgent))
+                (!isProviderBackedAgent(readyAgent) &&
+                  !isManagedAgentRunning(readyAgent)))
             ) {
               enqueueAgentWake(agentsToWake, readyAgent);
             }
@@ -130,8 +152,9 @@ export function useEnsureAgentMentionsReady({
               channelId: capturedChannelId,
               agent: readyAgent,
               role: "bot",
-              detachedStart: (agentToWake) =>
-                enqueueAgentWake(agentsToWake, agentToWake),
+              detachedStart: liveElsewhere.has(pubkey)
+                ? () => {}
+                : (agentToWake) => enqueueAgentWake(agentsToWake, agentToWake),
             });
             wroteRelayState = true;
           }
@@ -153,6 +176,7 @@ export function useEnsureAgentMentionsReady({
       attachAgentToChannel,
       getManagedAgentsByPubkey,
       getPersonas,
+      getPresence,
       memberPubkeys,
     ],
   );

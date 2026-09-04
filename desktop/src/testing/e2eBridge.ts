@@ -931,9 +931,12 @@ type RawRelayAgent = {
   status: PresenceStatus | "unknown";
   respond_to?: "owner-only" | "allowlist" | "anyone";
   respond_to_allowlist?: string[];
+  persona_id?: string | null;
 };
 
 type RawManagedAgent = {
+  /** Set only by the start command; see the Rust `StartOutcome`. */
+  start_outcome?: "startedLocal" | "alreadyLocal" | "runningElsewhere";
   pubkey: string;
   name: string;
   persona_id: string | null;
@@ -1025,6 +1028,8 @@ type RawPersona = {
   name_pool?: string[];
   is_builtin: boolean;
   is_active: boolean;
+  /** Device-local: first reached this device via inbound sync. */
+  remote_origin?: boolean;
   shared: boolean;
   source_team?: string | null;
   catalog_source?: { owner_pubkey: string; persona_id: string } | null;
@@ -9631,6 +9636,7 @@ async function handleStartManagedAgent(
     pubkey: string;
     expectedRelayUrl?: string | null;
     expectedSignerPubkey?: string | null;
+    intent?: "implicit" | "explicit" | "afterLocalStop" | null;
   },
   config?: E2eConfig,
 ): Promise<RawManagedAgent> {
@@ -9663,6 +9669,22 @@ async function handleStartManagedAgent(
   }
 
   const agent = getMockManagedAgent(args.pubkey);
+
+  // Cross-machine guard, mirroring `start_local_agent_with_preflight`: an
+  // implicit start (mention, attach, project send, huddle add) does not spawn
+  // a second harness for an agent that already answers from another device.
+  // Presence is the only cross-machine signal, so a spec drives this by
+  // seeding `setMockPresenceStatus` while the agent's own status is stopped.
+  const intent = args.intent ?? "implicit";
+  const presence = getMockPresenceStatus(args.pubkey);
+  const liveElsewhere = presence === "online" || presence === "away";
+  const localStatus =
+    agent.backend.type === "provider" ? "deployed" : "running";
+  if (intent === "implicit" && liveElsewhere && agent.status !== localStatus) {
+    return { ...cloneManagedAgent(agent), start_outcome: "runningElsewhere" };
+  }
+  const alreadyLocal = agent.status === localStatus;
+
   if (isRelayMeshManagedAgent(agent)) {
     // Model the backend start preflight (ensure_relay_mesh_for_record): a
     // saved relay-mesh agent re-resolves a live serve target for its model
@@ -9702,7 +9724,10 @@ async function handleStartManagedAgent(
       : `started mock harness at ${now}`,
   );
   syncMockRelayAgentsFromManagedAgents();
-  return cloneManagedAgent(agent);
+  return {
+    ...cloneManagedAgent(agent),
+    start_outcome: alreadyLocal ? "alreadyLocal" : "startedLocal",
+  };
 }
 
 async function handleStopManagedAgent(args: {
@@ -13525,6 +13550,9 @@ export function maybeInstallE2eTauriMocks() {
                 system_prompt: content.system_prompt ?? "",
                 is_builtin: false,
                 is_active: true,
+                // Mirrors apply_inbound_persona: a definition first seen via
+                // inbound sync is marked remote-origin (device-local fact).
+                remote_origin: true,
                 shared,
                 env_vars: {},
                 created_at: now,

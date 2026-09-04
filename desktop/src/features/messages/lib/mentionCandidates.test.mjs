@@ -170,3 +170,141 @@ test("teams with identity and persona display-name collisions are not suggested"
     [],
   );
 });
+
+// ── members that run on another device ───────────────────────────────────────
+//
+// A definition synced from another device, or one whose only instance lives
+// there, must resolve to the running agent — never to "create a copy here",
+// which mints a duplicate identity that answers every message twice.
+
+const VIEWER = "a".repeat(64);
+const STRANGER = "b".repeat(64);
+const REMOTE_AGENT = "c".repeat(64);
+
+function remotePersona(id, displayName) {
+  return { ...persona(id, displayName), remoteOrigin: true };
+}
+
+test("a synced definition resolves to the agent already running elsewhere", () => {
+  const candidates = [
+    identity("planner", "Planner", {
+      pubkey: REMOTE_AGENT,
+      ownerPubkey: VIEWER,
+    }),
+  ];
+
+  const [teamCandidate] = buildTeamMentionCandidates(
+    [team("team-1", ["planner"])],
+    [remotePersona("planner", "Planner")],
+    candidates,
+    new Set(["planner"]),
+    VIEWER,
+  );
+
+  assert.deepEqual(teamCandidate.teamMembers, [
+    {
+      displayName: "Planner",
+      kind: "identity",
+      personaId: "planner",
+      pubkey: REMOTE_AGENT,
+    },
+  ]);
+});
+
+test("an owned instance outside this channel drops the team", () => {
+  // Pins the owned-instance half on its own: this definition carries no
+  // `remoteOrigin` marker, so only that set can refuse the mint.
+  const teamCandidates = buildTeamMentionCandidates(
+    [team("team-1", ["planner"])],
+    [persona("planner", "Planner")],
+    [],
+    new Set(["planner"]),
+    VIEWER,
+  );
+
+  assert.deepEqual(
+    teamCandidates,
+    [],
+    "better to omit the team than to mint a duplicate on send",
+  );
+});
+
+test("a locally authored definition whose only instance is elsewhere drops the team", () => {
+  // No `remoteOrigin` marker here — the definition was authored on this
+  // device — so only the owned-instance check prevents a duplicate mint.
+  // Production always passes the standalone launcher candidate for such a
+  // definition (it is only filtered out for `remoteOrigin` ones), and that
+  // launcher matches by definition id, so the check has to survive it.
+  const launcher = {
+    kind: "persona",
+    personaId: "planner",
+    displayName: "Planner",
+    isAgent: true,
+    isMember: false,
+  };
+
+  const teamCandidates = buildTeamMentionCandidates(
+    [team("team-1", ["planner"])],
+    [persona("planner", "Planner")],
+    [launcher],
+    new Set(["planner"]),
+    VIEWER,
+  );
+
+  assert.deepEqual(
+    teamCandidates,
+    [],
+    "the launcher candidate must not smuggle the definition past the check",
+  );
+});
+
+test("a synced definition drops the team even without an owned-instance record", () => {
+  // Pins `remoteOrigin` on its own: the owned-instance set is empty here, so
+  // removing either half of the check fails a different test.
+  const teamCandidates = buildTeamMentionCandidates(
+    [team("team-1", ["planner"])],
+    [remotePersona("planner", "Planner")],
+    [],
+    new Set(),
+    VIEWER,
+  );
+
+  assert.deepEqual(teamCandidates, []);
+});
+
+test("a definition with no instance anywhere still offers a persona member", () => {
+  const [teamCandidate] = buildTeamMentionCandidates(
+    [team("team-1", ["planner"])],
+    [persona("planner", "Planner")],
+    [],
+    new Set(),
+    VIEWER,
+  );
+
+  assert.deepEqual(teamCandidate.teamMembers, [
+    { displayName: "Planner", kind: "persona", personaId: "planner" },
+  ]);
+});
+
+test("another owner's identity is never adopted as a team member", () => {
+  const candidates = [
+    identity("builtin:fizz", "Fizz", {
+      pubkey: REMOTE_AGENT,
+      ownerPubkey: STRANGER,
+    }),
+  ];
+
+  const teamCandidates = buildTeamMentionCandidates(
+    [team("team-1", ["builtin:fizz"])],
+    [remotePersona("builtin:fizz", "Fizz")],
+    candidates,
+    new Set(["builtin:fizz"]),
+    VIEWER,
+  );
+
+  assert.deepEqual(
+    teamCandidates,
+    [],
+    "the stranger's agent must not stand in for our definition",
+  );
+});

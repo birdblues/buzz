@@ -49,6 +49,8 @@
 	<true/>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Buzz uses Face ID to confirm sensitive identity transfers.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Buzz uses your local network to connect to relays hosted on devices near you, such as during development. Remote messaging does not require this access.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Buzz uses the camera to take profile photos and animated avatars, attach photos to messages, and scan QR codes for device pairing.</string>
 	<key>NSMicrophoneUsageDescription</key>

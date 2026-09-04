@@ -263,8 +263,10 @@ class _MarkdownEditingController extends TextEditingController {
 
     final escapedNames = _agentMentionNames.toList()
       ..sort((a, b) => b.length.compareTo(a.length));
+    // `(` is a valid prefix so team-expanded mentions — `TeamName(@a @b)` —
+    // render their first member as a chip.
     final expression = RegExp(
-      r'(^|\s)@(' +
+      r'(^|[\s(])@(' +
           escapedNames.map(RegExp.escape).join('|') +
           r')(?=\s|[,.!?:;)\]}*_]|$)',
       caseSensitive: false,

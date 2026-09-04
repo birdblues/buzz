@@ -7,7 +7,11 @@ import type { QueuedMediaAttachment } from "@/features/messages/lib/backgroundMe
 import type { PreparedBackgroundLinkPreviews } from "@/features/messages/lib/linkPreviewPreparationStore";
 import type { DraftMentionRef } from "@/features/messages/lib/useDrafts";
 import { normalizePubkey } from "@/shared/lib/pubkey";
-import { MENTION_REFERENCE_TAG } from "@/shared/lib/resolveMentionNames";
+import {
+  AGENT_ADDRESS_MENTION_MARKER,
+  MAX_MENTION_DISPLAY_NAME_CHARS,
+  MENTION_REFERENCE_TAG,
+} from "@/shared/lib/resolveMentionNames";
 
 export { MENTION_REFERENCE_TAG };
 
@@ -115,6 +119,43 @@ export async function resolvePreviewTags(
   );
 }
 
+/**
+ * `["mention", pubkey, displayName]` tags recording the name each mention was
+ * matched by at send time. Profiles only expose current aliases, so a later
+ * rename would stop the body's `@old-name` from resolving and the chip would
+ * degrade to plain text; the send-time name keeps historical mentions
+ * rendering (see `resolveMentionProps`). One tag per pubkey — the first
+ * occurrence's name wins, matching the resolver's first-alias-wins map.
+ *
+ * Names the backend validator would reject (empty, over the length cap,
+ * control characters) and the reserved `agent-address` provenance marker are
+ * skipped rather than truncated — a missing name tag only costs rename
+ * resilience, while an invalid one would fail the whole send.
+ */
+export function buildMentionNameTags(
+  refs: readonly DraftMentionRef[],
+): string[][] {
+  const seen = new Set<string>();
+  const tags: string[][] = [];
+  for (const ref of refs) {
+    const name = ref.displayName.trim();
+    const pubkey = normalizePubkey(ref.pubkey);
+    if (!name || !pubkey || seen.has(pubkey)) continue;
+    if (
+      name === AGENT_ADDRESS_MENTION_MARKER ||
+      [...name].length > MAX_MENTION_DISPLAY_NAME_CHARS ||
+      // Cc only — matches the backend's `char::is_control` (Cf format chars
+      // like the emoji ZWJ are legitimate in names).
+      /\p{Cc}/u.test(name)
+    ) {
+      continue;
+    }
+    seen.add(pubkey);
+    tags.push([MENTION_REFERENCE_TAG, pubkey, name]);
+  }
+  return tags;
+}
+
 export function mergeOutgoingTagsWithReferenceMentions(
   outgoingTags: string[][] | undefined,
   pubkeys: Iterable<string>,
@@ -169,4 +210,29 @@ export function isManagedAgentRunning(agent: ManagedAgent) {
 
 export function isProviderBackedAgent(agent: ManagedAgent) {
   return agent.backend.type === "provider";
+}
+
+/**
+ * Pubkeys the relay reports as live, so the mention flow can skip starting a
+ * local harness for them.
+ *
+ * Mirrors the backend `presence_start_decision` exactly: `online` and `away`
+ * both count as alive (the harness only ever publishes `online`/`offline`, so
+ * `away` means some other authenticated session holds that identity), and a
+ * missing entry means "unknown" and must NOT suppress a start.
+ *
+ * Keeping this in step with the backend matters: a mismatch just costs a
+ * redundant round trip, but inverting it would either resurrect the duplicate
+ * or stop agents starting at all.
+ */
+export function pubkeysLiveElsewhere(
+  presence: Record<string, "online" | "away" | "offline">,
+): Set<string> {
+  const live = new Set<string>();
+  for (const [pubkey, status] of Object.entries(presence)) {
+    if (status === "online" || status === "away") {
+      live.add(normalizePubkey(pubkey));
+    }
+  }
+  return live;
 }

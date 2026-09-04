@@ -16,6 +16,7 @@ import type {
   GetHomeFeedInput,
   HomeFeedResponse,
   ManagedAgent,
+  StartOutcome,
   ManagedAgentBackend,
   RelayAgent,
   RelayMember,
@@ -109,9 +110,11 @@ type RawRelayAgent = {
   status: RelayAgent["status"];
   respond_to?: RelayAgent["respondTo"];
   respond_to_allowlist?: string[];
+  persona_id?: string | null;
 };
 import type { RestartDiffEntry as RawRestartDiffEntry } from "./restartDiff";
 export type RawManagedAgent = {
+  start_outcome?: StartOutcome | null;
   pubkey: string;
   name: string;
   persona_id: string | null;
@@ -622,11 +625,13 @@ function fromRawRelayAgent(agent: RawRelayAgent): RelayAgent {
     status: agent.status,
     respondTo: agent.respond_to ?? null,
     respondToAllowlist: agent.respond_to_allowlist ?? [],
+    personaId: agent.persona_id ?? null,
   };
 }
 
 export function fromRawManagedAgent(agent: RawManagedAgent): ManagedAgent {
   return {
+    startOutcome: agent.start_outcome ?? null,
     pubkey: agent.pubkey,
     name: agent.name,
     personaId: agent.persona_id,

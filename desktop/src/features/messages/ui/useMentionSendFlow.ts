@@ -34,6 +34,7 @@ import {
   enqueueAgentWake,
   formatMessageSendError,
   getErrorMessage,
+  buildMentionNameTags,
   mergeMentionRecipients,
   MENTION_REFERENCE_TAG,
   mergeOutgoingTagsWithReferenceMentions,
@@ -723,9 +724,11 @@ export function useMentionSendFlow({
           explicitMentionPubkeys,
           addressedAgentPubkeys,
         );
+        const savedMentionRefs = mentions.getDraftMentionRefs(trimmed);
         const outgoingTags = [
           ...buildCustomEmojiTags(trimmed, customEmoji),
           ...linkPreviewTags,
+          ...buildMentionNameTags(savedMentionRefs),
         ];
         const nonMemberPubkeys =
           channelType === null ||
@@ -749,7 +752,6 @@ export function useMentionSendFlow({
             );
           } catch {}
         }
-        const savedMentionRefs = mentions.getDraftMentionRefs(trimmed);
         const pendingDraft: PendingNonMemberMentionSend = {
           addressedAgentPubkeys: uniqueNormalizedPubkeys(addressedAgentPubkeys),
           inlineAgentMentionPubkeys: uniqueNormalizedPubkeys(
@@ -857,11 +859,26 @@ export function useMentionSendFlow({
       const nonMemberPubkeys = [...originalNonMemberPubkeys].filter(
         admittedMentionPubkeys.has.bind(admittedMentionPubkeys),
       );
-      const outgoingTags = (pendingNonMemberSend.outgoingTags ?? []).filter(
-        (tag) =>
-          tag[0] !== MENTION_REFERENCE_TAG ||
-          !originalNonMemberPubkeys.has(normalizePubkey(tag[1] ?? "")),
-      );
+      const outgoingTags = [
+        ...(pendingNonMemberSend.outgoingTags ?? []).filter(
+          (tag) =>
+            tag[0] !== MENTION_REFERENCE_TAG ||
+            !originalNonMemberPubkeys.has(normalizePubkey(tag[1] ?? "")),
+        ),
+        // The filter above drops every mention tag for the invited pubkeys —
+        // including the send-time NAME tags. Re-emit those for the pubkeys
+        // that were actually admitted (now members), so an invited mention
+        // keeps rendering after a later rename like any other member mention.
+        ...buildMentionNameTags(
+          pendingNonMemberSend.savedMentionRefs.filter((ref) => {
+            const pubkey = normalizePubkey(ref.pubkey);
+            return (
+              originalNonMemberPubkeys.has(pubkey) &&
+              admittedMentionPubkeys.has(pubkey)
+            );
+          }),
+        ),
+      ];
       const managedAgentsByPubkey = await getManagedAgentsByPubkey();
       if (!isMountedRef.current) return;
       const peoplePubkeys: string[] = [];

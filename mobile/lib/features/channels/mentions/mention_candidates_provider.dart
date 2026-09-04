@@ -8,6 +8,7 @@ import '../../../shared/profile/user_profile.dart';
 import '../channel.dart';
 import '../channel_management_provider.dart';
 import '../channels_provider.dart';
+import 'agent_teams_provider.dart';
 import 'mention_candidates.dart';
 import 'mention_ranking.dart';
 
@@ -66,8 +67,9 @@ UserProfile _profileFromEvent(NostrEvent event) {
 }
 
 /// Ranked mention candidates for a channel + query. Channel members first,
-/// then non-member relay agents the user can actually reach, then global
-/// search results; ordering matches desktop's `rankMentionCandidates`.
+/// then the owner's agent teams, then non-member relay agents the user can
+/// actually reach, then global search results; ordering matches desktop's
+/// `rankMentionCandidates`.
 final mentionCandidatesProvider = Provider.family
     .autoDispose<List<MentionCandidate>, ({String channelId, String query})>((
       ref,
@@ -96,6 +98,9 @@ final mentionCandidatesProvider = Provider.family
       final searchResults =
           ref.watch(mentionUserSearchProvider(args.query)).asData?.value ??
           const <UserProfile>[];
+      final agentTeams =
+          ref.watch(ownedAgentTeamsProvider).asData?.value ??
+          const OwnedAgentTeams();
 
       final sharedChannelIds = {
         for (final channel in channels)
@@ -109,6 +114,7 @@ final mentionCandidatesProvider = Provider.family
         userCache: userCache,
         ownerByAgentPubkey: owners,
         searchResults: searchResults,
+        agentTeams: agentTeams,
         currentPubkey: currentPubkey,
       );
 

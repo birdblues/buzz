@@ -86,8 +86,15 @@ export function AddAgentDialog({
         ? agent.status !== "running"
         : agent.status !== "deployed";
       if (needsStart && isLocal) {
-        await invoke("start_managed_agent", { pubkey: agent.pubkey });
-        startedForAdd = true;
+        // Roll back only a child THIS call spawned. `alreadyLocal` means the
+        // snapshot was stale and some other flow owns the running process —
+        // stopping it on add-failure would kill work we didn't start.
+        // `runningElsewhere` spawned nothing here either.
+        const started = await invoke<{ start_outcome?: string }>(
+          "start_managed_agent",
+          { pubkey: agent.pubkey },
+        );
+        startedForAdd = started?.start_outcome === "startedLocal";
       }
       const result = await onAdd(agent.pubkey);
       if (needsStart && !isLocal) {

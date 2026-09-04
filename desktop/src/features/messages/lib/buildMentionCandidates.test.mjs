@@ -110,6 +110,27 @@ test("active personas join unless a managed agent already carries them", () => {
   );
 });
 
+test("remote-origin personas never offer a launcher candidate", () => {
+  // A definition synced from another device: selecting a launcher would mint
+  // a NEW local identity while the real agent already answers elsewhere.
+  const activePersonas = [
+    { id: "planner", displayName: "Planner", avatarUrl: null, isActive: true },
+    {
+      id: "remote",
+      displayName: "Remote",
+      avatarUrl: null,
+      isActive: true,
+      remoteOrigin: true,
+    },
+  ];
+
+  const candidates = buildMentionCandidates(input({ activePersonas }));
+  assert.deepEqual(
+    candidates.map((candidate) => candidate.personaId),
+    ["planner"],
+  );
+});
+
 test("global search results join only while global search is enabled", () => {
   const userSearchResults = [
     {
@@ -168,3 +189,87 @@ for (const locallyManaged of [true, false]) {
     assert.equal(Boolean(candidate.isManagedAgent), locallyManaged);
   });
 }
+
+// ── definition link from the relay directory ────────────────────────────────
+//
+// An agent that runs on another of the owner's devices is known here only
+// through the relay directory. Its kind:30177 projection carries the
+// definition id, and that link is what lets a team mention address the
+// running instance instead of minting a duplicate one locally.
+
+const VIEWER_PUBKEY = "e".repeat(64);
+const STRANGER_PUBKEY = "f".repeat(64);
+
+test("an owned relay agent contributes its definition link", () => {
+  const candidates = buildMentionCandidates(
+    input({
+      currentPubkey: VIEWER_PUBKEY,
+      mentionableAgentPubkeys: new Set([AGENT_PUBKEY]),
+      relayAgents: [
+        {
+          pubkey: AGENT_PUBKEY,
+          name: "Scout",
+          ownerPubkey: VIEWER_PUBKEY,
+          personaId: "persona-1",
+          status: "online",
+          channelIds: [],
+        },
+      ],
+    }),
+  );
+
+  const scout = candidates.find(
+    (candidate) => candidate.pubkey === AGENT_PUBKEY,
+  );
+  assert.equal(scout?.personaId, "persona-1");
+});
+
+test("another owner's relay agent never contributes a definition link", () => {
+  // Builtin definition ids are identical across owners, so trusting this link
+  // unowned would let a stranger's agent stand in for one of our team members.
+  const candidates = buildMentionCandidates(
+    input({
+      currentPubkey: VIEWER_PUBKEY,
+      mentionableAgentPubkeys: new Set([AGENT_PUBKEY]),
+      relayAgents: [
+        {
+          pubkey: AGENT_PUBKEY,
+          name: "Stranger's Fizz",
+          ownerPubkey: STRANGER_PUBKEY,
+          personaId: "builtin:fizz",
+          status: "online",
+          channelIds: [],
+        },
+      ],
+    }),
+  );
+
+  const stranger = candidates.find(
+    (candidate) => candidate.pubkey === AGENT_PUBKEY,
+  );
+  assert.equal(stranger?.personaId, undefined);
+});
+
+test("a definition link needs a known viewer to be trusted", () => {
+  const candidates = buildMentionCandidates(
+    input({
+      currentPubkey: null,
+      mentionableAgentPubkeys: new Set([AGENT_PUBKEY]),
+      relayAgents: [
+        {
+          pubkey: AGENT_PUBKEY,
+          name: "Scout",
+          ownerPubkey: VIEWER_PUBKEY,
+          personaId: "persona-1",
+          status: "online",
+          channelIds: [],
+        },
+      ],
+    }),
+  );
+
+  const scout = candidates.find(
+    (candidate) => candidate.pubkey === AGENT_PUBKEY,
+  );
+  assert.equal(scout?.personaId, undefined);
+});

@@ -49,6 +49,7 @@ import {
   startManagedAgent,
   stopManagedAgent,
 } from "@/shared/api/tauriManagedAgents";
+import type { StartIntent } from "@/shared/api/tauriManagedAgents";
 import { bootstrapManagedAgentRuntimePairs } from "@/features/agents/managedAgentRuntimeHooks";
 import {
   acpRuntimesQueryKey,
@@ -595,11 +596,14 @@ export function useStartManagedAgentMutation() {
             expectedRelayUrl?: string;
             expectedSignerPubkey?: string;
             replayFloorUnix?: number;
+            /** Why the start was requested; omitted means "implicit". */
+            intent?: StartIntent;
           },
     ) =>
       typeof input === "string"
         ? startManagedAgent(input)
         : startManagedAgent(input.pubkey, {
+            intent: input.intent,
             expectedRelayUrl: input.expectedRelayUrl,
             expectedSignerPubkey: input.expectedSignerPubkey,
             replayFloorUnix: input.replayFloorUnix,

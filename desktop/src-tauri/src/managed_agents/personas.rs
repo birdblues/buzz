@@ -132,6 +132,7 @@ fn built_in_persona_records(now: &str) -> Vec<AgentDefinition> {
             name_pool: persona.name_pool.iter().map(|s| s.to_string()).collect(),
             is_builtin: true,
             is_active: persona.default_active,
+            remote_origin: false,
             shared: false,
             source_team: None,
             source_team_persona_slug: None,
@@ -269,6 +270,34 @@ pub fn ensure_persona_is_active(
 
     if !persona.is_active {
         return Err(format!("{} is not in My Agents.", persona.display_name));
+    }
+
+    Ok(())
+}
+
+/// Refuse to mint a new local identity from a definition that first reached
+/// this device through sync. The agent it describes already answers from the
+/// device that created it — a second identity here would answer every mention
+/// twice (the original dual-machine duplicate-reply bug). This is the single
+/// boundary every creation surface converges on (Agents card, profile panel,
+/// team deploy, channel add, project create, channel template, team-mention
+/// auto-provision), so the refusal cannot be bypassed by a UI path we forgot.
+/// Duplicating the persona creates a NEW local definition and is the
+/// sanctioned way to run a copy on this device.
+pub fn ensure_persona_not_remote_origin(
+    personas: &[AgentDefinition],
+    persona_id: &str,
+) -> Result<(), String> {
+    let persona = personas
+        .iter()
+        .find(|candidate| candidate.id == persona_id)
+        .ok_or_else(|| format!("agent {persona_id} not found"))?;
+
+    if persona.remote_origin {
+        return Err(format!(
+            "{} was created on another device and already runs there. Duplicate it to run a copy on this device.",
+            persona.display_name
+        ));
     }
 
     Ok(())

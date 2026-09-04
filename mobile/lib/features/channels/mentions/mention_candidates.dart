@@ -1,6 +1,7 @@
 import '../../../shared/mentions/agent_identity_provider.dart';
 import '../../../shared/profile/user_profile.dart';
 import '../channel_management_provider.dart';
+import 'agent_teams_provider.dart';
 import 'mention_ranking.dart';
 
 /// Whether a non-member relay agent should be mentionable by the current
@@ -39,11 +40,12 @@ String? formatOwnerLabel(
 }
 
 /// Assemble the full mention candidate list: channel members first-class,
-/// then eligible non-member relay agents, then global user-search results.
-/// Mirrors desktop's `useMentions` candidate assembly (minus personas and
-/// managed agents, which live in the desktop app's local store; the
-/// owner-check on search results below covers their mention-eligibility
-/// semantics).
+/// then eligible non-member relay agents, then global user-search results,
+/// then the owner's agent teams (resolved from relay projections — see
+/// [buildTeamMentionCandidates]). Mirrors desktop's `useMentions` candidate
+/// assembly, minus standalone personas, which live in the desktop app's
+/// local store; the owner-check on search results below covers their
+/// mention-eligibility semantics.
 List<MentionCandidate> buildMentionCandidates({
   required List<ChannelMember> members,
   required List<AgentDirectoryEntry> relayAgents,
@@ -51,6 +53,7 @@ List<MentionCandidate> buildMentionCandidates({
   required Map<String, UserProfile> userCache,
   required Map<String, String> ownerByAgentPubkey,
   List<UserProfile> searchResults = const [],
+  OwnedAgentTeams agentTeams = const OwnedAgentTeams(),
   String? currentPubkey,
 }) {
   final candidates = <MentionCandidate>[];
@@ -141,5 +144,83 @@ List<MentionCandidate> buildMentionCandidates({
     );
   }
 
+  candidates.addAll(buildTeamMentionCandidates(agentTeams, candidates));
+
   return candidates;
+}
+
+/// Expand owned agent teams into mention candidates. Mirrors desktop's
+/// `buildTeamMentionCandidates`: a team is offered only when EVERY persona
+/// member resolves to at least one owned agent pubkey (mobile cannot spawn
+/// agents, so a persona with no managed-agent record means the team mention
+/// could not reach its whole roster) and member labels are collision-free
+/// (each `@label` token must map back to exactly one pubkey at send time).
+///
+/// A member that is not independently mentionable in this channel context
+/// falls back to a candidate synthesized from its kind:30177 record — the
+/// send path auto-adds mentioned non-member agents, so the mention still
+/// reaches it.
+List<MentionCandidate> buildTeamMentionCandidates(
+  OwnedAgentTeams agentTeams,
+  List<MentionCandidate> candidates,
+) {
+  if (agentTeams.teams.isEmpty) return const [];
+
+  final byPubkey = <String, MentionCandidate>{
+    for (final candidate in candidates)
+      if (candidate.isAgent) candidate.pubkey.toLowerCase(): candidate,
+  };
+
+  final teamCandidates = <MentionCandidate>[];
+  for (final team in agentTeams.teams) {
+    final personaIds = team.personaIds;
+    if (personaIds == null || personaIds.isEmpty) continue;
+
+    final teamMembers = <MentionCandidate>[];
+    final memberPubkeys = <String>{};
+    var resolvable = true;
+    for (final personaId in personaIds) {
+      final pubkeys = agentTeams.agentPubkeysByPersonaId[personaId] ?? const [];
+      final resolved = <MentionCandidate>[];
+      for (final rawPubkey in pubkeys) {
+        final pubkey = rawPubkey.toLowerCase();
+        final known = byPubkey[pubkey];
+        if (known != null) {
+          resolved.add(known);
+          continue;
+        }
+        final name = agentTeams.agentNamesByPubkey[pubkey];
+        if (name != null) {
+          resolved.add(
+            MentionCandidate(pubkey: pubkey, displayName: name, isAgent: true),
+          );
+        }
+      }
+      if (resolved.isEmpty) {
+        resolvable = false;
+        break;
+      }
+      for (final member in resolved) {
+        if (memberPubkeys.add(member.pubkey.toLowerCase())) {
+          teamMembers.add(member);
+        }
+      }
+    }
+    if (!resolvable || teamMembers.isEmpty) continue;
+
+    final labels = {
+      for (final member in teamMembers) member.label.toLowerCase(),
+    };
+    if (labels.length != teamMembers.length) continue;
+
+    teamCandidates.add(
+      MentionCandidate(
+        pubkey: '',
+        displayName: team.name,
+        isAgent: true,
+        teamMembers: teamMembers,
+      ),
+    );
+  }
+  return teamCandidates;
 }

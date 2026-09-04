@@ -79,6 +79,7 @@ function publicationToPersona(
     namePool: publication.agent.namePool,
     isBuiltIn: false,
     isActive: localPersona?.isActive ?? false,
+    remoteOrigin: localPersona?.remoteOrigin ?? false,
     shared: true,
     sourceTeam: null,
     envVars: {},
