@@ -90,6 +90,7 @@ class WideShellState {
     this.aux,
     this.mainSession = 0,
     this.auxSession = 0,
+    this.auxFocused = false,
   });
 
   /// What the main pane shows.
@@ -114,6 +115,10 @@ class WideShellState {
   /// Bumped whenever the auxiliary pane must be remounted.
   final int auxSession;
 
+  /// Whether the auxiliary pane takes the whole content area, hiding the main
+  /// pane, instead of sharing the row with it. Sticky across threads.
+  final bool auxFocused;
+
   /// Id of [selectedChannel].
   String? get selectedChannelId => selectedChannel?.id;
 
@@ -133,6 +138,7 @@ class WideShellState {
     WideAuxContent? Function()? aux,
     int? mainSession,
     int? auxSession,
+    bool? auxFocused,
   }) {
     return WideShellState(
       surface: surface ?? this.surface,
@@ -148,6 +154,7 @@ class WideShellState {
       aux: aux == null ? this.aux : aux(),
       mainSession: mainSession ?? this.mainSession,
       auxSession: auxSession ?? this.auxSession,
+      auxFocused: auxFocused ?? this.auxFocused,
     );
   }
 }
@@ -258,6 +265,11 @@ class WideShellNotifier extends Notifier<WideShellState> {
       aux: () => content,
       auxSession: state.auxSession + 1,
     );
+  }
+
+  /// Toggles whether the auxiliary pane fills the content area.
+  void toggleAuxFocus() {
+    state = state.copyWith(auxFocused: !state.auxFocused);
   }
 
   /// Closes the auxiliary pane.

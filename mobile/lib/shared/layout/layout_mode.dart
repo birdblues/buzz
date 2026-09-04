@@ -22,8 +22,31 @@ const double kWideLayoutMinShortestSide = 600;
 /// Width of the wide-layout sidebar column when expanded.
 const double kWideSidebarWidth = 280;
 
-/// Width of the wide-layout auxiliary (thread) pane.
+/// Minimum width of the wide-layout auxiliary (thread) pane.
 const double kWideAuxPaneWidth = 340;
+
+/// Maximum width of the auxiliary pane when it shares the row with the main
+/// pane (desktop caps its thread panel the same way).
+const double kWideAuxPaneMaxWidth = 720;
+
+/// Share of the content area (window minus sidebar) the auxiliary pane takes
+/// when it is not focused.
+const double kWideAuxPaneFraction = 0.42;
+
+/// Strip of the main pane left visible beside a focused auxiliary pane, so
+/// the channel it belongs to stays in view (desktop's focus thread drawer).
+const double kWideAuxFocusGutter = 112;
+
+/// Width of the auxiliary pane for a content area [contentWidth] wide: a
+/// share of the row, clamped so the main pane keeps its minimum width.
+double wideAuxPaneWidthFor(double contentWidth) {
+  final preferred = (contentWidth * kWideAuxPaneFraction).clamp(
+    kWideAuxPaneWidth,
+    kWideAuxPaneMaxWidth,
+  );
+  final maxForMain = contentWidth - kWideMainPaneMinWidth;
+  return preferred > maxForMain ? maxForMain.clamp(0, preferred) : preferred;
+}
 
 /// Smallest width the wide-layout main pane may be given.
 const double kWideMainPaneMinWidth = 360;

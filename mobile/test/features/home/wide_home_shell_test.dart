@@ -10,8 +10,10 @@ import 'package:buzz/features/channels/channel_messages_provider.dart';
 import 'package:buzz/features/channels/channel_mutes/channel_mutes_provider.dart';
 import 'package:buzz/features/channels/channel_stars/channel_stars_provider.dart';
 import 'package:buzz/features/channels/channel_typing_provider.dart';
+import 'package:buzz/features/channels/timeline_message.dart';
 import 'package:buzz/features/channels/channels_page.dart';
 import 'package:buzz/features/channels/channels_provider.dart';
+import 'package:buzz/features/channels/thread_detail_page.dart';
 import 'package:buzz/features/channels/deep_link_dispatcher.dart';
 import 'package:buzz/features/channels/mobile_huddle_controller.dart';
 import 'package:buzz/features/channels/wide_shell/wide_shell_provider.dart';
@@ -283,6 +285,7 @@ void _useIpadWindow(WidgetTester tester) {
 }
 
 void main() {
+  _focusTests();
   testWidgets('a phone window renders the tabbed home', (tester) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
@@ -454,5 +457,70 @@ void main() {
 
     expect(container.read(wideShellProvider).initialMessageId, 'm2');
     expect(container.read(wideShellProvider).mainPaneKey, isNot(firstKey));
+  });
+}
+
+const _threadHead = TimelineMessage(
+  id: 'root-1',
+  pubkey: 'aabb',
+  createdAt: 1000,
+  content: 'root',
+  tags: [],
+  isSystem: false,
+  edited: false,
+  systemEvent: null,
+  mentionPubkeys: [],
+);
+
+void _focusTests() {
+  testWidgets('the thread pane shares the row, then focuses as a drawer '
+      'over the channel', (tester) async {
+    _useIpadWindow(tester);
+    await tester.pumpWidget(await _buildApp());
+    await tester.pumpAndSettle();
+    final shell = tester.element(find.byType(WideHomeShell));
+    final container = ProviderScope.containerOf(shell, listen: false);
+    final notifier = container.read(wideShellProvider.notifier);
+
+    notifier.selectChannel(_channels.first);
+    await tester.pumpAndSettle();
+    notifier.openAux(
+      const WideAuxThread(
+        threadHead: _threadHead,
+        allMessages: [_threadHead],
+        channelId: _generalId,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ThreadDetailPage), findsOneWidget);
+    final contentWidth = 1194 - kWideSidebarWidth;
+    final sideWidth = tester.getSize(find.byType(ThreadDetailPage)).width;
+    expect(sideWidth, wideAuxPaneWidthFor(contentWidth));
+    expect(sideWidth, greaterThan(kWideAuxPaneWidth));
+    expect(find.byKey(const ValueKey('wide-aux-focus-scrim')), findsNothing);
+    expect(find.byType(ChannelDetailPage), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('wide-aux-focus')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('wide-aux-focus-scrim')), findsOneWidget);
+    expect(
+      tester.getSize(find.byType(ThreadDetailPage)).width,
+      contentWidth - kWideAuxFocusGutter,
+    );
+    // The channel stays mounted beneath the drawer.
+    expect(find.byType(ChannelDetailPage), findsOneWidget);
+    expect(container.read(wideShellProvider).auxFocused, isTrue);
+
+    // Tapping the visible strip of the channel returns to the side panel.
+    await tester.tapAt(const Offset(kWideSidebarWidth + 20, 400));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('wide-aux-focus-scrim')), findsNothing);
+    expect(tester.getSize(find.byType(ThreadDetailPage)).width, sideWidth);
+
+    await tester.tap(find.byKey(const ValueKey('wide-aux-close')));
+    await tester.pumpAndSettle();
+    expect(find.byType(ThreadDetailPage), findsNothing);
   });
 }

@@ -163,6 +163,24 @@ void main() {
     expect(state().auxPaneKey, isNot(key));
   });
 
+  test('focus is a sticky toggle that survives closing the pane', () {
+    notifier().selectChannel(_channel('a'));
+    expect(state().auxFocused, isFalse);
+    notifier().toggleAuxFocus();
+    expect(state().auxFocused, isTrue);
+    notifier().openAux(
+      WideAuxThread(
+        threadHead: _message('m1'),
+        allMessages: [_message('m1')],
+        channelId: 'a',
+      ),
+    );
+    notifier().closeAux();
+    expect(state().auxFocused, isTrue);
+    notifier().toggleAuxFocus();
+    expect(state().auxFocused, isFalse);
+  });
+
   test('clears the selection when the channel leaves the loaded list', () {
     notifier().selectChannel(_channel('a'));
     container.listen(wideShellProvider, (_, _) {});

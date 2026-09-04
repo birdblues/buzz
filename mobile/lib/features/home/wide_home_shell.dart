@@ -101,32 +101,85 @@ class WideHomeShell extends HookConsumerWidget {
       },
       child: ColoredBox(
         color: context.colors.surface,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _SidebarColumn(
-              settingsPageBuilder: settingsPageBuilder,
-              hasUnreadInbox: hasUnreadInbox,
-            ),
-            Expanded(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(
-                  minWidth: kWideMainPaneMinWidth,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final sidebarWidth = ref.watch(wideSidebarCollapsedProvider)
+                ? 0.0
+                : kWideSidebarWidth;
+            final contentWidth = constraints.maxWidth - sidebarWidth;
+            final auxFocused = auxContent != null && shell.auxFocused;
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _SidebarColumn(
+                  settingsPageBuilder: settingsPageBuilder,
+                  hasUnreadInbox: hasUnreadInbox,
                 ),
-                child: _MainPane(
-                  navigatorKey: mainNavigatorKey,
-                  depth: mainDepth,
+                Expanded(
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Expanded(
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(
+                                minWidth: kWideMainPaneMinWidth,
+                              ),
+                              child: _MainPane(
+                                navigatorKey: mainNavigatorKey,
+                                depth: mainDepth,
+                              ),
+                            ),
+                          ),
+                          if (auxContent != null && !auxFocused)
+                            _AuxPane(
+                              content: auxContent,
+                              paneKey: shell.auxPaneKey!,
+                              navigatorKey: auxNavigatorKey,
+                              depth: auxDepth,
+                              width: wideAuxPaneWidthFor(contentWidth),
+                              focused: false,
+                            ),
+                        ],
+                      ),
+                      // Focus mode: the thread slides over the channel as a
+                      // wide drawer, leaving a strip of the timeline visible
+                      // under a scrim (desktop's focus thread drawer).
+                      if (auxContent != null && auxFocused) ...[
+                        Positioned.fill(
+                          child: GestureDetector(
+                            key: const ValueKey('wide-aux-focus-scrim'),
+                            behavior: HitTestBehavior.opaque,
+                            onTap: notifier.toggleAuxFocus,
+                            child: ColoredBox(
+                              color: context.colors.scrim.withValues(
+                                alpha: 0.32,
+                              ),
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          top: 0,
+                          bottom: 0,
+                          right: 0,
+                          child: _AuxPane(
+                            content: auxContent,
+                            paneKey: shell.auxPaneKey!,
+                            navigatorKey: auxNavigatorKey,
+                            depth: auxDepth,
+                            width: contentWidth - kWideAuxFocusGutter,
+                            focused: true,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
-              ),
-            ),
-            if (auxContent != null)
-              _AuxPane(
-                content: auxContent,
-                paneKey: shell.auxPaneKey!,
-                navigatorKey: auxNavigatorKey,
-                depth: auxDepth,
-              ),
-          ],
+              ],
+            );
+          },
         ),
       ),
     );
