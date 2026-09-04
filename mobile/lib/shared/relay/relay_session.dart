@@ -61,7 +61,26 @@ class _PendingEvent {
   final Completer<NostrEvent> completer;
   final Timer timeout;
 
-  _PendingEvent({required this.completer, required this.timeout});
+  /// The signed frame, kept so a back-pressure refusal can be re-sent.
+  final NostrEvent event;
+
+  /// Acknowledgement budget for each attempt, restarted on a re-send.
+  final Duration timeoutDuration;
+
+  /// Connection this publish belongs to; a reconnect abandons the retry.
+  final int generation;
+
+  /// How many times this event has already been refused for back-pressure.
+  final int attempt;
+
+  _PendingEvent({
+    required this.completer,
+    required this.timeout,
+    required this.event,
+    required this.timeoutDuration,
+    required this.generation,
+    required this.attempt,
+  });
 }
 
 class _BufferedEvent {
@@ -101,6 +120,20 @@ class RelaySessionNotifier extends Notifier<SessionState> {
   static const _maxReconnectDelayMs = 30000;
   static const _eventBatchMs = 16;
   static const _reconnectReplaySkewSeconds = 5;
+
+  /// Automatic re-sends of a publish the relay refused for back-pressure.
+  static const _maxRateLimitedPublishRetries = 1;
+
+  /// Smallest wait before re-sending a refused publish. The relay reports the
+  /// remaining window in whole seconds, so its `retry in 0s` means "under a
+  /// second" rather than "now" — retrying instantly would land in the same
+  /// window that just refused the send.
+  static const _minRateLimitedPublishRetryDelay = Duration(milliseconds: 600);
+
+  /// Longest wait absorbed on the user's behalf. Past this the refusal is a
+  /// real quota exhaustion, not reconnect pacing, and must be surfaced.
+  static const _maxRateLimitedPublishRetryDelay = Duration(seconds: 6);
+
   static const _replayBatchSize = 8;
   static const _replayInterBatchDelay = Duration(milliseconds: 50);
   static const _maxRecentDeliveryKeys = 5000;
@@ -319,7 +352,24 @@ class RelaySessionNotifier extends Notifier<SessionState> {
     }
 
     final completer = Completer<NostrEvent>();
+    _sendPendingEvent(
+      event: event,
+      completer: completer,
+      timeout: timeout,
+      generation: generation,
+      attempt: 0,
+    );
+    return completer.future;
+  }
 
+  /// Sends one publish attempt and arms its acknowledgement timeout.
+  void _sendPendingEvent({
+    required NostrEvent event,
+    required Completer<NostrEvent> completer,
+    required Duration timeout,
+    required int generation,
+    required int attempt,
+  }) {
     final timer = Timer(timeout, () {
       final pending = _pendingEvents.remove(event.id);
       if (pending != null && !pending.completer.isCompleted) {
@@ -334,10 +384,52 @@ class RelaySessionNotifier extends Notifier<SessionState> {
     _pendingEvents[event.id] = _PendingEvent(
       completer: completer,
       timeout: timer,
+      event: event,
+      timeoutDuration: timeout,
+      generation: generation,
+      attempt: attempt,
     );
 
     _socket?.send(['EVENT', event.toJson()]);
-    return completer.future;
+  }
+
+  /// Re-sends a publish the relay refused for back-pressure, at most
+  /// [_maxRateLimitedPublishRetries] times, and reports whether the refusal
+  /// was absorbed.
+  ///
+  /// The relay's websocket burst quota is shared between subscription frames
+  /// and events, so a send that lands in a window a reconnect replay already
+  /// filled is refused even though nothing about the message is wrong. The
+  /// relay's own hint says when the next window opens; failing the user's
+  /// message instead of waiting that out turns relay pacing into a visible
+  /// send error. Only a short wait is absorbed — a hint long enough to mean a
+  /// genuinely exhausted quota still surfaces.
+  bool _retryRateLimitedPublish(_PendingEvent pending, String message) {
+    if (pending.attempt >= _maxRateLimitedPublishRetries) return false;
+    if (!_isActiveConnection(pending.generation) || !_socketConnected) {
+      return false;
+    }
+    final delayMs = max(
+      _rateLimitGate.remainingMs(),
+      _minRateLimitedPublishRetryDelay.inMilliseconds,
+    );
+    if (delayMs > _maxRateLimitedPublishRetryDelay.inMilliseconds) return false;
+
+    _retryTimerFactory(Duration(milliseconds: delayMs), () {
+      if (pending.completer.isCompleted) return;
+      if (!_isActiveConnection(pending.generation) || !_socketConnected) {
+        pending.completer.completeError(Exception(message));
+        return;
+      }
+      _sendPendingEvent(
+        event: pending.event,
+        completer: pending.completer,
+        timeout: pending.timeoutDuration,
+        generation: pending.generation,
+        attempt: pending.attempt + 1,
+      );
+    });
+    return true;
   }
 
   void sendRaw(List<dynamic> payload) {
@@ -836,6 +928,7 @@ class RelaySessionNotifier extends Notifier<SessionState> {
       // without ever backing off.
       if (message.startsWith('rate-limited:')) {
         _rateLimitGate.activate(parseRateLimitRetrySeconds(message));
+        if (_retryRateLimitedPublish(pending, message)) return;
       }
       if (!pending.completer.isCompleted) {
         pending.completer.completeError(

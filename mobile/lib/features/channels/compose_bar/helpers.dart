@@ -417,7 +417,8 @@ void _sendTypingIndicator(
 /// identity change that causes the failure also resets that state on the next
 /// frame, so [messenger] must be resolved before the send's first `await`.
 void _reportSendCancelledByCommunitySwitch(ScaffoldMessengerState? messenger) {
-  messenger?.showSnackBar(
+  showSnackBarIfPresentable(
+    messenger,
     const SnackBar(content: Text('Message not sent: the community changed')),
   );
 }
@@ -617,7 +618,8 @@ class _OutgoingMentions {
     );
     demote(outcome.notAdded);
     if (outcome.errors.isNotEmpty) {
-      messenger?.showSnackBar(
+      showSnackBarIfPresentable(
+        messenger,
         SnackBar(content: Text(outcome.errors.join(' '))),
       );
     }

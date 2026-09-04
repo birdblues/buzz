@@ -286,6 +286,38 @@ void _useIpadWindow(WidgetTester tester) {
 
 void main() {
   _focusTests();
+  testWidgets('a failure is reported once, in the pane that raised it', (
+    tester,
+  ) async {
+    _useIpadWindow(tester);
+    await tester.pumpWidget(await _buildApp());
+    await tester.pumpAndSettle();
+    final shell = tester.element(find.byType(WideHomeShell));
+    final container = ProviderScope.containerOf(shell, listen: false);
+    container.read(wideShellProvider.notifier).selectChannel(_channels.first);
+    await tester.pumpAndSettle();
+
+    // One messenger shows a snackbar in every root Scaffold registered with
+    // it, and the shell's columns are sibling Scaffolds — a shared messenger
+    // reported a single failed send once per visible pane.
+    final paneContext = tester.element(find.byType(ChannelDetailPage));
+    ScaffoldMessenger.of(
+      paneContext,
+    ).showSnackBar(const SnackBar(content: Text('rate-limited: probe')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(find.text('rate-limited: probe'), findsOneWidget);
+    final snackBar = tester.getRect(find.text('rate-limited: probe'));
+    final pane = tester.getRect(find.byType(ChannelDetailPage));
+    expect(
+      snackBar.center.dx,
+      greaterThan(pane.left),
+      reason: 'the report belongs to the pane that raised it',
+    );
+    expect(snackBar.center.dx, lessThan(pane.right));
+  });
+
   testWidgets('a phone window renders the tabbed home', (tester) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;

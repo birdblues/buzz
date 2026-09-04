@@ -75,11 +75,17 @@ class PaneNavigator extends HookWidget {
             headerTrailing: headerTrailing,
             child: HeroControllerScope(
               controller: heroController,
-              child: Navigator(
-                key: navigatorKey,
-                observers: [routeObserver, depthObserver],
-                onGenerateRoute: (_) =>
-                    MaterialPageRoute<void>(builder: (_) => child),
+              // Each pane keeps its own messenger. One messenger shows a
+              // snackbar in every root Scaffold registered with it, and the
+              // shell's columns are sibling Scaffolds — so a single failed
+              // send would otherwise report itself once per visible pane.
+              child: ScaffoldMessenger(
+                child: Navigator(
+                  key: navigatorKey,
+                  observers: [routeObserver, depthObserver],
+                  onGenerateRoute: (_) =>
+                      MaterialPageRoute<void>(builder: (_) => child),
+                ),
               ),
             ),
           ),

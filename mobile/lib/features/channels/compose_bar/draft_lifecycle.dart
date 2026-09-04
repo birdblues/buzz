@@ -56,7 +56,8 @@ Future<void> _sendTextOnlyDraft({
     // The caller runs unawaited, so surface publish failures and restore the
     // sent draft unless the user has already started a new one.
     restoreClearedDraft();
-    messenger?.showSnackBar(
+    showSnackBarIfPresentable(
+      messenger,
       SnackBar(content: Text(_composeSendErrorMessage(error))),
     );
   }
