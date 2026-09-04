@@ -136,6 +136,16 @@ class RelaySessionNotifier extends Notifier<SessionState> {
 
   static const _replayBatchSize = 8;
   static const _replayInterBatchDelay = Duration(milliseconds: 50);
+
+  /// The relay's websocket admission window. Its burst budget is shared by
+  /// subscription frames and events, so a replay that fills the window makes
+  /// the relay refuse the next message the user sends inside it.
+  static const _replayWindow = Duration(seconds: 5);
+
+  /// Replay frames allowed per [_replayWindow]. The relay's default budget is
+  /// 50 (10/sec across the 5-second window); the rest is left for whatever the
+  /// person is doing while their subscriptions come back.
+  static const _replayFramesPerWindow = 40;
   static const _maxRecentDeliveryKeys = 5000;
   static const _backgroundGraceDuration = Duration(seconds: 5);
 
@@ -143,6 +153,8 @@ class RelaySessionNotifier extends Notifier<SessionState> {
   final Map<String, _HistorySubscription> _historySubscriptions = {};
   final Map<String, _LiveSubscription> _liveSubscriptions = {};
   final Map<String, _ClosedRetry> _pendingClosedRetries = {};
+  DateTime? _replayWindowStart;
+  int _replayWindowFrames = 0;
   final Map<String, _PendingEvent> _pendingEvents = {};
   final List<_BufferedEvent> _eventBuffer = [];
   final Set<String> _recentDeliveryKeys = {};
@@ -670,6 +682,26 @@ class RelaySessionNotifier extends Notifier<SessionState> {
     await _sendReplayBatches(entries, generation, pendingClosedRetries: true);
   }
 
+  /// Holds the replay back once it has used its share of the relay's
+  /// admission window, so a reconnect cannot spend the budget the person's
+  /// own next message needs.
+  Future<void> _reserveReplayBudget(int frames) async {
+    final windowStart = _replayWindowStart;
+    if (windowStart == null ||
+        _now().difference(windowStart) >= _replayWindow) {
+      _replayWindowStart = _now();
+      _replayWindowFrames = 0;
+    }
+    if (_replayWindowFrames + frames > _replayFramesPerWindow) {
+      final elapsed = _now().difference(_replayWindowStart!);
+      final remaining = _replayWindow - elapsed;
+      if (remaining > Duration.zero) await _replayDelay(remaining);
+      _replayWindowStart = _now();
+      _replayWindowFrames = 0;
+    }
+    _replayWindowFrames += frames;
+  }
+
   Future<void> _sendReplayBatches(
     List<MapEntry<String, _LiveSubscription>> entries,
     int generation, {
@@ -682,6 +714,8 @@ class RelaySessionNotifier extends Notifier<SessionState> {
         i,
         min(i + _replayBatchSize, entries.length),
       );
+      await _reserveReplayBudget(batch.length);
+      if (!_isActiveConnection(generation)) return;
       for (final entry in batch) {
         if (_liveSubscriptions[entry.key] != entry.value) continue;
         if (pendingClosedRetries) {

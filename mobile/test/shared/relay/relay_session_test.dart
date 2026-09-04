@@ -1192,6 +1192,66 @@ void main() {
     session.debugDispose();
   });
 
+  // The relay shares one admission window between subscription frames and
+  // events, so a replay that spends the whole budget makes the relay refuse
+  // the next message the person sends inside that window.
+  test('replay leaves admission budget for the person using the app', () async {
+    final replayDelays = <Duration>[];
+    final replayDelayCompleters = <Completer<void>>[];
+    var clock = DateTime(2026);
+    final socket = _RecordingRelaySocket();
+    final session = RelaySessionNotifier(
+      now: () => clock,
+      replayDelay: (duration) {
+        replayDelays.add(duration);
+        final completer = Completer<void>();
+        replayDelayCompleters.add(completer);
+        return completer.future;
+      },
+    );
+    session.debugAttachSocketForTest(socket);
+
+    for (var i = 0; i < 56; i++) {
+      final subscribe = session.subscribe(
+        _filterForChannel('channel-$i'),
+        (_) {},
+      );
+      session.debugHandleMessage(['EOSE', 'l-${i + 1}']);
+      await subscribe;
+    }
+    socket.messages.clear();
+
+    final replay = session.debugReplayLiveSubscriptions();
+    await Future<void>.delayed(Duration.zero);
+
+    // Batches keep their 50 ms spacing until the window's share is spent.
+    while (_reqs(socket).length < 40) {
+      expect(replayDelays.last, const Duration(milliseconds: 50));
+      replayDelayCompleters.last.complete();
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(_reqs(socket), hasLength(40));
+
+    // The batch after the share waits for the next admission window instead
+    // of the usual 50 ms, leaving the rest of the budget for the person.
+    expect(replayDelays.last, const Duration(milliseconds: 50));
+    replayDelayCompleters.last.complete();
+    await Future<void>.delayed(Duration.zero);
+    expect(_reqs(socket), hasLength(40));
+    expect(replayDelays.last, const Duration(seconds: 5));
+
+    clock = clock.add(const Duration(seconds: 5));
+    replayDelayCompleters.last.complete();
+    await Future<void>.delayed(Duration.zero);
+    expect(_reqs(socket), hasLength(48));
+
+    replayDelayCompleters.last.complete();
+    await Future<void>.delayed(Duration.zero);
+    expect(_reqs(socket), hasLength(56));
+    await replay;
+    session.debugDispose();
+  });
+
   test('active rate-limit gate does not delay a new live subscribe', () async {
     final gateTimers = <_ManualTimer>[];
     final gate = RelayRateLimitGate(
