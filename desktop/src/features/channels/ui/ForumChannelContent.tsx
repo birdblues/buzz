@@ -9,6 +9,7 @@ import {
   type IdleAuxiliaryHeaderControls,
 } from "@/features/channels/ui/IdleAuxiliaryPanel";
 import { RightAuxiliaryPane } from "@/features/channels/ui/RightAuxiliaryPane";
+import { useCloseAppSandboxWhenLeaving } from "@/features/apps/ui/useCloseAppSandboxWhenLeaving";
 import type {
   ProfilePanelTab,
   ProfilePanelView,
@@ -94,6 +95,9 @@ export function ForumChannelContent({
   targetSearchMessageId,
   targetSearchQuery,
 }: ForumChannelContentProps) {
+  // An app belongs to the post (or list) it was opened from: selecting
+  // another post, going back to the list, or leaving the forum closes it.
+  useCloseAppSandboxWhenLeaving(`${channel.id}\u0000${selectedPostId ?? ""}`);
   return (
     <>
       {header}
@@ -118,19 +122,30 @@ export function ForumChannelContent({
         {idleAuxiliaryPanel && onCloseIdleAuxiliaryPanel ? (
           // An open app takes the auxiliary column, as it overrides an open
           // thread in ChannelPane; the profile panel returns when it closes.
-          <IdleAuxiliaryPanel
+          // Hosted the way ChannelPane's split layout hosts it: the docked
+          // panel pads its body under the overlaid channel header, and its
+          // own title row sits in that header band.
+          <RightAuxiliaryPane
             canResetWidth={canResetPanelWidth}
-            headerControls={idleAuxiliaryHeaderActions}
-            isSinglePanelView={false}
-            onClose={onCloseIdleAuxiliaryPanel}
             onResetWidth={onResetPanelWidth}
             onResizeStart={onPanelResizeStart}
-            title={idleAuxiliaryTitle}
-            useSplitAuxiliaryPane={false}
+            testId="idle-auxiliary-panel"
             widthPx={panelWidthPx}
           >
-            {idleAuxiliaryPanel}
-          </IdleAuxiliaryPanel>
+            <IdleAuxiliaryPanel
+              canResetWidth={canResetPanelWidth}
+              headerControls={idleAuxiliaryHeaderActions}
+              isSinglePanelView={false}
+              onClose={onCloseIdleAuxiliaryPanel}
+              onResetWidth={onResetPanelWidth}
+              onResizeStart={onPanelResizeStart}
+              title={idleAuxiliaryTitle}
+              useSplitAuxiliaryPane
+              widthPx={panelWidthPx}
+            >
+              {idleAuxiliaryPanel}
+            </IdleAuxiliaryPanel>
+          </RightAuxiliaryPane>
         ) : profilePanelPubkey ? (
           <RightAuxiliaryPane
             canResetWidth={canResetPanelWidth}
