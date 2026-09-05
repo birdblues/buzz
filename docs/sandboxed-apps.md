@@ -99,8 +99,11 @@ Relay: `ws://192.168.1.99:3000`, app door `http://192.168.1.99:3001`.
 4. `lib/shared/relay/relay_info.dart`: read NIP-11 `app_content_url`, same
    validation as desktop (bare origin, relay hostname, distinct port).
 5. `lib/shared/relay/media_auth.dart`: `signAppContentAuth(sha256)` — `t=get`,
-   `x`, `expiration` ≤ 600 s, **no `server` tag**. Leave the existing
-   server-scoped signer untouched.
+   `x`, `expiration = now + 300 s`, **no `server` tag**. Leave the existing
+   server-scoped signer untouched. The relay caps `expiration` at `now + 600`
+   with **no clock-skew tolerance**, so minting the full 600 s returns 401
+   whenever the device clock is a second ahead of the relay (seen on a second
+   Mac); 300 s leaves ±300 s headroom.
 6. `AppWebViewPage` (pushed with `CupertinoPageRoute` — slides in from the
    right): `loadRequest(uri, headers: {'Authorization': …})`,
    `javaScriptMode: unrestricted`, **no JavaScript channels**,

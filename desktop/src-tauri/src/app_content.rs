@@ -23,7 +23,12 @@ use crate::app_state::AppState;
 use crate::relay::relay_api_base_url_with_override;
 
 /// Lifetime of one app-content read token. Minted per open, per blob.
-pub(crate) const APP_CONTENT_AUTH_EXPIRY_SECS: u64 = 600;
+/// Token lifetime we mint. The relay caps `expiration` at `now + 600` with no
+/// clock-skew tolerance (`created_at` gets 5 s), so minting exactly 600 s
+/// fails with 401 whenever this machine's clock is even 1 s ahead of the
+/// relay's — observed on a second Mac on the LAN. Half the cap leaves ±300 s
+/// of skew headroom in both directions.
+pub(crate) const APP_CONTENT_AUTH_EXPIRY_SECS: u64 = 300;
 
 /// Largest HTML body the desktop will hand to an iframe. Mirrors the relay's
 /// default `BUZZ_APP_CONTENT_MAX_BYTES`; executable content must stay small.
@@ -277,6 +282,13 @@ pub(crate) fn sandbox_response(body: Vec<u8>) -> http::Response<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn expiry_leaves_skew_headroom_under_relay_cap() {
+        // Relay: buzz_media::auth::APP_CONTENT_AUTH_MAX_AGE_SECS == 600, checked
+        // as `exp <= now + 600` without leeway. Stay well under it.
+        assert!(super::APP_CONTENT_AUTH_EXPIRY_SECS <= 300);
+    }
+
     use super::*;
 
     #[test]
