@@ -45,6 +45,17 @@ export const MODEL_NOT_FOUND_COPY =
 export const CLI_ACP_INTERNAL_ERROR_COPY =
   "The agent's harness reported an internal error. For Codex agents this can mean the configured model isn't supported by your installed codex-acp — check the model in `~/.codex/config.toml` or upgrade the adapter (`brew upgrade codex-acp`).";
 
+/**
+ * The harness could not reach the community relay at startup (anyhow's
+ * `Error: relay connect error: …` line, recovered by the exit classifier).
+ * Prefix-matched, not coded: buzz-acp exits through `main` here, so no
+ * JSON-RPC code exists and inventing one would lie about the seam.
+ */
+export const RELAY_CONNECT_FAILED_COPY =
+  "The agent could not connect to the community relay. Check that the relay is reachable, then start the agent again.";
+
+const RELAY_CONNECT_ERROR_PREFIX = "Error: relay connect error";
+
 const EMBEDDED_CODE_RE = /^Agent reported error \(code (-?\d+)\): /;
 /** Bare form of the standard JSON-RPC -32603 message (after stripping the ACP wrapper prefix). */
 const BARE_INTERNAL_ERROR = "Internal error";
@@ -102,6 +113,10 @@ export function friendlyAgentLastError(
     // A structured code we don't recognize is authoritative — don't let
     // string patterns cross-classify it.
     return { severity: "generic", copy: trimmed };
+  }
+
+  if (trimmed.startsWith(RELAY_CONNECT_ERROR_PREFIX)) {
+    return { severity: "generic", copy: RELAY_CONNECT_FAILED_COPY };
   }
 
   // Legacy string fallback for records written before codes existed.

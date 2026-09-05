@@ -1,8 +1,7 @@
 use super::{
     bestie_assignment::recover_pending_assignment_cleanup, find_managed_agent_mut,
     kill_stale_tracked_processes, load_managed_agents, load_personas, managed_agents_base_dir,
-    save_managed_agents, spawn_agent_child, sync_managed_agent_processes, BackendKind,
-    ManagedAgentProcess,
+    save_managed_agents, spawn_agent_child, BackendKind, ManagedAgentProcess,
 };
 use crate::app_state::AppState;
 use crate::util;
@@ -124,12 +123,14 @@ pub async fn restore_managed_agents_on_launch(
             .managed_agent_processes
             .lock()
             .map_err(|error| error.to_string())?;
-        let (mut changed, _exited) = sync_managed_agent_processes(
+        // Silent: the app is coming up; nothing here is news to the user.
+        super::reaper::reap_managed_agent_runtimes(
+            app,
             &mut records,
             &mut runtimes,
-            &super::current_instance_id(app),
-        );
-        changed |=
+            super::reaper::Notify::Silent,
+        )?;
+        let mut changed =
             kill_stale_tracked_processes(&mut records, &runtimes, &super::current_instance_id(app));
 
         let tracked_pids: Vec<u32> = runtimes
@@ -411,6 +412,7 @@ pub async fn restore_managed_agents_on_launch(
                 record.last_stopped_at = None;
                 record.last_exit_code = None;
                 record.last_error = None;
+                record.last_error_code = None;
                 runtimes.insert(
                     key.clone(),
                     super::ManagedAgentPairRuntime::starting(*process),

@@ -92,6 +92,11 @@ pub struct ManagedAgentRuntimeStatus {
     pub pid: Option<u32>,
     pub error: Option<String>,
     pub log_path: Option<String>,
+    /// Present only on the status emitted when a tracked harness is reaped:
+    /// why it exited, as classified by `exit_verdict`. `error` then carries
+    /// the human-readable cause. Absent on every live-runtime status.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_cause: Option<super::ExitCause>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::managed_agents::{ExitCause, ExitVerdict, HarnessExit};
+
 /// Kill stale agent processes from a previous session whose PID is still alive
 /// but not tracked in the current `runtimes` map. Updates the record fields and
 /// returns `true` if any records were modified.
@@ -51,65 +53,105 @@ pub(crate) fn kill_stale_tracked_processes_with(
     changed
 }
 
-pub fn sync_managed_agent_processes(
+/// One runtime the reaper removed from the map this pass, with the verdict
+/// that was written to its record. Pair-keyed, unlike the record's own
+/// error fields, so callers can act on exactly the pair that died.
+#[derive(Debug, Clone)]
+pub struct ExitedRuntime {
+    pub key: ManagedAgentRuntimeKey,
+    pub verdict: ExitVerdict,
+    /// `try_wait` itself failed: we do not actually know the child is gone.
+    /// The receipt must survive so a later start can find and terminate a
+    /// still-live process instead of spawning a duplicate.
+    pub inspect_failed: bool,
+}
+
+/// Write an exit verdict onto the pubkey-wide record fields.
+pub(crate) fn apply_exit_verdict(record: &mut ManagedAgentRecord, verdict: &ExitVerdict) {
+    let now = now_iso();
+    record.updated_at = now.clone();
+    record.last_stopped_at = Some(now);
+    record.last_exit_code = verdict.exit_code;
+    record.last_error = verdict.message.clone();
+    record.last_error_code = verdict.code;
+}
+
+/// Reap every tracked runtime whose child has exited, recording the verdict
+/// on its record. Returns whether any record changed plus the reaped pairs.
+///
+/// Callers must go through `reaper::reap_managed_agent_runtimes`, which owns
+/// the save → receipt → cache → emit sequence; this function only touches
+/// memory. Restricted to the parent module so nothing else can reap without
+/// those side effects.
+pub(in crate::managed_agents) fn sync_managed_agent_processes(
     records: &mut [ManagedAgentRecord],
     runtimes: &mut HashMap<ManagedAgentRuntimeKey, ManagedAgentPairRuntime>,
-    _instance_id: &str,
-) -> (bool, Vec<String>) {
+) -> (bool, Vec<ExitedRuntime>) {
+    sync_managed_agent_processes_with(
+        records,
+        runtimes,
+        |child| child.try_wait(),
+        |key, log_path, exit| {
+            super::super::exit_verdict::classify_harness_exit_from_log(exit, log_path, &key.pubkey)
+        },
+    )
+}
+
+/// Injectable version of [`sync_managed_agent_processes`]: `try_wait` stands
+/// in for `Child::try_wait` and `classify` for the log-backed classifier.
+pub(crate) fn sync_managed_agent_processes_with(
+    records: &mut [ManagedAgentRecord],
+    runtimes: &mut HashMap<ManagedAgentRuntimeKey, ManagedAgentPairRuntime>,
+    mut try_wait: impl FnMut(
+        &mut std::process::Child,
+    ) -> std::io::Result<Option<std::process::ExitStatus>>,
+    classify: impl Fn(&ManagedAgentRuntimeKey, &std::path::Path, HarnessExit) -> ExitVerdict,
+) -> (bool, Vec<ExitedRuntime>) {
     let mut changed = false;
     let mut exited = Vec::new();
 
     for (key, runtime) in runtimes.iter_mut() {
-        let status = match runtime.child.try_wait() {
-            Ok(status) => status,
+        let record = records
+            .iter_mut()
+            .find(|record| record.pubkey.eq_ignore_ascii_case(&key.pubkey));
+        match try_wait(&mut runtime.child) {
+            Ok(None) => continue,
+            Ok(Some(status)) => {
+                let verdict = classify(key, &runtime.log_path, HarnessExit::from(status));
+                if let Some(record) = record {
+                    apply_exit_verdict(record, &verdict);
+                }
+                exited.push(ExitedRuntime {
+                    key: key.clone(),
+                    verdict,
+                    inspect_failed: false,
+                });
+            }
             Err(error) => {
-                if let Some(record) = records
-                    .iter_mut()
-                    .find(|record| record.pubkey == key.pubkey)
-                {
+                let verdict = ExitVerdict {
+                    cause: ExitCause::Unknown,
+                    exit_code: None,
+                    message: Some(format!("failed to inspect process state: {error}")),
+                    code: None,
+                };
+                if let Some(record) = record {
+                    // Not a stop: no `last_stopped_at`, the child may be live.
                     record.updated_at = now_iso();
-                    record.last_error = Some(format!("failed to inspect process state: {error}"));
+                    record.last_error = verdict.message.clone();
                     record.last_error_code = None;
                 }
-                changed = true;
-                exited.push(key.clone());
-                continue;
+                exited.push(ExitedRuntime {
+                    key: key.clone(),
+                    verdict,
+                    inspect_failed: true,
+                });
             }
-        };
-
-        let Some(status) = status else {
-            continue;
-        };
-
-        if let Some(record) = records
-            .iter_mut()
-            .find(|record| record.pubkey == key.pubkey)
-        {
-            record.updated_at = now_iso();
-            record.last_stopped_at = Some(now_iso());
-            record.last_exit_code = status.code();
-            let log_err = if status.success() {
-                None
-            } else {
-                Some(
-                    super::super::meaningful_agent_error_from_log(&runtime.log_path)
-                        .unwrap_or_else(|| super::super::storage::AgentLogError {
-                            message: format!("harness exited with status {status}"),
-                            code: None,
-                        }),
-                )
-            };
-            record.last_error = log_err.as_ref().map(|e| e.message.clone());
-            record.last_error_code = log_err.as_ref().and_then(|e| e.code);
         }
-
         changed = true;
-        exited.push(key.clone());
     }
 
-    let exited_pubkeys: Vec<String> = exited.iter().map(|key| key.pubkey.clone()).collect();
-    for key in exited {
-        runtimes.remove(&key);
+    for exited_runtime in &exited {
+        runtimes.remove(&exited_runtime.key);
     }
 
     // `runtime_pid` is legacy bookkeeping. Pair runtimes and receipts are the
@@ -121,5 +163,5 @@ pub fn sync_managed_agent_processes(
         }
     }
 
-    (changed, exited_pubkeys)
+    (changed, exited)
 }

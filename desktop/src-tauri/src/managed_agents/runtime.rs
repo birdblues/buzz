@@ -68,9 +68,13 @@ use instance_reaper::{buffer_contains_identifier, is_desktop_binary};
 // Exact-path harness sweep lives in runtime/sweep.rs (re-exported above).
 
 mod lifecycle;
+pub(crate) use lifecycle::apply_exit_verdict;
 #[cfg(test)]
 use lifecycle::kill_stale_tracked_processes_with;
-pub use lifecycle::{kill_stale_tracked_processes, sync_managed_agent_processes};
+pub(in crate::managed_agents) use lifecycle::sync_managed_agent_processes;
+#[cfg(test)]
+pub(crate) use lifecycle::sync_managed_agent_processes_with;
+pub use lifecycle::{kill_stale_tracked_processes, ExitedRuntime};
 mod spawn_key; // production spawn-key derivation + its regressions
 pub(crate) use spawn_key::bound_runtime_key;
 

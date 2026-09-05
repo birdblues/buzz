@@ -19,6 +19,7 @@ mod definition_validation;
 mod discovery;
 pub(crate) mod effective_config;
 mod env_vars;
+pub(crate) mod exit_verdict;
 pub(crate) mod git_bash;
 pub(crate) mod global_config;
 mod managed_node_paths;
@@ -31,6 +32,7 @@ pub(crate) mod presence_guard;
 #[cfg(windows)]
 mod process_lifecycle;
 pub(crate) mod readiness;
+pub(crate) mod reaper;
 pub(crate) mod reconcile;
 mod relay_mesh;
 mod repos;
@@ -80,6 +82,7 @@ pub(crate) use definition_validation::{
 };
 pub use discovery::*;
 pub use env_vars::*;
+pub use exit_verdict::{ExitCause, ExitVerdict, HarnessExit};
 #[cfg(windows)]
 pub(crate) use git_bash::git_bash_available;
 pub(crate) use git_bash::{discover_git_bash, GitBashPrerequisite};

@@ -878,6 +878,10 @@ pub fn run() {
     #[cfg(unix)]
     shutdown::install_signal_handler(app.handle().clone(), Arc::clone(&shutdown_done));
 
+    // Periodic harness liveness reaper — the only reaper that runs while the
+    // window is hidden or every agent already reads as stopped.
+    managed_agents::reaper::spawn_liveness_tick(app.handle());
+
     let run_shutdown_done = Arc::clone(&shutdown_done);
     let restart_requested = Arc::new(AtomicBool::new(false));
     app.run(move |app_handle, event| match event {

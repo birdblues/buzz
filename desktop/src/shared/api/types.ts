@@ -293,6 +293,13 @@ export type ManagedAgentRuntimeLifecycle =
   | "failed"
   | "stopped";
 
+/**
+ * Why a reaped harness exited, as classified by the backend
+ * (`managed_agents/exit_verdict.rs`). Present only on the status emitted
+ * when a tracked runtime is reaped.
+ */
+export type ManagedAgentExitCause = "crash" | "intentional" | "unknown";
+
 export type ManagedAgentRuntimeStatus = {
   pubkey: string;
   /** Exact submitted descriptor, present only on startup reconcile results. */
@@ -304,6 +311,7 @@ export type ManagedAgentRuntimeStatus = {
   pid: number | null;
   error: string | null;
   logPath: string | null;
+  exitCause?: ManagedAgentExitCause;
 };
 
 export type ManagedAgentBackend =
