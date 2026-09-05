@@ -2,8 +2,7 @@ use tauri::Manager;
 
 use crate::app_state::AppState;
 use crate::managed_agents::{
-    self, kill_stale_tracked_processes, load_managed_agents, save_managed_agents,
-    sync_managed_agent_processes, BackendKind,
+    self, kill_stale_tracked_processes, load_managed_agents, save_managed_agents, BackendKind,
 };
 use crate::{prevent_sleep, util};
 
@@ -126,6 +125,11 @@ pub(crate) fn shutdown_mesh_runtime(app: &tauri::AppHandle) {
 
 pub(crate) fn shutdown_managed_agents(app: &tauri::AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
+    // Every shutdown entry (`shut_down_app`, the signal handler, `sign_out`)
+    // lands here, so this is the one place the liveness tick is stopped —
+    // and it must happen before the transition lock below, or a tick parked
+    // on that lock and this shutdown wait on each other.
+    managed_agents::reaper::stop_liveness_tick(&state.liveness_tick);
     let _restore_transition = state
         .managed_agent_runtime_transition
         .lock()
@@ -139,12 +143,14 @@ pub(crate) fn shutdown_managed_agents(app: &tauri::AppHandle) -> Result<(), Stri
         .managed_agent_processes
         .lock()
         .map_err(|error| error.to_string())?;
-    let (mut changed, _exited) = sync_managed_agent_processes(
+    // Silent: a death observed while the app goes down is not news.
+    managed_agents::reaper::reap_managed_agent_runtimes(
+        app,
         &mut records,
         &mut runtimes,
-        &managed_agents::current_instance_id(app),
-    );
-    changed |= kill_stale_tracked_processes(
+        managed_agents::reaper::Notify::Silent,
+    )?;
+    let mut changed = kill_stale_tracked_processes(
         &mut records,
         &runtimes,
         &managed_agents::current_instance_id(app),
@@ -244,6 +250,7 @@ pub(crate) fn shutdown_managed_agents(app: &tauri::AppHandle) -> Result<(), Stri
             record.updated_at = util::now_iso();
             record.last_exit_code = None;
             record.last_error = None;
+            record.last_error_code = None;
         }
     }
 

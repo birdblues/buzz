@@ -4,8 +4,7 @@ use tauri::{AppHandle, Manager, State};
 use crate::{
     app_state::AppState,
     managed_agents::{
-        current_instance_id, find_managed_agent_mut, load_managed_agents, save_managed_agents,
-        sync_managed_agent_processes, ManagedAgentSummary,
+        find_managed_agent_mut, load_managed_agents, save_managed_agents, ManagedAgentSummary,
     },
     util::now_iso,
 };
@@ -42,14 +41,12 @@ pub async fn set_managed_agent_start_on_app_launch(
             .lock()
             .map_err(|error| error.to_string())?;
 
-        let (sync_changed, exited_pubkeys) =
-            sync_managed_agent_processes(&mut records, &mut runtimes, &current_instance_id(&app));
-        if sync_changed {
-            save_managed_agents(&app, &records)?;
-        }
-        for pubkey in &exited_pubkeys {
-            state.clear_agent_session_caches(pubkey);
-        }
+        crate::managed_agents::reaper::reap_managed_agent_runtimes(
+            &app,
+            &mut records,
+            &mut runtimes,
+            crate::managed_agents::reaper::Notify::Emit,
+        )?;
 
         {
             let record = find_managed_agent_mut(&mut records, &pubkey)?;
@@ -86,14 +83,12 @@ pub async fn set_managed_agent_auto_restart(
             .lock()
             .map_err(|error| error.to_string())?;
 
-        let (sync_changed, exited_pubkeys) =
-            sync_managed_agent_processes(&mut records, &mut runtimes, &current_instance_id(&app));
-        if sync_changed {
-            save_managed_agents(&app, &records)?;
-        }
-        for pubkey in &exited_pubkeys {
-            state.clear_agent_session_caches(pubkey);
-        }
+        crate::managed_agents::reaper::reap_managed_agent_runtimes(
+            &app,
+            &mut records,
+            &mut runtimes,
+            crate::managed_agents::reaper::Notify::Emit,
+        )?;
 
         {
             let record = find_managed_agent_mut(&mut records, &pubkey)?;

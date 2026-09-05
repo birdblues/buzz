@@ -7,12 +7,11 @@ use crate::{
     app_state::AppState,
     managed_agents::{
         bestie_assignment::{recover_pending_assignment_cleanup, with_agent_assignments_cleared},
-        build_managed_agent_summary, current_instance_id, ensure_persona_is_active,
-        find_managed_agent_mut, load_managed_agents, load_personas, load_teams,
-        managed_agents_base_dir, normalize_agent_args, resolve_provider_binary,
-        save_managed_agents, start_managed_agent_process, stop_managed_agent_process,
-        stop_managed_agent_workspace_pair, sync_managed_agent_processes, try_regenerate_nest,
-        validate_provider_config, BackendKind, CreateManagedAgentRequest,
+        build_managed_agent_summary, ensure_persona_is_active, find_managed_agent_mut,
+        load_managed_agents, load_personas, load_teams, managed_agents_base_dir,
+        normalize_agent_args, resolve_provider_binary, save_managed_agents,
+        start_managed_agent_process, stop_managed_agent_process, stop_managed_agent_workspace_pair,
+        try_regenerate_nest, validate_provider_config, BackendKind, CreateManagedAgentRequest,
         CreateManagedAgentResponse, ManagedAgentRecord, ManagedAgentSummary, RelayMeshConfig,
         StartIntent, StartOutcome, DEFAULT_ACP_COMMAND, DEFAULT_AGENT_PARALLELISM,
         DEFAULT_AGENT_TURN_TIMEOUT_SECONDS,
@@ -368,14 +367,12 @@ pub async fn list_managed_agents(app: AppHandle) -> Result<Vec<ManagedAgentSumma
             .lock()
             .map_err(|error| error.to_string())?;
 
-        let (sync_changed, exited_pubkeys) =
-            sync_managed_agent_processes(&mut records, &mut runtimes, &current_instance_id(&app));
-        if sync_changed {
-            save_managed_agents(&app, &records)?;
-        }
-        for pubkey in &exited_pubkeys {
-            state.clear_agent_session_caches(pubkey);
-        }
+        crate::managed_agents::reaper::reap_managed_agent_runtimes(
+            &app,
+            &mut records,
+            &mut runtimes,
+            crate::managed_agents::reaper::Notify::Emit,
+        )?;
 
         let personas = load_personas(&app).unwrap_or_default();
         // One disk read for the whole list — build_managed_agent_summary takes
@@ -452,14 +449,12 @@ pub async fn create_managed_agent(
             .lock()
             .map_err(|error| error.to_string())?;
 
-        let (sync_changed, exited_pubkeys) =
-            sync_managed_agent_processes(&mut records, &mut runtimes, &current_instance_id(&app));
-        if sync_changed {
-            save_managed_agents(&app, &records)?;
-        }
-        for pubkey in &exited_pubkeys {
-            state.clear_agent_session_caches(pubkey);
-        }
+        crate::managed_agents::reaper::reap_managed_agent_runtimes(
+            &app,
+            &mut records,
+            &mut runtimes,
+            crate::managed_agents::reaper::Notify::Emit,
+        )?;
         if let Some(persona_id) = requested_persona_id.as_deref() {
             let personas = load_personas(&app)?;
             ensure_persona_is_active(&personas, persona_id)?;
@@ -528,14 +523,12 @@ pub async fn create_managed_agent(
             .lock()
             .map_err(|error| error.to_string())?;
 
-        let (sync_changed, exited_pubkeys) =
-            sync_managed_agent_processes(&mut records, &mut runtimes, &current_instance_id(&app));
-        if sync_changed {
-            save_managed_agents(&app, &records)?;
-        }
-        for pubkey in &exited_pubkeys {
-            state.clear_agent_session_caches(pubkey);
-        }
+        crate::managed_agents::reaper::reap_managed_agent_runtimes(
+            &app,
+            &mut records,
+            &mut runtimes,
+            crate::managed_agents::reaper::Notify::Emit,
+        )?;
 
         // Guard against a duplicate pubkey appearing between phase 1 and phase 3
         // (extremely unlikely but safe to check).
@@ -971,14 +964,12 @@ pub async fn start_managed_agent(
             .lock()
             .map_err(|error| error.to_string())?;
 
-        let (sync_changed, exited_pubkeys) =
-            sync_managed_agent_processes(&mut records, &mut runtimes, &current_instance_id(&app));
-        if sync_changed {
-            save_managed_agents(&app, &records)?;
-        }
-        for pubkey in &exited_pubkeys {
-            state.clear_agent_session_caches(pubkey);
-        }
+        crate::managed_agents::reaper::reap_managed_agent_runtimes(
+            &app,
+            &mut records,
+            &mut runtimes,
+            crate::managed_agents::reaper::Notify::Emit,
+        )?;
 
         let record = find_managed_agent_mut(&mut records, &pubkey)?;
 
@@ -1116,14 +1107,12 @@ pub async fn stop_managed_agent(
             .lock()
             .map_err(|error| error.to_string())?;
 
-        let (sync_changed, exited_pubkeys) =
-            sync_managed_agent_processes(&mut records, &mut runtimes, &current_instance_id(&app));
-        if sync_changed {
-            save_managed_agents(&app, &records)?;
-        }
-        for pubkey in &exited_pubkeys {
-            state.clear_agent_session_caches(pubkey);
-        }
+        crate::managed_agents::reaper::reap_managed_agent_runtimes(
+            &app,
+            &mut records,
+            &mut runtimes,
+            crate::managed_agents::reaper::Notify::Emit,
+        )?;
 
         {
             let record = find_managed_agent_mut(&mut records, &pubkey)?;
@@ -1191,17 +1180,12 @@ pub async fn delete_managed_agent(
                 .lock()
                 .map_err(|error| error.to_string())?;
 
-            let (sync_changed, exited_pubkeys) = sync_managed_agent_processes(
+            crate::managed_agents::reaper::reap_managed_agent_runtimes(
+                &app,
                 &mut records,
                 &mut runtimes,
-                &current_instance_id(&app),
-            );
-            if sync_changed {
-                save_managed_agents(&app, &records)?;
-            }
-            for pubkey in &exited_pubkeys {
-                state.clear_agent_session_caches(pubkey);
-            }
+                crate::managed_agents::reaper::Notify::Emit,
+            )?;
             // Guard: reject deletion of deployed remote agents unless explicitly forced.
             // This turns "don't orphan remote infra" from a UI convention into a backend
             // invariant — a buggy or compromised IPC caller cannot silently orphan a live

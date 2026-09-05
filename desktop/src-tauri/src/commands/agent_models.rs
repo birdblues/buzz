@@ -18,12 +18,11 @@ use super::agent_update_rollback::{rollback_failed_agent_update, AgentUpdateRoll
 use crate::{
     app_state::AppState,
     managed_agents::{
-        current_instance_id, discovery_env_with_baked_floor, find_managed_agent_mut,
-        known_acp_runtime, load_global_agent_config, load_managed_agents, load_personas,
-        managed_agent_avatar_url, missing_command_message, normalize_agent_args, resolve_command,
-        save_managed_agents, sync_managed_agent_processes, try_regenerate_nest, AgentModelInfo,
-        AgentModelsResponse, ManagedAgentRecord, UpdateManagedAgentRequest,
-        UpdateManagedAgentResponse, DEFAULT_ACP_COMMAND,
+        discovery_env_with_baked_floor, find_managed_agent_mut, known_acp_runtime,
+        load_global_agent_config, load_managed_agents, load_personas, managed_agent_avatar_url,
+        missing_command_message, normalize_agent_args, resolve_command, save_managed_agents,
+        try_regenerate_nest, AgentModelInfo, AgentModelsResponse, ManagedAgentRecord,
+        UpdateManagedAgentRequest, UpdateManagedAgentResponse, DEFAULT_ACP_COMMAND,
     },
     relay::{relay_ws_url_with_override, sync_managed_agent_profile},
 };
@@ -48,14 +47,12 @@ pub async fn get_agent_models(
             .managed_agent_processes
             .lock()
             .map_err(|e| e.to_string())?;
-        let (sync_changed, exited_pubkeys) =
-            sync_managed_agent_processes(&mut records, &mut runtimes, &current_instance_id(&app));
-        if sync_changed {
-            save_managed_agents(&app, &records)?;
-        }
-        for pubkey in &exited_pubkeys {
-            state.clear_agent_session_caches(pubkey);
-        }
+        crate::managed_agents::reaper::reap_managed_agent_runtimes(
+            &app,
+            &mut records,
+            &mut runtimes,
+            crate::managed_agents::reaper::Notify::Emit,
+        )?;
 
         let record = records
             .iter()
