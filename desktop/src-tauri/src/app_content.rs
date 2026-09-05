@@ -282,14 +282,33 @@ pub(crate) fn sandbox_response(body: Vec<u8>) -> http::Response<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn expiry_leaves_skew_headroom_under_relay_cap() {
-        // Relay: buzz_media::auth::APP_CONTENT_AUTH_MAX_AGE_SECS == 600, checked
-        // as `exp <= now + 600` without leeway. Stay well under it.
-        assert!(super::APP_CONTENT_AUTH_EXPIRY_SECS <= 300);
-    }
-
     use super::*;
+
+    #[test]
+    fn minted_token_expires_well_under_relay_cap() {
+        // The relay caps `expiration` at now + 600 (+ a small skew allowance).
+        // Mint at half that so a clock a few minutes off in either direction
+        // still verifies.
+        let keys = Keys::generate();
+        let header = sign_app_content_auth_header(&keys, &"a".repeat(64)).unwrap();
+        let encoded = header.strip_prefix("Nostr ").expect("Nostr scheme");
+        let json = URL_SAFE_NO_PAD.decode(encoded).expect("base64");
+        let event: serde_json::Value = serde_json::from_slice(&json).expect("event json");
+        let exp: u64 = event["tags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t[0] == "expiration")
+            .and_then(|t| t[1].as_str())
+            .and_then(|v| v.parse().ok())
+            .expect("expiration tag");
+        let now = Timestamp::now().as_secs();
+        assert!(
+            (now + 298..=now + 302).contains(&exp),
+            "exp {exp} now {now}"
+        );
+        assert!(exp < now + 600, "must stay under the relay cap");
+    }
 
     #[test]
     fn app_url_must_be_bare_same_host_distinct_origin() {

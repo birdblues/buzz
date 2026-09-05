@@ -76,6 +76,37 @@ buzz messages send --channel <UUID> --content "…" \
   (`features/apps`), i.e. the same drawer as threads, above an open thread.
   Closing the drawer unmounts the iframe.
 
+## Intel-Mac session — desktop test (do this before the mobile work)
+
+Requested 2026-09-05 by the owner. Run Buzz Desktop from this branch on the
+Intel Mac against the mac-mini relay and repeat the desktop verification.
+
+1. `git pull` `feat/sandbox-webapp` (≥ 2460c474). `just desktop-install`,
+   then `BUZZ_RELAY_URL=ws://192.168.1.99:3000 just desktop-standalone`
+   (this is `tauri dev` with the `xyz.block.buzz.app.dev` identifier). Sign in
+   with the Intel Mac's existing Buzz identity and open `#test`.
+2. **Cards.** `cache-miss-sequence.html` and `buzz-relay-sequence.html` show a
+   preview that matches the current theme; switch the theme in Settings and
+   the preview swaps (light ↔ dark PNG). `sandbox-probe.html` and
+   `sandbox-net-probe.html` show plain app cards (no preview attached).
+3. **Run.** Run `buzz-relay-sequence.html` → the auxiliary drawer opens on the
+   right with the sender + "sandbox" bar; the diagram is interactive
+   (guided views, Present, Export); closing the drawer unmounts it. Download
+   saves the HTML.
+4. **Probe.** Run `sandbox-probe.html` → the banner reads **all 19 blocked**.
+   Any ALLOWED row is a fail; paste the row.
+5. **Listener probe.** Run `sandbox-net-probe.html`; the page shows a run id
+   `t=…`. Listeners are up on the mac mini (`192.168.1.99:3999` http,
+   `:3478` udp); the mac-mini session checks its logs for that run id —
+   zero hits is the pass. Report the run id.
+6. **Navigation.** From an app, links / `window.open` / form submits do
+   nothing (probe rows 14–19); the desktop log prints
+   `buzz-desktop: blocked navigation to …` for external attempts.
+
+Report back by cross-session message to the mac-mini session (it shows as
+"buzz 웹앱 구현" in your ListAgents) with one line per item 2–6 and the run id
+from item 5. Then continue with the mobile checklist below.
+
 ## Mobile — checklist for the Intel-Mac session (real iPad)
 
 Do not build or run the Flutter app on the M-series dev Mac; verify on a
