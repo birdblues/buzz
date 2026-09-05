@@ -244,6 +244,12 @@ pub fn verify_blossom_get_auth(
 /// open; there is no reason for one to outlive a single page load by much.
 pub const APP_CONTENT_AUTH_MAX_AGE_SECS: u64 = 600;
 
+/// Clock-skew tolerance for the lifetime cap below. A client that mints
+/// exactly `now + APP_CONTENT_AUTH_MAX_AGE_SECS` (the documented contract)
+/// must not fail because its clock runs a few hundred milliseconds ahead of
+/// the relay's — that is what happened from a second Mac on the LAN.
+pub const APP_CONTENT_AUTH_SKEW_SECS: u64 = 60;
+
 /// Verify a kind:24242 auth event for the sandboxed **app-content** door.
 ///
 /// Deliberately stricter than [`verify_blossom_get_auth`]:
@@ -282,14 +288,16 @@ pub fn verify_app_content_auth(auth_event: &nostr::Event, sha256: &str) -> Resul
     }
 
     // Cap the advertised lifetime as well: a token that is fresh now but claims
-    // to be valid for a day would otherwise be replayable for a day.
+    // to be valid for a day would otherwise be replayable for a day. Allow a
+    // little skew so a client honouring the cap exactly is not rejected.
     let now = nostr::Timestamp::now().as_secs();
+    let cap = now + APP_CONTENT_AUTH_MAX_AGE_SECS + APP_CONTENT_AUTH_SKEW_SECS;
     let exp_ok = auth_event.tags.iter().any(|tag| {
         tag.kind().to_string() == "expiration"
             && tag
                 .content()
                 .and_then(|value| value.parse::<u64>().ok())
-                .is_some_and(|exp| exp <= now + APP_CONTENT_AUTH_MAX_AGE_SECS)
+                .is_some_and(|exp| exp <= cap)
     });
     if !exp_ok {
         return Err(MediaError::TokenExpired);
@@ -681,6 +689,30 @@ mod tests {
         assert!(matches!(
             verify_app_content_auth(&event, &sha256),
             Err(MediaError::InvalidAuthVerb)
+        ));
+    }
+
+    #[test]
+    fn app_content_accepts_contract_lifetime_and_small_skew() {
+        // A client minting exactly the documented cap (now + 600) must pass
+        // even when its clock is slightly ahead of the relay's.
+        let keys = Keys::generate();
+        let sha256 = "a".repeat(64);
+        for lifetime in [
+            APP_CONTENT_AUTH_MAX_AGE_SECS,
+            APP_CONTENT_AUTH_MAX_AGE_SECS + APP_CONTENT_AUTH_SKEW_SECS - 1,
+        ] {
+            let event = build_get_auth(&keys, app_get_tags(&sha256, lifetime));
+            assert!(
+                verify_app_content_auth(&event, &sha256).is_ok(),
+                "lifetime {lifetime} should pass"
+            );
+        }
+        let too_long = APP_CONTENT_AUTH_MAX_AGE_SECS + APP_CONTENT_AUTH_SKEW_SECS + 2;
+        let event = build_get_auth(&keys, app_get_tags(&sha256, too_long));
+        assert!(matches!(
+            verify_app_content_auth(&event, &sha256),
+            Err(MediaError::TokenExpired)
         ));
     }
 

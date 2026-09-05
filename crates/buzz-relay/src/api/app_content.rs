@@ -135,21 +135,45 @@ pub async fn get_app_content(
     Path(sha256_ext): Path<String>,
     headers: HeaderMap,
 ) -> Result<Response, MediaError> {
+    let result = serve_app_content(state, &sha256_ext, &headers).await;
+    if let Err(error) = &result {
+        // The door answers with a bare status; clients render "app content
+        // unavailable". Keep the reason server-side so a 401/403/404 can be
+        // diagnosed without instrumenting the client.
+        let host = headers
+            .get(header::HOST)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        tracing::warn!(
+            sha256 = %sha256_ext.chars().take(12).collect::<String>(),
+            host,
+            reason = %error,
+            "app-content door rejected request"
+        );
+    }
+    result
+}
+
+async fn serve_app_content(
+    state: Arc<AppState>,
+    sha256_ext: &str,
+    headers: &HeaderMap,
+) -> Result<Response, MediaError> {
     // The router only exists when the door is configured, but stay fail-closed.
     let app = state
         .config
         .app_content
         .as_ref()
         .ok_or(MediaError::NotFound)?;
-    let sha256 = parse_sha256_html(&sha256_ext)?;
+    let sha256 = parse_sha256_html(sha256_ext)?;
 
-    let tenant = bind_app_content_tenant(&state, &headers).await?;
+    let tenant = bind_app_content_tenant(&state, headers).await?;
 
     // Header-only credential. There is deliberately no query-string form.
-    let auth_event = super::media::extract_blossom_auth(&headers)?;
+    let auth_event = super::media::extract_blossom_auth(headers)?;
     buzz_media::auth::verify_app_content_auth(&auth_event, sha256)?;
 
-    let auth_tag = super::relay_members::extract_auth_tag_header(&headers);
+    let auth_tag = super::relay_members::extract_auth_tag_header(headers);
     super::relay_members::enforce_relay_membership(
         &state,
         tenant.community(),
@@ -176,7 +200,7 @@ pub async fn get_app_content(
         });
     }
 
-    let key = super::media::resolve_s3_key(&state.media_storage, &tenant, &sha256_ext).await?;
+    let key = super::media::resolve_s3_key(&state.media_storage, &tenant, sha256_ext).await?;
     let total = state
         .media_storage
         .head_with_metadata(&key)
