@@ -505,7 +505,11 @@ class MessageContent extends HookConsumerWidget {
         previewLight: imeta.previewLight,
         previewDark: imeta.previewDark,
         sharedBy: authorLabel,
-        onRun: () => Navigator.of(context).push(
+        // The root navigator: the app takes the whole screen on every
+        // layout, and a push inside a wide-shell pane's nested navigator
+        // aborts (its compose bar's overlay portal is re-activated during the
+        // pane's layout pass), leaving Run silently dead in forum threads.
+        onRun: () => Navigator.of(context, rootNavigator: true).push(
           AppWebViewPage.route(
             sha256: sha256,
             filename: filename,

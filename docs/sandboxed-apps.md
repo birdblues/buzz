@@ -126,7 +126,7 @@ app door `http://192.168.1.99:3001`.
 | Blob-scoped token: `t=get`, `x`, `expiration = now + 300 s`, **no `server` tag**, minted fresh on every Run (never memoized) | `mobile/lib/shared/relay/media_auth.dart` `signAppContentAuth` |
 | Document fetch **in Dart**, the way the desktop proxy does it: `Authorization` header (never a URL token), **no redirects** (a 3xx fails — a custom header must never follow one), `text/html` only, ≤ 8 MiB. The WebView itself never touches the network, so a LAN MITM cannot strip the policy and no ATS exception is needed | `mobile/lib/shared/relay/app_content.dart` (`fetchAppDocument`) |
 | CSP stamped by the client: the relay/desktop policy minus `sandbox`, inserted as the first element (after a leading doctype) so no script can precede it; the document is then loaded with `loadHtmlString` and no base URL → `about:blank`, opaque origin, no storage | `app_content.dart` (`stampSandboxCsp`, `appSandboxCsp`) |
-| Sandbox page: `CupertinoPageRoute` (slides in from the right, like the desktop drawer; stacks inside the pane in the wide shell), JS unrestricted, **no JavaScript channels**, `onNavigationRequest` allows exactly the first main-frame `about:blank` load and prevents everything else, generation-fenced retry, error states per relay status | `mobile/lib/features/channels/app_webview_page.dart` (`decideAppNavigation`) |
+| Sandbox page: `CupertinoPageRoute` pushed on the **root** navigator (slides in from the right, like the desktop drawer, and takes the whole screen in the wide shell too — a push inside a pane's nested navigator aborts on the compose bar's overlay portal during the pane's layout pass, which left Run silently dead in forum threads), JS unrestricted, **no JavaScript channels**, `onNavigationRequest` allows exactly the first main-frame `about:blank` load and prevents everything else, generation-fenced retry, error states per relay status | `mobile/lib/features/channels/app_webview_page.dart` (`decideAppNavigation`) |
 | Fail closed on the native hook: before running, Dart asks `buzz/sandbox_webview` → `isHardeningInstalled`; false (hook failed, or a platform without one — Android today) shows an error instead of the app | `app_webview_page.dart` (`sandboxHardeningProbeProvider`), `AppDelegate.swift` |
 | WebRTC + `sendBeacon` removal. `webview_flutter` has no user-script API, so `WKWebView.loadHTMLString(_:baseURL:)` — the sandbox page's only entry point — is swizzled to register the document-start script (all frames) on that web view before the load. `WKUserContentController` is shared by reference with the live page; `webview_flutter` adds its own channel scripts the same way after creation | `mobile/ios/Runner/SandboxWebViewHardening.swift`, installed from `AppDelegate` |
 | Pretendard 1.3.9 (OFL) as a Flutter font family | `mobile/pubspec.yaml`, `mobile/assets/fonts/Pretendard-*.otf` |
@@ -152,7 +152,16 @@ app door `http://192.168.1.99:3001`.
    the mac mini reports zero hits (send the run id and time); (g) light/dark
    preview follows the app theme; (h) a forum post card shows the inert
    pill, not a cropped card — needs a forum channel with an HTML attachment
-   (none existed on 2026-09-05). The compose-note preview cannot be reached:
+   posted as kind 45001 (`buzz messages send --kind 45001 …`; the CLI sends
+   kind 9 by default whatever the channel type). Mobile lists no forum
+   channels (`channels_page/body.dart` sections are stream and DM only, an
+   upstream gap), so open the forum by deep link
+   (`buzz://channel/<id>` in Safari) or from a search hit. The post list
+   clips only the prose of a post, so the trailing attachment line stays
+   renderable (`features/forum/forum_preview.dart`); opening the post shows
+   the app card, and Run works from the thread on both layouts. Desktop
+   forums host the app drawer through `ForumChannelContent`, which replaces
+   `ChannelPane` for forum channels. The compose-note preview cannot be reached:
    `lib/features/pulse/` is not referenced from the rest of the mobile app,
    so that call site is covered by widget tests only.
 
