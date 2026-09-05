@@ -13,6 +13,7 @@ Future<void> _sendTextOnlyDraft({
   required _OutgoingMentions outgoing,
   required ComposeBarOnSend onSend,
   required ScaffoldMessengerState? messenger,
+  required VoidCallback onRestoreDraft,
 }) async {
   TextEditingValue? clearedDraftText;
   Map<String, MentionCandidate>? clearedDraftMentions;
@@ -30,6 +31,7 @@ Future<void> _sendTextOnlyDraft({
     mentionMap.value
       ..clear()
       ..addAll(clearedDraftMentions);
+    onRestoreDraft();
     focusNode.requestFocus();
   }
 

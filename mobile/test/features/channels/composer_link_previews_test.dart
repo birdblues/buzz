@@ -17,7 +17,8 @@ const _debounce = Duration(milliseconds: 10);
 class _FakeFetcher extends LinkPreviewFetcher {
   _FakeFetcher(this.handler)
     : super(
-        client: http_testing.MockClient((_) async => http.Response('', 404)),
+        clientFactory: () =>
+            http_testing.MockClient((_) async => http.Response('', 404)),
       );
 
   final Future<LinkPreviewCapture?> Function(Uri url) handler;
@@ -264,6 +265,35 @@ void main() {
     await _until(() => controller.previews.length == 1);
     expect(controller.previews.single.status, ComposerLinkPreviewStatus.ready);
     expect(fetcher.calls, 1);
+  });
+
+  test('the snapshot cache is bounded, oldest first', () async {
+    final fetcher = _FakeFetcher((_) async => _capture(withImage: false));
+    final controller = ComposerLinkPreviewsController(
+      fetcher: fetcher,
+      upload: (_, _) async => (url: _blob, sha256: _sha),
+      debounce: _debounce,
+    );
+    addTearDown(controller.dispose);
+    const first = 'https://example.com/first';
+    controller.updateContent(first);
+    await _until(() => controller.previews.singleOrNull?.tag != null);
+    // Enough other links to push the first one out (8 per draft).
+    for (var batch = 0; batch < composerLinkPreviewCacheLimit ~/ 8; batch++) {
+      final urls = [
+        for (var i = 0; i < 8; i++) 'https://example.com/b$batch-$i',
+      ];
+      controller.updateContent(urls.join(' '));
+      await _until(
+        () =>
+            controller.previews.map((p) => p.url).join(' ') == urls.join(' ') &&
+            controller.previews.every((p) => p.tag != null),
+      );
+    }
+    final callsBefore = fetcher.calls;
+    controller.updateContent(first);
+    await _until(() => controller.previews.singleOrNull?.tag != null);
+    expect(fetcher.calls, callsBefore + 1);
   });
 
   test('keeps previews in body order and caps them', () async {

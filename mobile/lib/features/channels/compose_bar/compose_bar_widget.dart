@@ -555,7 +555,13 @@ class ComposeBar extends HookConsumerWidget {
       isSending.value = true;
       try {
         // Waits briefly for previews still in flight; a send never fails or
-        // stalls because a preview did.
+        // stalls because a preview did. Clearing the composer forgets the
+        // "send without previews" choice, so a restored draft gets it back.
+        final linkPreviewsSuppressed = linkPreviews.suppressed;
+        void restoreLinkPreviews() {
+          if (linkPreviewsSuppressed) linkPreviews.suppress();
+        }
+
         final linkPreviewTags = await linkPreviews.tagsForSend(text);
         if (queuedAttachments.isEmpty) {
           if (!context.mounted) return;
@@ -577,6 +583,7 @@ class ComposeBar extends HookConsumerWidget {
             outgoing: outgoing,
             onSend: onSend,
             messenger: messenger,
+            onRestoreDraft: restoreLinkPreviews,
           );
           return;
         }
@@ -641,6 +648,7 @@ class ComposeBar extends HookConsumerWidget {
                 draftRevision.value == clearedDraftRevision) {
               controller.value = draftText;
               attachments.value = draftAttachments;
+              restoreLinkPreviews();
               retainedForRetry = true;
               mentionMap.value
                 ..clear()

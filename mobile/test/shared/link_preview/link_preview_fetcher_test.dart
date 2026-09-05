@@ -47,7 +47,7 @@ const _html = '''
 
 LinkPreviewFetcher _fetcher(http_testing.MockClientHandler handler) =>
     LinkPreviewFetcher(
-      client: http_testing.MockClient(handler),
+      clientFactory: () => http_testing.MockClient(handler),
       resolveHost: _resolve,
       sanitize: _sanitize,
     );
@@ -89,6 +89,17 @@ void main() {
         '2001:db8::1',
         '::ffff:10.0.0.1',
         '64:ff9b::a00:1',
+        '64:ff9b:1::1',
+        '::ffff:0:a00:1',
+        '::10.0.0.1',
+        'fec0::1',
+        '2002:c0a8:101::1',
+        '2001:0:1::1',
+        '3fff::1',
+        '5f00::1',
+        '100::1',
+        '192.0.0.1',
+        '240.0.0.1',
       ]) {
         expect(isPublicAddress(InternetAddress(ip)), isFalse, reason: ip);
       }
@@ -99,8 +110,13 @@ void main() {
         '1.1.1.1',
         '8.8.8.8',
         '93.184.216.34',
+        '192.0.0.9',
         '2606:4700::1',
         '::ffff:1.1.1.1',
+        '64:ff9b::101:101',
+        '2001:1::1',
+        '2001:20::1',
+        '2001:4:112::1',
       ]) {
         expect(isPublicAddress(InternetAddress(ip)), isTrue, reason: ip);
       }
@@ -287,6 +303,28 @@ void main() {
       expect(paths.any((p) => p.startsWith('https://youtu.be/')), isFalse);
     });
 
+    test('closes its client when the fetch ends, success or not', () async {
+      var closed = 0;
+      LinkPreviewFetcher fetcher(http_testing.MockClientHandler handler) =>
+          LinkPreviewFetcher(
+            clientFactory: () => _ClosingClient(handler, () => closed += 1),
+            resolveHost: _resolve,
+            sanitize: _sanitize,
+          );
+      await fetcher(
+        (_) async => _htmlResponse(),
+      ).fetch(Uri.parse('https://example.com/post'));
+      expect(closed, 1);
+      await fetcher(
+        (_) async => throw const SocketException('down'),
+      ).fetch(Uri.parse('https://example.com/post'));
+      expect(closed, 2);
+      await fetcher(
+        (_) async => _htmlResponse(),
+      ).fetch(Uri.parse('https://internal.example/post'));
+      expect(closed, 3);
+    });
+
     test('never throws', () async {
       final fetcher = _fetcher(
         (_) async => throw const SocketException('down'),
@@ -297,4 +335,16 @@ void main() {
       );
     });
   });
+}
+
+class _ClosingClient extends http_testing.MockClient {
+  _ClosingClient(super.handler, this.onClose);
+
+  final void Function() onClose;
+
+  @override
+  void close() {
+    onClose();
+    super.close();
+  }
 }

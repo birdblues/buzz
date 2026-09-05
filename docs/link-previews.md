@@ -47,22 +47,28 @@ Rules, in the order they are applied:
 1. **Suppressed or no relay**: `["link-preview","none"]` on the event, or no
    active relay base URL, renders nothing.
 2. **Cropped surfaces render nothing** — any `MessageContent` with `maxLines`
-   (search hits, inbox rows, profile status). Full message bodies in channels,
-   threads, forum posts and replies render cards.
+   (search hits, inbox rows, profile status) or with `allowAppCards: false`
+   (box-cropped forum post cards, the compose-note preview). Full message
+   bodies in channels, threads and forum thread pages render cards.
 3. **Tag shape**: exactly 11 fields, version `"1"`, at most 8 accepted per
    message, duplicates by canonical URL dropped.
-4. **Canonical URL**: https, host present, no userinfo, no `#`. It must appear
-   verbatim in the body outside code (fenced, inline, indented) and outside
-   markdown image syntax, matching what desktop would preview. Cards are
-   ordered by where the link appears in the body.
+4. **Canonical URL**: https, host present, no userinfo, no `#`. It must be one
+   of the links the composer would preview — the same extraction
+   (`extractLinkPreviewCandidates`: visible body only, outside code and image
+   syntax, a link starts the body or follows whitespace or a bracket), matched
+   whole, never as a substring: a body linking `https://bank.example.evil/x`
+   carries no card for `https://bank.example`. Cards are ordered by where the
+   link appears in the body.
 5. **Text limits**: title ≤ 300, site name ≤ 100, description ≤ 1000 UTF-8
-   bytes; no control characters, except newlines in the description.
+   bytes; no control characters (C0, DEL, C1 — the relay's `is_control`),
+   except newlines in the description.
 6. **Media pairs**: image and favicon are each either both empty or a relay
    blob whose path is `/media/<sha256>.<jpg|png|gif|webp>` with the hash
-   matching the tag's sha256, on the active relay's scheme and authority (port
-   80/443 normalised), with no query, fragment, or credentials. The blob loads
-   through `MediaImage`, which attaches the Blossom read token only for relay
-   URLs, so a failed check can never leak a token or fetch from a third party.
+   matching the tag's sha256, on the active relay's scheme, host and port (the
+   port defaulting per scheme, so `https://relay:80` is not `https://relay`),
+   with no query, fragment, or credentials. The blob loads through
+   `MediaImage`, which attaches the Blossom read token only for relay URLs, so
+   a failed check can never leak a token or fetch from a third party.
 
 The card is the desktop **compact** presentation: a 104×64 thumbnail on the
 left when there is an image (favicon, then a broken-image glyph, as fallbacks),
@@ -97,31 +103,42 @@ which serve a consent wall to anonymous fetchers), `link_preview_image.dart`
 What happens as you type:
 
 1. **Candidates.** After 350 ms of quiet, the https links in the visible
-   body (not inside code or image syntax) are taken in order, fragments
-   dropped, trailing punctuation and unbalanced brackets trimmed, at most 8,
-   each exactly as it appears so the relay's "URL is in the content" rule
-   holds. `http://`, `buzz://` and relay git clone links never qualify.
+   body (not inside code or image syntax; a link starts the body or follows
+   whitespace, a bracket or a quote, so `abchttps://…` is not one) are taken
+   in order, fragments dropped, trailing punctuation and unbalanced brackets
+   trimmed, at most 8, each exactly as it appears so the relay's "URL is in
+   the content" rule holds. `http://`, `buzz://` and relay git clone links
+   never qualify.
 2. **Fetch, guarded.** Same rules as the desktop native command:
    https only, no credentials, default port; the host must resolve to global
-   unicast addresses — loopback, RFC 1918, link-local, CGNAT, documentation,
-   multicast, ULA, 6to4 anycast, and IPv4-mapped / NAT64 forms of those are
-   refused — and the socket is pinned to the checked addresses, so a
-   rebinding DNS answer cannot redirect the connect. The pin is an
+   unicast addresses per `isPublicAddress`, a port of the classifier the
+   relay and desktop share (`buzz_core::network::is_not_global_unicast`):
+   loopback, RFC 1918, link-local, CGNAT, benchmarking, the TEST-NETs, 6to4
+   anycast and the IETF 192.0.0.0/24 block on IPv4; ULA, link-local,
+   site-local, multicast, documentation, discard, 6to4, SRv6 and the
+   2001::/23 envelope (minus its global carve-outs) on IPv6; and every
+   IPv4-carrying form — mapped, compatible, SIIT, NAT64 — judged by its
+   payload. The socket is pinned to the checked addresses, so a rebinding
+   DNS answer cannot redirect the connect. The pin is an
    `HttpClient.connectionFactory` that opens `SecureSocket.startConnect` on
    the looked-up `InternetAddress`: with a factory set dart:io does not
    negotiate TLS itself, and a looked-up address carries the name it was
    resolved from, so the handshake verifies the certificate and sends SNI
    for the URL's host while the bytes go to the checked address
    (`link_preview_pinned_client_test.dart` proves both against a local
-   https server). Redirects are
-   followed by hand, at most 3, each hop re-checked; 4 s per request, 10 s
-   total; 256 KiB of HTML, 2 MiB per image, 64 KiB of oEmbed.
+   https server). Redirects are followed by hand, at most 3, each hop
+   re-checked; 4 s per request, 10 s total; 256 KiB of HTML, 2 MiB per
+   image, 64 KiB of oEmbed. Each fetch owns one client that is closed when
+   the fetch ends, so a stalled or trickling response is torn down with its
+   socket rather than left reading after the timeout.
 3. **Sanitize.** An image must declare `image/jpeg|png|webp`, its bytes must
    match, it must not be animated (APNG `acTL`, WebP `ANIM`/VP8X flag), and
    it must fit 4096 px a side and 16 MP. It is then decoded off the UI
    isolate, EXIF orientation baked in, downscaled to 1200 px on the long
-   side, and re-encoded — JPEG at quality 82, or PNG for a favicon with alpha.
-   The bytes the relay stores are ours, never the site's.
+   side, stripped of every metadata block (EXIF, ICC profile, text chunks —
+   a PNG's deflated ICC profile would otherwise be inflated at encode time
+   with no bound), and re-encoded — JPEG at quality 82, or PNG for a favicon
+   with alpha. The bytes the relay stores are ours, never the site's.
 4. **Upload and tag.** Image and favicon go through the ordinary Blossom
    upload (`MediaUploadService.uploadBytes`), and the tag is built from the
    title, the site name (hostname when the page has none), the description,
@@ -130,12 +147,14 @@ What happens as you type:
 5. **Cards.** Each candidate shows a compact card above the editor (skeleton
    while loading, "No preview available" when the page yields none). One
    control, "Send without link previews", hides them all and sends
-   `["link-preview","none"]`; the choice clears once the draft has no links.
+   `["link-preview","none"]`; the choice clears once the draft has no links,
+   and survives a failed send that hands the draft back.
 6. **Send.** The send takes the ready tags for the links still in the body,
    waiting up to 6 s for ones in flight, then goes out — a preview never
-   fails or holds a message. A snapshot is cached for 5 minutes per URL, so a
-   link that leaves and re-enters the draft is instant, and the cache is
-   dropped on a community switch (blob URLs belong to one relay).
+   fails or holds a message. A snapshot is cached for 5 minutes per URL (at
+   most 32, oldest evicted), so a link that leaves and re-enters the draft is
+   instant, and the cache is dropped on a community switch (blob URLs belong
+   to one relay).
 
 Differences from desktop, by choice: no transient-failure retry with
 backoff (one attempt per link per draft), no separate metadata cache across

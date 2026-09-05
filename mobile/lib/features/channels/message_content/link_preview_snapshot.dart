@@ -2,8 +2,8 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
-import '../../../shared/relay/media_auth.dart' show extractServerAuthority;
 import '../../../shared/relay/sha256_hex.dart';
+import 'link_preview_candidates.dart';
 
 /// Sender-authored link previews (`docs/link-previews.md`).
 ///
@@ -161,7 +161,9 @@ bool isValidLinkPreviewCanonicalUrl(String value) {
 /// Whether ([url], [sha256]) names an image blob on this relay, or is the
 /// empty pair meaning "no image". Mirrors the relay's
 /// `validate_local_image_media_pair`, so a snapshot can only ever point the
-/// image loader at a relay blob whose hash the sender committed to.
+/// image loader at a relay blob whose hash the sender committed to. The
+/// origin must match scheme, host and port, the port defaulting per scheme
+/// (`https://relay:80` is not the relay at `https://relay`).
 bool isRelayImageMediaPair(String url, String sha256, String relayBaseUrl) {
   if (url.isEmpty && sha256.isEmpty) return true;
   if (url.isEmpty || !isSha256Hex(sha256)) return false;
@@ -170,18 +172,11 @@ bool isRelayImageMediaPair(String url, String sha256, String relayBaseUrl) {
   if (uri == null || base == null) return false;
   if (uri.scheme != base.scheme ||
       uri.host.isEmpty ||
+      uri.host.toLowerCase() != base.host.toLowerCase() ||
+      uri.port != base.port ||
       uri.userInfo.isNotEmpty ||
       uri.hasQuery ||
       uri.hasFragment) {
-    return false;
-  }
-  final mediaAuthority = extractServerAuthority(
-    '${uri.scheme}://${uri.authority}',
-  );
-  final relayAuthority = extractServerAuthority(relayBaseUrl);
-  if (mediaAuthority == null ||
-      relayAuthority == null ||
-      mediaAuthority != relayAuthority) {
     return false;
   }
   final match = _relayMediaPath.firstMatch(uri.path);
@@ -190,9 +185,10 @@ bool isRelayImageMediaPair(String url, String sha256, String relayBaseUrl) {
       _imageExtensions.contains(match[2]);
 }
 
+/// C0 and C1 controls plus DEL, as the relay's `char::is_control`.
 bool _isControl(int rune, {bool allowNewline = false}) {
   if (allowNewline && rune == 0x0a) return false;
-  return rune <= 0x1f || rune == 0x7f;
+  return rune <= 0x1f || (rune >= 0x7f && rune <= 0x9f);
 }
 
 bool _validText(String value, int maxBytes, {bool allowNewlines = false}) {
@@ -219,6 +215,12 @@ String maskHiddenLinkPreviewContent(String content) {
 /// Parses the snapshot tags of one message into previews, in the order their
 /// links appear in [content]. Returns nothing when the sender suppressed
 /// previews or [relayBaseUrl] is unknown.
+///
+/// A snapshot counts only when its canonical URL is one of the links a
+/// composer would have previewed ([extractLinkPreviewCandidates]) — an
+/// exact match, as on desktop, not a substring: a body that links
+/// `https://bank.example.evil/x` must not carry a card for
+/// `https://bank.example`.
 List<LinkPreviewSnapshot> parseLinkPreviewSnapshots(
   List<List<String>> tags,
   String content, {
@@ -227,7 +229,7 @@ List<LinkPreviewSnapshot> parseLinkPreviewSnapshots(
   if (relayBaseUrl.isEmpty || hasLinkPreviewSuppression(tags)) {
     return const [];
   }
-  final visible = maskHiddenLinkPreviewContent(content);
+  final candidates = extractLinkPreviewCandidates(content);
   final seen = <String>{};
   final ordered = <(int, LinkPreviewSnapshot)>[];
   for (final tag in tags) {
@@ -244,7 +246,7 @@ List<LinkPreviewSnapshot> parseLinkPreviewSnapshots(
         seen.contains(canonicalUrl)) {
       continue;
     }
-    final position = visible.indexOf(canonicalUrl);
+    final position = candidates.indexOf(canonicalUrl);
     if (position < 0) continue;
     final title = tag[4];
     final siteName = tag[5];

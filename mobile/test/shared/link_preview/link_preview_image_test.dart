@@ -90,6 +90,50 @@ void main() {
       expect(opaque!.mimeType, 'image/jpeg');
     });
 
+    test(
+      'keeps pixels only: EXIF, ICC profiles and text chunks are dropped',
+      () {
+        final source = img.Image(width: 4, height: 4)
+          ..iccProfile = img.IccProfile(
+            'p',
+            img.IccProfileCompression.none,
+            Uint8List(64 * 1024),
+          )
+          ..textData = {'Comment': 'tracking'};
+        source.exif.imageIfd['Make'] = 'Vendor';
+        final input = img.encodePng(source);
+        expect(img.decodePng(input)!.iccProfile, isNotNull);
+
+        final jpeg = sanitizeLinkPreviewImage(input, 'image/png')!;
+        final decodedJpeg = img.decodeJpg(jpeg.bytes)!;
+        expect(decodedJpeg.iccProfile, isNull);
+        expect(decodedJpeg.exif.imageIfd.data.containsKey(0x010f), isFalse);
+
+        final png = sanitizeLinkPreviewImage(
+          img.encodePng(source..numChannels),
+          'image/png',
+          preserveTransparency: true,
+        );
+        expect(png, isNotNull);
+        final alpha = img.Image(width: 4, height: 4, numChannels: 4)
+          ..iccProfile = img.IccProfile(
+            'p',
+            img.IccProfileCompression.none,
+            Uint8List(1024),
+          )
+          ..textData = {'Comment': 'tracking'};
+        final pngOut = sanitizeLinkPreviewImage(
+          img.encodePng(alpha),
+          'image/png',
+          preserveTransparency: true,
+        )!;
+        final decodedPng = img.decodePng(pngOut.bytes)!;
+        expect(pngOut.mimeType, 'image/png');
+        expect(decodedPng.iccProfile, isNull);
+        expect(decodedPng.textData, anyOf(isNull, isEmpty));
+      },
+    );
+
     test('downscales to the sanitized bound', () {
       final result = sanitizeLinkPreviewImage(
         _jpg(width: 2400, height: 600),

@@ -75,9 +75,25 @@ class _Snapshot {
 
 final Map<String, _Snapshot> _snapshotCache = {};
 
+/// The cache keeps at most this many snapshots; the oldest go first. It is
+/// a convenience for retyping a link, not a store: image bytes live in it.
+const composerLinkPreviewCacheLimit = 32;
+
 /// Drops every cached snapshot (community switch: blob URLs belong to the
 /// old relay).
 void clearComposerLinkPreviewCache() => _snapshotCache.clear();
+
+void _cacheSnapshot(String url, _Snapshot snapshot, DateTime now) {
+  _snapshotCache.removeWhere(
+    (_, cached) =>
+        now.difference(cached.capturedAt) >= composerLinkPreviewCacheTtl,
+  );
+  _snapshotCache.remove(url);
+  while (_snapshotCache.length >= composerLinkPreviewCacheLimit) {
+    _snapshotCache.remove(_snapshotCache.keys.first);
+  }
+  _snapshotCache[url] = snapshot;
+}
 
 /// The link previews of one composer draft, authored the way desktop's
 /// `useComposerLinkPreviews` does it (`docs/link-previews.md`): every https
@@ -291,11 +307,16 @@ class ComposerLinkPreviewsController extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    _snapshotCache[url] = _Snapshot(
-      metadata: metadata,
-      imageBytes: capture.image?.bytes,
-      tag: tag,
-      capturedAt: _now(),
+    final now = _now();
+    _cacheSnapshot(
+      url,
+      _Snapshot(
+        metadata: metadata,
+        imageBytes: capture.image?.bytes,
+        tag: tag,
+        capturedAt: now,
+      ),
+      now,
     );
     _previews[url] = ComposerLinkPreview(
       url: url,

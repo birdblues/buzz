@@ -8,7 +8,13 @@ import 'link_preview_snapshot.dart';
 /// Mirrors desktop `extractSupportedLinkPreviews` for the generic-link case.
 /// Buzz-native links (`buzz://`, relay git clone URLs) are entity chips on
 /// every client and never snapshot.
-final _httpsUrl = RegExp('https://[^\\s<>"\'\\]]+');
+/// A link starts the body or follows whitespace or an opening bracket or
+/// quote, as desktop's `SUPPORTED_URL_RE` requires: `abchttps://…` is not a
+/// link.
+final _httpsUrl = RegExp(
+  '(?<=^|[\\s(\\[{<>"\'])https://[^\\s<>"\'\\]]+',
+  multiLine: true,
+);
 final _trailingPunctuation = RegExp(r'[.,!?;:]+$');
 final _relayGitPath = RegExp(r'/git/[0-9a-f]{64}/');
 const _bracketPairs = [(')', '('), (']', '['), ('}', '{')];

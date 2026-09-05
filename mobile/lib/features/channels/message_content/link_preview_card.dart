@@ -161,6 +161,7 @@ class LinkPreviewCard extends StatelessWidget {
       button: true,
       link: true,
       excludeSemantics: true,
+      onTap: onOpen,
       label: [
         'Open link: $hostname, $title',
         if (description.isNotEmpty) description,

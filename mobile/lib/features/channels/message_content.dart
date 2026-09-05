@@ -108,10 +108,12 @@ class MessageContent extends HookConsumerWidget {
   /// their sender ("App shared by …"). Null where no author is in scope.
   final String? authorLabel;
 
-  /// Whether sandboxed HTML apps may render as cards. Preview surfaces that
-  /// crop the body with a box instead of [maxLines] (forum post cards, the
-  /// compose-note preview) turn this off: a cropped card could hide its
-  /// safety chrome and Run button, so they show the inert link instead.
+  /// Whether sandboxed HTML apps may render as cards, and whether link
+  /// previews render at all. Preview surfaces that crop the body with a box
+  /// instead of [maxLines] (forum post cards, the compose-note preview) turn
+  /// this off: a cropped app card could hide its safety chrome and Run
+  /// button, so they show the inert link instead, and a cropped link card
+  /// is just a clipped card, so they show none.
   final bool allowAppCards;
 
   /// Called when a #channel link is tapped.
@@ -217,11 +219,12 @@ class MessageContent extends HookConsumerWidget {
     final relayBaseUrl = ref.watch(
       relayConfigProvider.select((config) => config.baseUrl),
     );
+    final showLinkPreviews = allowAppCards && maxLines == null;
     final linkPreviews = useMemoized(
-      () => maxLines == null
+      () => showLinkPreviews
           ? parseLinkPreviewSnapshots(tags, content, relayBaseUrl: relayBaseUrl)
           : const <LinkPreviewSnapshot>[],
-      [tags, content, relayBaseUrl, maxLines],
+      [tags, content, relayBaseUrl, showLinkPreviews],
     );
     final customEmoji = _mergeCustomEmoji(
       customEmojiFromTags(tags),

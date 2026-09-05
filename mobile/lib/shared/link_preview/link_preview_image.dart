@@ -139,6 +139,14 @@ SanitizedLinkPreviewImage? sanitizeLinkPreviewImage(
             interpolation: img.Interpolation.average,
           );
   }
+  // Pixels only, as on desktop: the encoders would otherwise copy the
+  // source's EXIF, ICC profile and text chunks into the blob — third-party
+  // metadata we never inspected, and for a PNG's deflated ICC profile an
+  // inflate at encode time whose size the file did not bound.
+  image
+    ..exif = img.ExifData()
+    ..iccProfile = null
+    ..textData = null;
   if (preserveTransparency && image.hasAlpha) {
     return SanitizedLinkPreviewImage(
       bytes: img.encodePng(image),

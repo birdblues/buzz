@@ -5597,6 +5597,55 @@ void main() {
       expect(sentTags!.where((tag) => tag[0] == 'link-preview'), hasLength(1));
     });
 
+    testWidgets('a failed send keeps the hide-previews choice', (tester) async {
+      final sent = <List<List<String>>>[];
+      var failNext = true;
+      await tester.pumpWidget(
+        _buildComposeBar(
+          uploadService: _testUploadService(nostr.Keys.generate().nsec),
+          linkPreviewFetcher: fetcher,
+          onSend: (content, mentionPubkeys, {mediaTags = const []}) async {
+            sent.add(mediaTags);
+            if (failNext) {
+              failNext = false;
+              throw Exception('relay down');
+            }
+          },
+        ),
+      );
+
+      await _expandComposer(tester);
+      await tester.enterText(find.byType(TextField), 'look $url');
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('composer-hide-link-previews')),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(LucideIcons.arrowUp));
+      await tester.pumpAndSettle();
+      expect(sent.single, anyElement(equals(['link-preview', 'none'])));
+      // The draft came back; so must the choice, before the debounce
+      // re-previews the restored link.
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('composer-link-preview:$url')),
+        findsNothing,
+      );
+
+      // The failure snackbar sits over the composer until it times out.
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pumpAndSettle();
+      await _expandComposer(tester);
+      await tester.tap(find.byIcon(LucideIcons.arrowUp).hitTestable());
+      await tester.pumpAndSettle();
+      expect(sent, hasLength(2));
+      expect(sent.last, anyElement(equals(['link-preview', 'none'])));
+    });
+
     testWidgets('a draft without links sends no preview tags', (tester) async {
       List<List<String>>? sentTags;
       await tester.pumpWidget(
@@ -5733,7 +5782,8 @@ Channel _makeChannel({required String name, required String channelType}) {
 class _NoLinkPreviews extends LinkPreviewFetcher {
   _NoLinkPreviews()
     : super(
-        client: http_testing.MockClient((_) async => http.Response('', 404)),
+        clientFactory: () =>
+            http_testing.MockClient((_) async => http.Response('', 404)),
       );
 
   @override
@@ -5743,7 +5793,8 @@ class _NoLinkPreviews extends LinkPreviewFetcher {
 class _FakeLinkPreviews extends LinkPreviewFetcher {
   _FakeLinkPreviews(this.captures)
     : super(
-        client: http_testing.MockClient((_) async => http.Response('', 404)),
+        clientFactory: () =>
+            http_testing.MockClient((_) async => http.Response('', 404)),
       );
 
   final Map<String, LinkPreviewCapture> captures;

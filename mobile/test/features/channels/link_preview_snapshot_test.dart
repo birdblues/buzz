@@ -119,6 +119,16 @@ void main() {
       expect(_parse([_tag(url: 'not a url')], content: 'not a url'), isEmpty);
     });
 
+    test('matches whole links, never substrings of another link', () {
+      const bank = 'https://bank.example';
+      expect(
+        _parse([_tag(url: bank)], content: 'see https://bank.example.evil/x'),
+        isEmpty,
+      );
+      expect(_parse([_tag(url: bank)], content: 'see $bank now'), hasLength(1));
+      expect(_parse([_tag(url: bank)], content: 'abc$bank'), isEmpty);
+    });
+
     test('requires the URL to appear in the visible body', () {
       expect(_parse([_tag()], content: 'no link here'), isEmpty);
       expect(_parse([_tag()], content: '```\n$_url\n```'), isEmpty);
@@ -148,6 +158,10 @@ void main() {
       expect(_parse([_tag(site: 'bad\u001bsite')]), isEmpty);
       expect(_parse([_tag(description: 'line one\nline two')]), hasLength(1));
       expect(_parse([_tag(description: 'bad\ttab')]), isEmpty);
+      // C1 controls too, as the relay's `char::is_control`.
+      expect(_parse([_tag(title: 'bad\u0080title')]), isEmpty);
+      expect(_parse([_tag(title: 'bad\u009ftitle')]), isEmpty);
+      expect(_parse([_tag(title: 'fine\u00a0title')]), hasLength(1));
     });
 
     test('accepts only matching image blobs on this relay', () {
@@ -167,6 +181,15 @@ void main() {
       expect(
         withImage('http://relay.example.com/media/$_sha.png', _sha),
         isEmpty,
+      );
+      // The port defaults per scheme: https on :80 is not this relay.
+      expect(
+        withImage('https://relay.example.com:80/media/$_sha.png', _sha),
+        isEmpty,
+      );
+      expect(
+        withImage('https://RELAY.example.com/media/$_sha.png', _sha),
+        hasLength(1),
       );
       expect(withImage('$_relay/media/$_sha.svg', _sha), isEmpty);
       expect(withImage('$_relay/media/$_sha.html', _sha), isEmpty);

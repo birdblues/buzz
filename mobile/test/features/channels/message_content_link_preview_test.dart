@@ -132,6 +132,23 @@ void main() {
     expect(_card(), findsNothing);
   });
 
+  testWidgets('box-cropped surfaces (allowAppCards false) show no card', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _testable(
+        MessageContent(
+          content: 'Read $_url today',
+          tags: [_tag()],
+          allowAppCards: false,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(_card(), findsNothing);
+  });
+
   testWidgets('a suppression tag hides the card', (tester) async {
     await tester.pumpWidget(
       _testable(
