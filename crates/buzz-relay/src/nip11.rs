@@ -52,6 +52,11 @@ pub struct RelayInfo {
     /// Public WebSocket URL of the dedicated NIP-AB device-pairing relay.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pairing_relay_url: Option<String>,
+    /// Origin of the sandboxed app-content door (`Config::app_content`), when
+    /// enabled. Clients that see this may offer "run" for `text/html`
+    /// attachments; absent means the feature is off and HTML stays a download.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app_content_url: Option<String>,
     /// Canonical origin (`scheme://host[:port]`, no path) of the deployment
     /// admin API, advertised only when the admin surface is configured
     /// (`config.admin.is_some()`). Lets desktop auto-discover the admin
@@ -212,6 +217,7 @@ impl RelayInfo {
             version: env!("CARGO_PKG_VERSION").to_string(),
             limitation: Some(relay_limitation(max_message_length)),
             pairing_relay_url: pairing_relay_url.map(str::to_string),
+            app_content_url: None,
             admin_api: admin_api.map(str::to_string),
             gif,
             relay_self: relay_self.map(|s| s.to_string()),
@@ -313,6 +319,11 @@ pub(crate) async fn nip11_document(state: &crate::state::AppState, raw_host: &st
             .push("nip-pl".to_string());
         info.push = Some(push);
     }
+    info.app_content_url = state
+        .config
+        .app_content
+        .as_ref()
+        .map(|app| app.public_url.clone());
     info
 }
 

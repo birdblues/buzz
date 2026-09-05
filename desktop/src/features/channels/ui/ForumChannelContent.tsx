@@ -4,7 +4,12 @@ import {
   ForumView,
   UserProfilePanel,
 } from "@/features/channels/ui/ChannelScreenLazyViews";
+import {
+  IdleAuxiliaryPanel,
+  type IdleAuxiliaryHeaderControls,
+} from "@/features/channels/ui/IdleAuxiliaryPanel";
 import { RightAuxiliaryPane } from "@/features/channels/ui/RightAuxiliaryPane";
+import { useCloseAppSandboxWhenLeaving } from "@/features/apps/ui/useCloseAppSandboxWhenLeaving";
 import type {
   ProfilePanelTab,
   ProfilePanelView,
@@ -18,6 +23,16 @@ type ForumChannelContentProps = {
   channel: Channel;
   currentPubkey?: string;
   header: React.ReactNode;
+  /**
+   * Idle auxiliary content (the sandboxed-app drawer, `useAppSandboxAuxiliary`)
+   * and its chrome. ChannelPane hosts the same props for message channels;
+   * forums replace ChannelPane, so without a host here an app's Run button
+   * would set store state that never renders.
+   */
+  idleAuxiliaryHeaderActions?: IdleAuxiliaryHeaderControls;
+  idleAuxiliaryPanel?: React.ReactNode;
+  idleAuxiliaryTitle?: string;
+  onCloseIdleAuxiliaryPanel?: () => void;
   onClosePost: () => void;
   onCloseProfilePanel: () => void;
   onOpenDm?: (pubkeys: string[]) => Promise<void> | void;
@@ -58,6 +73,10 @@ export function ForumChannelContent({
   channel,
   currentPubkey,
   header,
+  idleAuxiliaryHeaderActions,
+  idleAuxiliaryPanel = null,
+  idleAuxiliaryTitle = "",
+  onCloseIdleAuxiliaryPanel,
   onClosePost,
   onCloseProfilePanel,
   onOpenDm,
@@ -76,6 +95,9 @@ export function ForumChannelContent({
   targetSearchMessageId,
   targetSearchQuery,
 }: ForumChannelContentProps) {
+  // An app belongs to the post (or list) it was opened from: selecting
+  // another post, going back to the list, or leaving the forum closes it.
+  useCloseAppSandboxWhenLeaving(`${channel.id}\u0000${selectedPostId ?? ""}`);
   return (
     <>
       {header}
@@ -97,7 +119,34 @@ export function ForumChannelContent({
             />
           </React.Suspense>
         </section>
-        {profilePanelPubkey ? (
+        {idleAuxiliaryPanel && onCloseIdleAuxiliaryPanel ? (
+          // An open app takes the auxiliary column, as it overrides an open
+          // thread in ChannelPane; the profile panel returns when it closes.
+          // Hosted the way ChannelPane's split layout hosts it: the docked
+          // panel pads its body under the overlaid channel header, and its
+          // own title row sits in that header band.
+          <RightAuxiliaryPane
+            canResetWidth={canResetPanelWidth}
+            onResetWidth={onResetPanelWidth}
+            onResizeStart={onPanelResizeStart}
+            testId="idle-auxiliary-panel"
+            widthPx={panelWidthPx}
+          >
+            <IdleAuxiliaryPanel
+              canResetWidth={canResetPanelWidth}
+              headerControls={idleAuxiliaryHeaderActions}
+              isSinglePanelView={false}
+              onClose={onCloseIdleAuxiliaryPanel}
+              onResetWidth={onResetPanelWidth}
+              onResizeStart={onPanelResizeStart}
+              title={idleAuxiliaryTitle}
+              useSplitAuxiliaryPane
+              widthPx={panelWidthPx}
+            >
+              {idleAuxiliaryPanel}
+            </IdleAuxiliaryPanel>
+          </RightAuxiliaryPane>
+        ) : profilePanelPubkey ? (
           <RightAuxiliaryPane
             canResetWidth={canResetPanelWidth}
             onResetWidth={onResetPanelWidth}

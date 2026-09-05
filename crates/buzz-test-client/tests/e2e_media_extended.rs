@@ -802,3 +802,196 @@ async fn test_ws_invalid_imeta_missing_fields() {
 
     client.disconnect().await.unwrap();
 }
+
+// ---------------------------------------------------------------------------
+// App-content door (sandboxed HTML). Needs a relay started with
+// BUZZ_APP_CONTENT_BIND_ADDR / BUZZ_APP_CONTENT_URL; set APP_CONTENT_URL to
+// the public origin (default http://localhost:3001).
+// ---------------------------------------------------------------------------
+
+fn app_content_url() -> String {
+    std::env::var("APP_CONTENT_URL").unwrap_or_else(|_| "http://localhost:3001".to_string())
+}
+
+/// Blob-scoped kind:24242 read token for the app door: `x` + `t=get`, no `server`.
+fn sign_app_content_auth(keys: &Keys, sha256: &str, ttl: u64) -> nostr::Event {
+    let now = Timestamp::now().as_secs();
+    let tags = vec![
+        Tag::parse(["t", "get"]).unwrap(),
+        Tag::parse(["x", sha256]).unwrap(),
+        Tag::parse(["expiration", &(now + ttl).to_string()]).unwrap(),
+    ];
+    EventBuilder::new(Kind::from(24242), "Get buzz-app")
+        .tags(tags)
+        .sign_with_keys(keys)
+        .unwrap()
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_app_content_served_sandboxed_on_separate_origin() {
+    let client = http_client();
+    let keys = Keys::generate();
+    let html = b"<!DOCTYPE html><html><body><script>document.body.textContent='app'</script></body></html>";
+    let resp = upload(&client, &keys, html).await;
+    assert_eq!(resp.status(), 200, "HTML upload must succeed on /upload");
+    let desc: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(desc["type"].as_str().unwrap(), "text/html");
+    let sha256 = desc["sha256"].as_str().unwrap().to_string();
+    let media_url = desc["url"].as_str().unwrap().to_string();
+    let app_url = format!("{}/app/{sha256}.html", app_content_url());
+
+    // 1. The main listener still treats HTML as an inert download — the
+    //    invariant is relocated, not weakened.
+    let media_get = client
+        .get(&media_url)
+        .header(
+            "Authorization",
+            blossom_auth_header(&sign_blossom_get_auth(&keys, &sha256)),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(media_get.status(), 200);
+    assert_eq!(
+        media_get.headers().get("content-disposition").unwrap(),
+        "attachment"
+    );
+
+    // 2. No credential → 401 on the app door.
+    let anon = client.get(&app_url).send().await.unwrap();
+    assert_eq!(anon.status(), 401, "app door must require Authorization");
+
+    // 3. A query-string credential is not a credential.
+    let query = client
+        .get(format!(
+            "{app_url}?auth={}",
+            blossom_auth_header(&sign_app_content_auth(&keys, &sha256, 300))
+                .trim_start_matches("Nostr ")
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(query.status(), 401, "?auth= must be ignored");
+
+    // 4. Server-scoped token (what /media accepts) → 403 on the app door.
+    let now = Timestamp::now().as_secs();
+    let server_scoped = sign_custom_auth(
+        &keys,
+        24242,
+        "Get buzz-media",
+        vec![
+            Tag::parse(["t", "get"]).unwrap(),
+            Tag::parse([
+                "server",
+                &app_content_url().trim_start_matches("http://").to_string(),
+            ])
+            .unwrap(),
+            Tag::parse(["expiration", &(now + 300).to_string()]).unwrap(),
+        ],
+    );
+    let server_only = client
+        .get(&app_url)
+        .header("Authorization", blossom_auth_header(&server_scoped))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        server_only.status(),
+        403,
+        "server-scoped tokens must be refused"
+    );
+
+    // 5. Wrong blob → 403.
+    let other = client
+        .get(&app_url)
+        .header(
+            "Authorization",
+            blossom_auth_header(&sign_app_content_auth(&keys, &"0".repeat(64), 300)),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(other.status(), 403);
+
+    // 6. Overlong lifetime → 401.
+    let long = client
+        .get(&app_url)
+        .header(
+            "Authorization",
+            blossom_auth_header(&sign_app_content_auth(&keys, &sha256, 24 * 3600)),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(long.status(), 401);
+
+    // 7. The happy path: inline HTML under the sandbox contract.
+    let ok = client
+        .get(&app_url)
+        .header(
+            "Authorization",
+            blossom_auth_header(&sign_app_content_auth(&keys, &sha256, 300)),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ok.status(), 200, "blob-scoped token must open the app door");
+    let header = |name: &str| {
+        ok.headers()
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string()
+    };
+    assert_eq!(header("content-type"), "text/html; charset=utf-8");
+    assert_eq!(header("x-content-type-options"), "nosniff");
+    assert_eq!(header("referrer-policy"), "no-referrer");
+    assert_eq!(header("cache-control"), "private, no-store");
+    assert_eq!(header("content-disposition"), "", "app door serves inline");
+    let csp = header("content-security-policy");
+    for directive in [
+        "sandbox allow-scripts",
+        "default-src 'none'",
+        "connect-src 'none'",
+    ] {
+        assert!(csp.contains(directive), "CSP missing `{directive}`: {csp}");
+    }
+    assert!(!csp.contains("allow-same-origin"));
+    let body = ok.bytes().await.unwrap();
+    assert_eq!(&body[..], &html[..], "bytes must be served verbatim");
+
+    // 8. Everything else on the app listener is a 404.
+    for path in [
+        "/media/upload",
+        "/upload",
+        "/",
+        &format!("/media/{sha256}.html"),
+    ] {
+        let r = client
+            .get(format!("{}{path}", app_content_url()))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 404, "{path} must not exist on the app listener");
+    }
+
+    // 9. A non-HTML blob is never served by the app door, even with a valid token.
+    let png = tiny_png();
+    let png_resp = upload(&client, &keys, &png).await;
+    assert_eq!(png_resp.status(), 200);
+    let png_desc: serde_json::Value = png_resp.json().await.unwrap();
+    let png_sha = png_desc["sha256"].as_str().unwrap();
+    let png_app = client
+        .get(format!("{}/app/{png_sha}.html", app_content_url()))
+        .header(
+            "Authorization",
+            blossom_auth_header(&sign_app_content_auth(&keys, png_sha, 300)),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(png_app.status(), 404);
+
+    println!("✅ app-content door: header-only blob-scoped auth, sandbox CSP, /media unchanged");
+}

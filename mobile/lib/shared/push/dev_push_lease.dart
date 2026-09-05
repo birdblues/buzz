@@ -44,33 +44,11 @@ class BuzzPushLeaseDescriptor {
   factory BuzzPushLeaseDescriptor.fromRelayInformation(
     Map<String, dynamic> information,
   ) {
-    _requireExactKeys(
-      information,
-      required: const {},
-      allowed: const {
-        'name',
-        'description',
-        'pubkey',
-        'contact',
-        'supported_nips',
-        'supported_extensions',
-        'software',
-        'version',
-        'limitation',
-        'retention',
-        'relay_countries',
-        'language_tags',
-        'tags',
-        'posting_policy',
-        'payments_url',
-        'fees',
-        'icon',
-        'self',
-        'pairing_relay_url',
-        'push',
-      },
-      name: 'NIP-11 document',
-    );
+    // NIP-11 is an extensible document: relays add top-level fields at will
+    // (this fork's relay advertises `app_content_url`, `admin_api`, `gif`;
+    // upstream added `pairing_relay_url`). Unknown top-level keys are ignored
+    // here — only the `push` object we own is parsed exactly — so a relay
+    // metadata addition can never silently disable push discovery again.
     final extensions = _stringList(
       information['supported_extensions'],
       name: 'supported_extensions',

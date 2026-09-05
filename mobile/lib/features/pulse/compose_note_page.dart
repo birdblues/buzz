@@ -238,6 +238,7 @@ class _ReplyContext extends ConsumerWidget {
                           heightFactor: 1,
                           child: MessageContent(
                             content: note.content,
+                            allowAppCards: false,
                             tags: note.tags,
                             baseStyle: messageBodyTextStyle.copyWith(
                               color: context.colors.onSurface,

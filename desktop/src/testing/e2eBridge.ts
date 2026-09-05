@@ -14307,6 +14307,10 @@ export function maybeInstallE2eTauriMocks() {
         );
       case "get_media_proxy_port":
         return mockMediaProxyPort;
+      case "app_content_available":
+        return false;
+      case "reset_app_content_discovery":
+        return null;
       case "pick_and_upload_media":
         return await resolveMockUploadDescriptors(activeConfig);
       case "pick_and_upload_image":

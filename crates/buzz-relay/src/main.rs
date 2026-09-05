@@ -19,7 +19,7 @@ use buzz_search::SearchService;
 use buzz_relay::config::{Config, MAX_DRAIN_JITTER_MS};
 use buzz_relay::lifecycle::{BootTracker, LifecycleReason, StartupPhase};
 use buzz_relay::metrics as relay_metrics;
-use buzz_relay::router::{build_health_router, build_router};
+use buzz_relay::router::{build_app_content_router, build_health_router, build_router};
 use buzz_relay::state::AppState;
 use buzz_relay::storage_sweep;
 use buzz_relay::telemetry;
@@ -1087,6 +1087,11 @@ async fn run_relay_main(boot: BootTracker) -> anyhow::Result<()> {
 
     let router = build_router(Arc::clone(&state));
     let health_router = build_health_router(Arc::clone(&state));
+    let app_content_router = state
+        .config
+        .app_content
+        .as_ref()
+        .map(|_| build_app_content_router(Arc::clone(&state)));
 
     // Pool metrics: periodic background task polling DB + Redis pool stats.
     {
@@ -1214,7 +1219,13 @@ async fn run_relay_main(boot: BootTracker) -> anyhow::Result<()> {
         });
     }
 
-    serve(router, health_router, Arc::clone(&state)).await?;
+    serve(
+        router,
+        health_router,
+        app_content_router,
+        Arc::clone(&state),
+    )
+    .await?;
     state.community_revalidator_cancel.cancel();
 
     // Signal the audit worker to stop accepting, flush buffered entries, and
@@ -1364,6 +1375,7 @@ const GRACEFUL_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_se
 async fn serve(
     router: axum::Router,
     health_router: axum::Router,
+    app_content_router: Option<axum::Router>,
     state: Arc<AppState>,
 ) -> anyhow::Result<()> {
     let config = &state.config;
@@ -1443,6 +1455,33 @@ async fn serve(
         hard_shutdown_abort
     });
 
+    // App-content door: its own listener + its own router, sharing the graceful
+    // shutdown fan-out. A bind failure is fatal — a half-configured door would
+    // leave clients that discovered `app_content_url` via NIP-11 pointing at
+    // nothing.
+    let app_content_handle = match (app_content_router, config.app_content.as_ref()) {
+        (Some(app_router), Some(app)) => {
+            let app_listener = tokio::net::TcpListener::bind(app.bind_addr)
+                .await
+                .map_err(|e| {
+                    anyhow::anyhow!("Failed to bind app-content listener {}: {e}", app.bind_addr)
+                })?;
+            info!(addr = %app.bind_addr, url = %app.public_url, "app-content listener started");
+            let mut app_rx = shutdown_tx.subscribe();
+            Some(tokio::spawn(async move {
+                if let Err(e) = axum::serve(app_listener, app_router.into_make_service())
+                    .with_graceful_shutdown(async move {
+                        app_rx.changed().await.ok();
+                    })
+                    .await
+                {
+                    tracing::error!(error = %e, "app-content server error");
+                }
+            }))
+        }
+        _ => None,
+    };
+
     let tcp_listener = tokio::net::TcpListener::bind(&config.bind_addr)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to bind {}: {e}", config.bind_addr))?;
@@ -1492,6 +1531,9 @@ async fn serve(
             .await
             .map_err(|e| anyhow::anyhow!("Shutdown task failed: {e}"))?;
         uds_handle.abort();
+        if let Some(handle) = app_content_handle {
+            handle.abort();
+        }
         hard_shutdown.abort();
         return Ok(());
     }
@@ -1516,6 +1558,9 @@ async fn serve(
     let hard_shutdown = shutdown_handle
         .await
         .map_err(|e| anyhow::anyhow!("Shutdown task failed: {e}"))?;
+    if let Some(handle) = app_content_handle {
+        handle.abort();
+    }
     hard_shutdown.abort();
     Ok(())
 }

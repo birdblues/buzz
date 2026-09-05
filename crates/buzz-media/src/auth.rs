@@ -238,6 +238,74 @@ pub fn verify_blossom_get_auth(
     Ok(())
 }
 
+/// Maximum lifetime of an app-content read token, in seconds.
+///
+/// Tokens for the sandboxed app-content door are minted per blob and per
+/// open; there is no reason for one to outlive a single page load by much.
+pub const APP_CONTENT_AUTH_MAX_AGE_SECS: u64 = 600;
+
+/// Clock-skew tolerance for the lifetime cap below. A client that mints
+/// exactly `now + APP_CONTENT_AUTH_MAX_AGE_SECS` (the documented contract)
+/// must not fail because its clock runs a few hundred milliseconds ahead of
+/// the relay's — that is what happened from a second Mac on the LAN.
+pub const APP_CONTENT_AUTH_SKEW_SECS: u64 = 60;
+
+/// Verify a kind:24242 auth event for the sandboxed **app-content** door.
+///
+/// Deliberately stricter than [`verify_blossom_get_auth`]:
+///
+/// - the token MUST be blob-scoped — an `x` tag equal to `sha256` is required;
+/// - any `server` tag is rejected outright (`InsufficientScope`), so a
+///   host-scoped token that grants every blob on the relay can never open the
+///   app door, even if it leaks;
+/// - `created_at` must be within [`APP_CONTENT_AUTH_MAX_AGE_SECS`] (bounded
+///   replay), and `expiration` may not extend past that window either.
+///
+/// Callers must still apply relay membership after this verifier returns.
+pub fn verify_app_content_auth(auth_event: &nostr::Event, sha256: &str) -> Result<(), MediaError> {
+    let has_server_tag = auth_event
+        .tags
+        .iter()
+        .any(|tag| tag.kind().to_string() == "server");
+    if has_server_tag {
+        return Err(MediaError::InsufficientScope);
+    }
+
+    // No server tags present, so `server_domain` is irrelevant to the verb check.
+    verify_blossom_auth_event_for_verb(
+        auth_event,
+        BlossomVerb::Get,
+        None,
+        APP_CONTENT_AUTH_MAX_AGE_SECS,
+    )?;
+
+    let has_matching_x = auth_event
+        .tags
+        .iter()
+        .any(|tag| tag.kind().to_string() == "x" && tag.content() == Some(sha256));
+    if !has_matching_x {
+        return Err(MediaError::InsufficientScope);
+    }
+
+    // Cap the advertised lifetime as well: a token that is fresh now but claims
+    // to be valid for a day would otherwise be replayable for a day. Allow a
+    // little skew so a client honouring the cap exactly is not rejected.
+    let now = nostr::Timestamp::now().as_secs();
+    let cap = now + APP_CONTENT_AUTH_MAX_AGE_SECS + APP_CONTENT_AUTH_SKEW_SECS;
+    let exp_ok = auth_event.tags.iter().any(|tag| {
+        tag.kind().to_string() == "expiration"
+            && tag
+                .content()
+                .and_then(|value| value.parse::<u64>().ok())
+                .is_some_and(|exp| exp <= cap)
+    });
+    if !exp_ok {
+        return Err(MediaError::TokenExpired);
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -547,6 +615,115 @@ mod tests {
         assert!(matches!(
             verify_blossom_auth_event(&event, None, 600),
             Err(MediaError::InvalidAuthEvent)
+        ));
+    }
+    // --- app-content door -------------------------------------------------
+
+    fn app_get_tags(sha256: &str, ttl: u64) -> Vec<Tag> {
+        let now = Timestamp::now().as_secs();
+        vec![
+            Tag::parse(["t", "get"]).unwrap(),
+            Tag::parse(["x", sha256]).unwrap(),
+            Tag::parse(["expiration", &(now + ttl).to_string()]).unwrap(),
+        ]
+    }
+
+    #[test]
+    fn app_content_accepts_blob_scoped_token() {
+        let keys = Keys::generate();
+        let sha256 = "a".repeat(64);
+        let event = build_get_auth(&keys, app_get_tags(&sha256, 300));
+        assert!(verify_app_content_auth(&event, &sha256).is_ok());
+    }
+
+    #[test]
+    fn app_content_rejects_server_only_token() {
+        let keys = Keys::generate();
+        let sha256 = "a".repeat(64);
+        let now = Timestamp::now().as_secs();
+        let event = build_get_auth(
+            &keys,
+            vec![
+                Tag::parse(["t", "get"]).unwrap(),
+                Tag::parse(["server", "relay.example"]).unwrap(),
+                Tag::parse(["expiration", &(now + 300).to_string()]).unwrap(),
+            ],
+        );
+        // The permissive media verifier would accept this on relay.example …
+        assert!(verify_blossom_get_auth(&event, &sha256, Some("relay.example"), 600).is_ok());
+        // … the app door must not.
+        assert!(matches!(
+            verify_app_content_auth(&event, &sha256),
+            Err(MediaError::InsufficientScope)
+        ));
+    }
+
+    #[test]
+    fn app_content_rejects_token_that_also_carries_server_tag() {
+        let keys = Keys::generate();
+        let sha256 = "a".repeat(64);
+        let mut tags = app_get_tags(&sha256, 300);
+        tags.push(Tag::parse(["server", "relay.example"]).unwrap());
+        let event = build_get_auth(&keys, tags);
+        assert!(matches!(
+            verify_app_content_auth(&event, &sha256),
+            Err(MediaError::InsufficientScope)
+        ));
+    }
+
+    #[test]
+    fn app_content_rejects_wrong_blob() {
+        let keys = Keys::generate();
+        let event = build_get_auth(&keys, app_get_tags(&"a".repeat(64), 300));
+        assert!(matches!(
+            verify_app_content_auth(&event, &"b".repeat(64)),
+            Err(MediaError::InsufficientScope)
+        ));
+    }
+
+    #[test]
+    fn app_content_rejects_upload_verb() {
+        let keys = Keys::generate();
+        let sha256 = "a".repeat(64);
+        let event = build_valid_auth(&keys, &sha256);
+        assert!(matches!(
+            verify_app_content_auth(&event, &sha256),
+            Err(MediaError::InvalidAuthVerb)
+        ));
+    }
+
+    #[test]
+    fn app_content_accepts_contract_lifetime_and_small_skew() {
+        // A client minting exactly the documented cap (now + 600) must pass
+        // even when its clock is slightly ahead of the relay's.
+        let keys = Keys::generate();
+        let sha256 = "a".repeat(64);
+        for lifetime in [
+            APP_CONTENT_AUTH_MAX_AGE_SECS,
+            APP_CONTENT_AUTH_MAX_AGE_SECS + APP_CONTENT_AUTH_SKEW_SECS - 1,
+        ] {
+            let event = build_get_auth(&keys, app_get_tags(&sha256, lifetime));
+            assert!(
+                verify_app_content_auth(&event, &sha256).is_ok(),
+                "lifetime {lifetime} should pass"
+            );
+        }
+        let too_long = APP_CONTENT_AUTH_MAX_AGE_SECS + APP_CONTENT_AUTH_SKEW_SECS + 2;
+        let event = build_get_auth(&keys, app_get_tags(&sha256, too_long));
+        assert!(matches!(
+            verify_app_content_auth(&event, &sha256),
+            Err(MediaError::TokenExpired)
+        ));
+    }
+
+    #[test]
+    fn app_content_rejects_overlong_expiration() {
+        let keys = Keys::generate();
+        let sha256 = "a".repeat(64);
+        let event = build_get_auth(&keys, app_get_tags(&sha256, 24 * 3600));
+        assert!(matches!(
+            verify_app_content_auth(&event, &sha256),
+            Err(MediaError::TokenExpired)
         ));
     }
 }

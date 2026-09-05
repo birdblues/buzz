@@ -606,6 +606,79 @@ pub struct SendMessageParams {
     pub broadcast: bool,
     pub files: Vec<String>,
     pub mentions: Vec<String>,
+    /// Static preview image (light theme) for every `text/html` attachment.
+    pub preview_light: Option<String>,
+    /// Static preview image (dark theme) for every `text/html` attachment.
+    pub preview_dark: Option<String>,
+}
+
+/// Markdown line appended to the body for one uploaded attachment, mirroring
+/// the desktop composer (`formatImetaMediaLine`): images and videos embed,
+/// everything else is a plain `[filename](url)` link so clients route it to
+/// their attachment card instead of an `<img>`.
+fn attachment_markdown(desc: &crate::client::BlobDescriptor) -> String {
+    if desc.mime_type.starts_with("video/") {
+        return format!("\n![video]({})", desc.url);
+    }
+    if desc.mime_type.starts_with("image/") {
+        return format!("\n![image]({})", desc.url);
+    }
+    let raw_label = desc
+        .filename
+        .as_deref()
+        .filter(|n| !n.trim().is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| desc.url.rsplit('/').next().unwrap_or("file").to_string());
+    format!(
+        "\n[{}]({})",
+        crate::client::escape_markdown_label(&raw_label),
+        desc.url
+    )
+}
+
+/// Upload the `--preview-light` / `--preview-dark` images, if any, and return
+/// their URLs as `(light, dark)`. Previews only make sense next to an HTML
+/// attachment; both must be images.
+async fn upload_previews(
+    client: &BuzzClient,
+    descriptors: &[crate::client::BlobDescriptor],
+    p: &SendMessageParams,
+) -> Result<Option<(String, String)>, CliError> {
+    if p.preview_light.is_none() && p.preview_dark.is_none() {
+        return Ok(None);
+    }
+    if !descriptors.iter().any(|d| d.mime_type == "text/html") {
+        return Err(CliError::Usage(
+            "--preview-light/--preview-dark require an HTML --file to attach to".into(),
+        ));
+    }
+    let upload_preview = |path: &str| {
+        let path = path.to_string();
+        async move {
+            let desc = client
+                .upload_file(&path)
+                .await
+                .map_err(|e| CliError::Other(format!("preview upload failed for {path}: {e}")))?;
+            if !desc.mime_type.starts_with("image/") {
+                return Err(CliError::Usage(format!(
+                    "preview {path} must be an image, got {}",
+                    desc.mime_type
+                )));
+            }
+            Ok::<String, CliError>(desc.url)
+        }
+    };
+    let light = match &p.preview_light {
+        Some(path) => Some(upload_preview(path).await?),
+        None => None,
+    };
+    let dark = match &p.preview_dark {
+        Some(path) => Some(upload_preview(path).await?),
+        None => None,
+    };
+    let light_url = light.clone().or_else(|| dark.clone());
+    let dark_url = dark.or(light);
+    Ok(light_url.zip(dark_url))
 }
 
 pub async fn cmd_send_message(
@@ -650,19 +723,30 @@ pub async fn cmd_send_message(
     // Upload files and build imeta tags
     let mut media_tags: Vec<Vec<String>> = Vec::new();
     let mut media_content = String::new();
+    let mut descriptors = Vec::with_capacity(p.files.len());
     for file_path in &p.files {
         let desc = client
             .upload_file(file_path)
             .await
             .map_err(|e| CliError::Other(format!("upload failed for {file_path}: {e}")))?;
-        media_tags.push(crate::client::build_imeta_tag(&desc));
-        if desc.mime_type.starts_with("video/") {
-            media_content.push_str("\n![video](");
-        } else {
-            media_content.push_str("\n![image](");
+        descriptors.push(desc);
+    }
+
+    // Theme-aware previews attach to every HTML app in this message. Upload
+    // them once, then stamp their URLs on each HTML imeta as our fork-local
+    // `preview-light` / `preview-dark` keys. One provided preview serves both.
+    let previews = upload_previews(client, &descriptors, &p).await?;
+
+    for desc in &descriptors {
+        let mut tag = crate::client::build_imeta_tag(desc);
+        if desc.mime_type == "text/html" {
+            if let Some((light, dark)) = &previews {
+                tag.push(format!("preview-light {light}"));
+                tag.push(format!("preview-dark {dark}"));
+            }
         }
-        media_content.push_str(&desc.url);
-        media_content.push(')');
+        media_tags.push(tag);
+        media_content.push_str(&attachment_markdown(desc));
     }
     let final_content = if media_content.is_empty() {
         p.content.clone()
@@ -945,6 +1029,8 @@ pub async fn dispatch(
             broadcast,
             files,
             mentions,
+            preview_light,
+            preview_dark,
         } => {
             cmd_send_message(
                 client,
@@ -956,6 +1042,8 @@ pub async fn dispatch(
                     broadcast,
                     files,
                     mentions,
+                    preview_light,
+                    preview_dark,
                 },
             )
             .await
@@ -1717,7 +1805,48 @@ mod tests {
             broadcast: false,
             files: vec![],
             mentions: vec![],
+            preview_light: None,
+            preview_dark: None,
         }
+    }
+
+    fn html_desc(name: Option<&str>) -> crate::client::BlobDescriptor {
+        crate::client::BlobDescriptor {
+            url: "http://relay.test/media/abc.html".into(),
+            sha256: "abc".into(),
+            size: 10,
+            mime_type: "text/html".into(),
+            uploaded: 0,
+            dim: None,
+            blurhash: None,
+            thumb: None,
+            duration: None,
+            filename: name.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn attachment_markdown_links_generic_files_and_embeds_media() {
+        assert_eq!(
+            super::attachment_markdown(&html_desc(Some("diagram.html"))),
+            "\n[diagram.html](http://relay.test/media/abc.html)"
+        );
+        // Hostile names cannot break out of the link text.
+        assert_eq!(
+            super::attachment_markdown(&html_desc(Some("x](http://evil)[.html"))),
+            "\n[x\\](http://evil)\\[.html](http://relay.test/media/abc.html)"
+        );
+        // No filename → fall back to the URL's last segment.
+        assert_eq!(
+            super::attachment_markdown(&html_desc(None)),
+            "\n[abc.html](http://relay.test/media/abc.html)"
+        );
+        let mut img = html_desc(Some("a.png"));
+        img.mime_type = "image/png".into();
+        assert_eq!(
+            super::attachment_markdown(&img),
+            "\n![image](http://relay.test/media/abc.html)"
+        );
     }
 
     #[tokio::test]

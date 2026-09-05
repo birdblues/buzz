@@ -14,6 +14,7 @@ import '../profile/user_profile_sheet.dart';
 import '../../shared/profile/user_profile.dart';
 import '../channels/message_gesture_region.dart';
 import 'forum_models.dart';
+import 'forum_preview.dart';
 
 /// Card displaying a forum post preview in the posts list.
 ///
@@ -90,9 +91,7 @@ class ForumPostCard extends HookConsumerWidget {
       directoryDisplayNames: ref.watch(agentDirectoryDisplayNamesProvider),
       agentMentionPubkeys: agentMentionPubkeys,
     );
-    final preview = post.content.length > 200
-        ? '${post.content.substring(0, 200)}...'
-        : post.content;
+    final preview = forumPostPreview(post.content, post.tags);
     final summary = post.threadSummary;
 
     return MessageGestureInkWell(
@@ -184,6 +183,7 @@ class ForumPostCard extends HookConsumerWidget {
                 child: IgnorePointer(
                   child: MessageContent(
                     content: preview,
+                    allowAppCards: false,
                     mentionNames: mentionNames,
                     agentMentionPubkeys: agentMentionPubkeys,
                     tags: post.tags,

@@ -9,6 +9,26 @@ export type FileCardImetaEntry = {
   x?: string;
   /** Optional thumbnail URL (from imeta `thumb` field). */
   thumb?: string;
+  /** Fork-local theme previews for `text/html` apps. */
+  previewLight?: string;
+  previewDark?: string;
+};
+
+/**
+ * A sandboxed HTML app resolved from an imeta entry. The card shows a static
+ * preview and a **Run** action that opens the app in the auxiliary drawer;
+ * the HTML itself never renders inside the message.
+ */
+export type ResolvedAppCard = {
+  /** SHA-256 hex from imeta `x` — the app door is addressed by hash only. */
+  sha256: string;
+  filename: string;
+  size?: number;
+  /** Relay URL of the HTML blob, for the Download action. */
+  downloadHref: string;
+  /** Proxy-rewritten preview URLs, when the sender attached them. */
+  previewLight?: string;
+  previewDark?: string;
 };
 
 export type ResolvedFileCard = {
@@ -114,6 +134,39 @@ export function resolveSnapshotCard(
     // Agent PNG snapshots carry the avatar card image. Team PNG snapshots use
     // a transport placeholder, so render the team icon instead of that image.
     thumb: isPng ? rewriteRelayUrl(href) : undefined,
+  };
+}
+
+/**
+ * Classify a markdown link as a sandboxed HTML app.
+ *
+ * A link qualifies when its imeta entry is `text/html`, carries a 64-hex `x`
+ * hash (the app door is addressed by hash, so unverifiable content is never
+ * runnable), and the active relay advertises an app-content door
+ * (`appContentAvailable`). Otherwise it falls through to the generic
+ * download card — HTML stays an inert download exactly as before.
+ */
+export function resolveAppCard(
+  entry: FileCardImetaEntry | undefined,
+  href: string | undefined,
+  childText: string,
+  appContentAvailable: boolean,
+): ResolvedAppCard | null {
+  if (!appContentAvailable || !href || !entry) return null;
+  if (entry.m !== "text/html") return null;
+  const sha256 = entry.x?.trim().toLowerCase();
+  if (!sha256 || !/^[0-9a-f]{64}$/.test(sha256)) return null;
+  const filename =
+    entry.filename || childText.trim() || href.split("/").pop() || "app.html";
+  const preview = (url: string | undefined) =>
+    url && /^https?:\/\//.test(url) ? rewriteRelayUrl(url) : undefined;
+  return {
+    sha256,
+    filename,
+    size: entry.size,
+    downloadHref: href,
+    previewLight: preview(entry.previewLight),
+    previewDark: preview(entry.previewDark),
   };
 }
 

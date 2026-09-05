@@ -38,9 +38,34 @@ class ComposeBar extends HookConsumerWidget {
       () => controller.text,
     );
     useEffect(() => controller.dispose, [controller]);
+    // Link previews are authored here, on the sender's device, from the
+    // links in the draft (`docs/link-previews.md`); the tags ride the send.
+    final linkPreviews = useMemoized(
+      () => ComposerLinkPreviewsController(
+        fetcher: ref.read(linkPreviewFetcherProvider),
+        upload: (bytes, mimeType) async {
+          final blob = await ref
+              .read(mediaUploadServiceProvider)
+              .uploadBytes(bytes, mimeType: mimeType);
+          return (url: blob.url, sha256: blob.sha256);
+        },
+      ),
+    );
+    useEffect(() => linkPreviews.dispose, [linkPreviews]);
+    useListenable(linkPreviews);
+    useEffect(() {
+      linkPreviews.updateContent(composerText);
+      return null;
+    }, [composerText, linkPreviews]);
     final draftKey = composeDraftKey(channelId, threadHeadId: threadHeadId);
     final draftRevision = useRef(0);
     final draftIdentity = _composerDraftIdentity(ref);
+    // Snapshots hold blob URLs of one relay: a community switch drops them.
+    useEffect(() {
+      linkPreviews.clear();
+      clearComposerLinkPreviewCache();
+      return null;
+    }, [draftIdentity, linkPreviews]);
     final isComposerExpanded = useState(false);
     final androidImeTransitionStarted = useState(
       defaultTargetPlatform != TargetPlatform.android,
@@ -461,6 +486,7 @@ class ComposeBar extends HookConsumerWidget {
     void clearComposer() {
       draftRevision.value += 1;
       controller.clear();
+      linkPreviews.clear();
       attachments.value = [];
       mentionMap.value.clear();
       mentionQuery.value = null;
@@ -528,6 +554,15 @@ class ComposeBar extends HookConsumerWidget {
 
       isSending.value = true;
       try {
+        // Waits briefly for previews still in flight; a send never fails or
+        // stalls because a preview did. Clearing the composer forgets the
+        // "send without previews" choice, so a restored draft gets it back.
+        final linkPreviewsSuppressed = linkPreviews.suppressed;
+        void restoreLinkPreviews() {
+          if (linkPreviewsSuppressed) linkPreviews.suppress();
+        }
+
+        final linkPreviewTags = await linkPreviews.tagsForSend(text);
         if (queuedAttachments.isEmpty) {
           if (!context.mounted) return;
           await _sendTextOnlyDraft(
@@ -543,10 +578,12 @@ class ComposeBar extends HookConsumerWidget {
               text: text,
               attachments: const [],
               customEmoji: customEmoji,
+              linkPreviewTags: linkPreviewTags,
             ),
             outgoing: outgoing,
             onSend: onSend,
             messenger: messenger,
+            onRestoreDraft: restoreLinkPreviews,
           );
           return;
         }
@@ -593,6 +630,7 @@ class ComposeBar extends HookConsumerWidget {
               text: text,
               attachments: uploaded,
               customEmoji: customEmoji,
+              linkPreviewTags: linkPreviewTags,
             );
             if (queueGeneration != uploadGeneration.value) return;
             await addMentionedNonMembers();
@@ -610,6 +648,7 @@ class ComposeBar extends HookConsumerWidget {
                 draftRevision.value == clearedDraftRevision) {
               controller.value = draftText;
               attachments.value = draftAttachments;
+              restoreLinkPreviews();
               retainedForRetry = true;
               mentionMap.value
                 ..clear()
@@ -965,6 +1004,9 @@ class ComposeBar extends HookConsumerWidget {
               voiceNoteRecorder: voiceNote.recorder,
               attachments: attachments.value,
               onRemoveAttachment: removeAttachment,
+              linkPreviews: linkPreviews.previews,
+              linkPreviewsSuppressed: linkPreviews.suppressed,
+              onSuppressLinkPreviews: linkPreviews.suppress,
               uploadError: uploadError.value,
               isExpanded: isComposerExpanded.value,
               controller: controller,

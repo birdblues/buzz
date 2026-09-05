@@ -16,6 +16,10 @@ export type ImetaEntry = {
   duration?: number;
   /** SHA-256 hex of the attachment bytes (from imeta `x` field). */
   x?: string;
+  /** Fork-local: static light-theme preview for a `text/html` app. */
+  previewLight?: string;
+  /** Fork-local: static dark-theme preview for a `text/html` app. */
+  previewDark?: string;
 };
 
 export type ImetaLookup = Map<string, ImetaEntry>;

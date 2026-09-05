@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Buzz sandbox probe</title>
+<style>
+  body { font: 14px/1.4 system-ui, sans-serif; margin: 16px; color: #111; background: #fff; }
+  table { border-collapse: collapse; width: 100%; }
+  td, th { border: 1px solid #ccc; padding: 4px 8px; text-align: left; vertical-align: top; }
+  .blocked { background: #e6f7e6; }
+  .allowed { background: #ffe0e0; font-weight: bold; }
+  .pending { background: #fff8d6; }
+  #summary { font-size: 18px; margin: 12px 0; }
+</style>
+</head>
+<body>
+<h1>Buzz sandbox probe</h1>
+<p>Every row must read <b>blocked</b>. Any <b>ALLOWED</b> row means the sandbox leaks — do not ship.</p>
+<div id="summary" class="pending">running…</div>
+<table>
+  <thead><tr><th>#</th><th>Escape attempt</th><th>Result</th><th>Detail</th></tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+<!-- Static attempts: a prefetch link and a meta refresh that would fire if navigation were open. -->
+<link rel="prefetch" href="https://example.com/probe-prefetch">
+<script>
+(function () {
+  var rows = document.getElementById('rows');
+  var results = [];
+  function row(name, promise) {
+    var tr = document.createElement('tr');
+    // Labels contain literal markup (<img>, <meta …>) — build cells with
+    // textContent so they render as text instead of becoming elements.
+    [String(rows.children.length + 1), name, 'pending', ''].forEach(function (text, i) {
+      var td = document.createElement('td'); td.textContent = text; if (i === 2) td.className = 'pending'; tr.appendChild(td);
+    });
+    rows.appendChild(tr);
+    var cell = tr.children[2], detail = tr.children[3];
+    Promise.resolve().then(promise).then(function (allowed) {
+      var a = allowed === true;
+      cell.textContent = a ? 'ALLOWED' : 'blocked';
+      cell.className = a ? 'allowed' : 'blocked';
+      // A string result is "blocked, but here is what I saw" (rows 3 and 20).
+      if (typeof allowed === 'string') detail.textContent = allowed.slice(0, 160);
+      results.push(a);
+    }, function (err) {
+      cell.textContent = 'blocked';
+      cell.className = 'blocked';
+      detail.textContent = String(err && err.message || err).slice(0, 120);
+      results.push(false);
+    }).then(finish);
+  }
+  var total = 0;
+  function finish() {
+    if (results.length < total) return;
+    var leaks = results.filter(Boolean).length;
+    var s = document.getElementById('summary');
+    s.textContent = leaks ? leaks + ' ALLOWED — sandbox leaks' : 'all ' + total + ' blocked';
+    s.className = leaks ? 'allowed' : 'blocked';
+  }
+  function withTimeout(p, ms) {
+    return Promise.race([p, new Promise(function (_, rej) { setTimeout(function () { rej(new Error('timeout (no response = blocked)')); }, ms); })]);
+  }
+  var attempts = [
+    ['window.__TAURI_INTERNALS__ present', function () { return typeof window.__TAURI_INTERNALS__ !== 'undefined'; }],
+    ['window.__TAURI__ present', function () { return typeof window.__TAURI__ !== 'undefined'; }],
+    ['webkit.messageHandlers.ipc.postMessage (fake key)', function () {
+      var h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.ipc;
+      if (!h) return false;
+      try { h.postMessage({ cmd: 'get_media_proxy_port', callback: 1, error: 2, payload: {}, options: {}, __TAURI_INVOKE_KEY__: 'x' }); } catch (e) { return false; }
+      // Reaching here only means the call did not throw; the ACL still rejects. Report presence for a human to judge.
+      return 'handler present (call did not throw) — verify the app did nothing';
+    }],
+    ['fetch ipc://localhost/…', function () { return withTimeout(fetch('ipc://localhost/get_media_proxy_port', { method: 'POST' }).then(function () { return true; }), 3000); }],
+    ['fetch http://127.0.0.1:1/ (loopback)', function () { return withTimeout(fetch('http://127.0.0.1:1/media/x').then(function () { return true; }), 3000); }],
+    ['fetch https://example.com', function () { return withTimeout(fetch('https://example.com/').then(function () { return true; }), 5000); }],
+    ['navigator.sendBeacon', function () { return navigator.sendBeacon && navigator.sendBeacon('https://example.com/beacon', 'x') === true; }],
+    ['new WebSocket(wss://example.com)', function () {
+      return new Promise(function (resolve) {
+        try { var ws = new WebSocket('wss://example.com/'); ws.onopen = function () { resolve(true); }; ws.onerror = function () { resolve(false); }; setTimeout(function () { resolve(false); }, 4000); }
+        catch (e) { resolve(false); }
+      });
+    }],
+    ['new RTCPeerConnection + ICE gather', function () {
+      if (typeof RTCPeerConnection === 'undefined') return false;
+      return new Promise(function (resolve) {
+        try {
+          var pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+          pc.createDataChannel('x');
+          var got = false;
+          pc.onicecandidate = function (e) { if (e.candidate && /srflx|relay/.test(e.candidate.candidate)) { got = true; } };
+          pc.createOffer().then(function (o) { return pc.setLocalDescription(o); }).catch(function () {});
+          setTimeout(function () { try { pc.close(); } catch (e) {} resolve(got); }, 4000);
+        } catch (e) { resolve(false); }
+      });
+    }],
+    ['new WebTransport', function () {
+      if (typeof WebTransport === 'undefined') return false;
+      return withTimeout(new WebTransport('https://example.com:443/').ready.then(function () { return true; }), 3000);
+    }],
+    ['<img> to https://example.com', function () {
+      return new Promise(function (resolve) { var i = new Image(); i.onload = function () { resolve(true); }; i.onerror = function () { resolve(false); }; i.src = 'https://example.com/favicon.ico?' + Date.now(); setTimeout(function () { resolve(false); }, 4000); });
+    }],
+    ['localStorage', function () { try { localStorage.setItem('p', '1'); return true; } catch (e) { return false; } }],
+    ['document.cookie readable', function () { try { document.cookie = 'p=1'; return document.cookie.indexOf('p=1') !== -1; } catch (e) { return false; } }],
+    ['window.open', function () { try { var w = window.open('https://example.com/'); return !!w; } catch (e) { return false; } }],
+    ['<a download> click', function () {
+      var a = document.createElement('a'); a.href = 'data:text/plain,probe'; a.download = 'probe.txt'; document.body.appendChild(a);
+      var fired = false; a.addEventListener('click', function (e) { fired = !e.defaultPrevented; });
+      a.click(); a.remove();
+      return false; // downloads are blocked by sandbox (no allow-downloads); cannot observe, treat as blocked
+    }],
+    ['<form> submit to https://example.com', function () {
+      return new Promise(function (resolve) {
+        var f = document.createElement('form'); f.method = 'post'; f.action = 'https://example.com/'; f.target = '_self'; document.body.appendChild(f);
+        try { f.submit(); } catch (e) { resolve(false); return; }
+        setTimeout(function () { resolve(false); }, 1500); // if we are still here, navigation did not happen
+      });
+    }],
+    ['top.location = …', function () { try { top.location.href = 'https://example.com/'; } catch (e) { return false; } return new Promise(function (r) { setTimeout(function () { r(false); }, 1500); }); }],
+    ['location.href = … (self navigation)', function () {
+      // Must be last-ish: if allowed, this page disappears — the visible failure IS the signal.
+      return new Promise(function (resolve) { setTimeout(function () { try { location.href = 'https://example.com/?probe=' + Date.now(); } catch (e) {} setTimeout(function () { resolve(false); }, 2000); }, 200); });
+    }],
+    ['<meta http-equiv=refresh>', function () {
+      var m = document.createElement('meta'); m.httpEquiv = 'refresh'; m.content = '0;url=https://example.com/?refresh'; document.head.appendChild(m);
+      return new Promise(function (resolve) { setTimeout(function () { resolve(false); }, 2000); });
+    }],
+    ['document origin is opaque (shows location.href)', function () {
+      // Desktop: the sandbox iframe (CSP `sandbox`) → origin "null" with a
+      // buzz-media:// href. Mobile: loadHtmlString without a base URL →
+      // about:blank, origin "null". Anything else means the app runs with a
+      // real origin and could keep storage or reach same-origin resources.
+      var origin = typeof self.origin === 'string' ? self.origin : (location.origin || 'null');
+      if (origin !== 'null') return true;
+      return 'origin=null href=' + location.href;
+    }],
+  ];
+  total = attempts.length;
+  attempts.forEach(function (a) { row(a[0], a[1]); });
+})();
+</script>
+</body>
+</html>

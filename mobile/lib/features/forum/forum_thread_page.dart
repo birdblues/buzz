@@ -401,6 +401,7 @@ class _OriginalPost extends ConsumerWidget {
           const SizedBox(height: Grid.xxs),
           MessageContent(
             content: post.content,
+            authorLabel: displayName,
             mentionNames: mentionNames,
             agentMentionPubkeys: agentMentionPubkeys,
             tags: post.tags,
@@ -522,6 +523,7 @@ class _ReplyRow extends ConsumerWidget {
             padding: const EdgeInsets.only(left: 32, top: Grid.half),
             child: MessageContent(
               content: reply.content,
+              authorLabel: displayName,
               mentionNames: mentionNames,
               agentMentionPubkeys: agentMentionPubkeys,
               tags: reply.tags,

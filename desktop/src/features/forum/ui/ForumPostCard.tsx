@@ -15,6 +15,7 @@ import { hasLinkPreviewSuppression } from "@/features/messages/lib/formatTimelin
 import { parseImetaTags } from "@/shared/ui/markdown/parseImeta";
 
 import { formatRelativeTime } from "../lib/time";
+import { forumPostPreview } from "../lib/forumPreview";
 import { DeleteActionMenu } from "./DeleteActionMenu";
 
 type ForumPostCardProps = {
@@ -58,10 +59,10 @@ export function ForumPostCard({
   // the browser never fires `click` and a file download is silently dropped.
   const imetaByUrl = useMemo(() => parseImetaTags(post.tags), [post.tags]);
   const summary = post.threadSummary;
-  const previewContent =
-    post.content.length > 200
-      ? `${post.content.slice(0, 200)}...`
-      : post.content;
+  const previewContent = useMemo(
+    () => forumPostPreview(post.content, imetaByUrl),
+    [imetaByUrl, post.content],
+  );
 
   return (
     // biome-ignore lint/a11y/useSemanticElements: Cannot use <button> because DeleteActionMenu renders a nested <button> via DropdownMenuTrigger, which is invalid HTML

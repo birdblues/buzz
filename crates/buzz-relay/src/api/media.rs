@@ -962,7 +962,7 @@ pub async fn head_blob(
 ///
 /// Sidecar-derived extensions are validated as safe tokens to prevent
 /// object-key confusion if sidecar data is ever tampered with.
-async fn resolve_s3_key(
+pub(crate) async fn resolve_s3_key(
     storage: &buzz_media::MediaStorage,
     tenant: &TenantContext,
     sha256_ext: &str,
@@ -985,7 +985,7 @@ async fn resolve_s3_key(
 /// Extract and verify a kind:24242 Blossom auth event from the `Authorization` header.
 ///
 /// Accepts both base64url (BUD-11 spec) and standard base64 (nostr-tools compat).
-fn extract_blossom_auth(headers: &HeaderMap) -> Result<nostr::Event, MediaError> {
+pub(crate) fn extract_blossom_auth(headers: &HeaderMap) -> Result<nostr::Event, MediaError> {
     use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 
     let header = headers

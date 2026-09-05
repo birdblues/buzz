@@ -9,12 +9,37 @@ use buzz_media::validation::mime_to_ext;
 /// Returns Ok(()) if all tags are valid, or a human-readable error string.
 pub fn validate_imeta_tags(tags: &[Vec<String>], media_base_url: &str) -> Result<(), String> {
     const ALLOWED_IMETA_KEYS: &[&str] = &[
-        "url", "m", "x", "size", "dim", "blurhash", "alt", "thumb", "fallback", "duration",
-        "bitrate", "image", "filename",
+        "url",
+        "m",
+        "x",
+        "size",
+        "dim",
+        "blurhash",
+        "alt",
+        "thumb",
+        "fallback",
+        "duration",
+        "bitrate",
+        "image",
+        "filename",
+        "preview-light",
+        "preview-dark",
     ];
     const SINGLETON_KEYS: &[&str] = &[
-        "url", "m", "x", "size", "dim", "blurhash", "thumb", "alt", "duration", "bitrate", "image",
+        "url",
+        "m",
+        "x",
+        "size",
+        "dim",
+        "blurhash",
+        "thumb",
+        "alt",
+        "duration",
+        "bitrate",
+        "image",
         "filename",
+        "preview-light",
+        "preview-dark",
     ];
     // Previewable media MIME types — these get the strict url-extension
     // consistency check below (their ext is derived from the MIME). Generic
@@ -43,6 +68,7 @@ pub fn validate_imeta_tags(tags: &[Vec<String>], media_base_url: &str) -> Result
         let mut x_value = String::new();
         let mut m_value = String::new();
         let mut thumb_value = String::new();
+        let mut has_preview = false;
 
         for part in tag.iter().skip(1) {
             let mut parts = part.splitn(2, ' ');
@@ -137,6 +163,27 @@ pub fn validate_imeta_tags(tags: &[Vec<String>], media_base_url: &str) -> Result
                         );
                     }
                 }
+                "preview-light" | "preview-dark" => {
+                    // Fork-local: themed preview image for a sandboxed HTML app
+                    // card. Must be a standalone local image blob (the blob
+                    // itself is verified in `verify_imeta_blobs`).
+                    const PREVIEW_EXTS: &[&str] = &["jpg", "png", "webp"];
+                    if !is_local_media_url(value, media_base_url) {
+                        return Err(format!("imeta {key} must be a local /media/ path"));
+                    }
+                    if value.contains(".thumb.") {
+                        return Err(format!(
+                            "imeta {key} must reference a standalone image, not a thumbnail"
+                        ));
+                    }
+                    let ext = value.rsplit('.').next().unwrap_or("");
+                    if !PREVIEW_EXTS.contains(&ext) {
+                        return Err(format!(
+                            "imeta {key} must reference an image file (jpg, png, webp)"
+                        ));
+                    }
+                    has_preview = true;
+                }
                 "filename" => {
                     // Original filename for the file-card label. Bounded length;
                     // no path separators or control chars (it's display-only and
@@ -160,6 +207,13 @@ pub fn validate_imeta_tags(tags: &[Vec<String>], media_base_url: &str) -> Result
 
         if !has_url || !has_m || !has_x || !has_size {
             return Err("imeta tag must include url, m, x, and size".into());
+        }
+
+        // Themed previews only make sense on sandboxed HTML apps.
+        if has_preview && m_value != "text/html" {
+            return Err(format!(
+                "imeta preview-light/preview-dark are only valid for text/html, not {m_value}"
+            ));
         }
 
         // Video-only NIP-71 fields must not appear on image blobs.
@@ -204,6 +258,52 @@ pub fn validate_imeta_tags(tags: &[Vec<String>], media_base_url: &str) -> Result
     Ok(())
 }
 
+/// Verify that an imeta image-valued key (`image`, `preview-light`,
+/// `preview-dark`) points at a stored image blob whose sidecar MIME/ext agree
+/// with the URL. `noun` names the blob in error messages (poster, preview).
+async fn verify_image_blob(
+    ctx: &TenantContext,
+    storage: &buzz_media::MediaStorage,
+    key: &str,
+    noun: &str,
+    value: &str,
+) -> Result<(), String> {
+    let img_hash = extract_hash_from_media_url(value)
+        .ok_or_else(|| format!("imeta {key} URL has no extractable hash: {value}"))?;
+
+    let img_sidecar = storage
+        .get_sidecar(ctx, img_hash)
+        .await
+        .map_err(|_| format!("imeta {key} references nonexistent {noun}: {img_hash}"))?;
+
+    const IMAGE_MIMES: &[&str] = &["image/jpeg", "image/png", "image/gif", "image/webp"];
+    if !IMAGE_MIMES.contains(&img_sidecar.mime_type.as_str()) {
+        return Err(format!(
+            "imeta {key} {noun} MIME must be image type, got {}",
+            img_sidecar.mime_type
+        ));
+    }
+
+    if let Some(url_ext) = extract_ext_from_media_url(value) {
+        if url_ext != img_sidecar.ext {
+            return Err(format!(
+                "imeta {key} extension ({url_ext}) does not match stored extension ({})",
+                img_sidecar.ext
+            ));
+        }
+    }
+
+    let img_key = format!("{img_hash}.{}", img_sidecar.ext);
+    let img_exists = storage
+        .head(&img_key)
+        .await
+        .map_err(|e| format!("storage error checking {noun} image: {e}"))?;
+    if !img_exists {
+        return Err(format!("imeta {key} references missing {noun}: {img_hash}"));
+    }
+    Ok(())
+}
+
 /// Verify that every imeta tag references a blob that actually exists in storage
 /// and that the claimed metadata (size, MIME) matches the sidecar.
 pub async fn verify_imeta_blobs(
@@ -217,6 +317,7 @@ pub async fn verify_imeta_blobs(
         let mut size_value: u64 = 0;
         let mut thumb_value = String::new();
         let mut image_value = String::new();
+        let mut preview_values: Vec<(&str, String)> = Vec::new();
         let mut duration_value: f64 = 0.0;
 
         for part in tag.iter().skip(1) {
@@ -229,6 +330,14 @@ pub async fn verify_imeta_blobs(
                 "size" => size_value = value.parse().unwrap_or(0),
                 "thumb" => thumb_value = value.to_string(),
                 "image" => image_value = value.to_string(),
+                "preview-light" | "preview-dark" => preview_values.push((
+                    if key == "preview-light" {
+                        "preview-light"
+                    } else {
+                        "preview-dark"
+                    },
+                    value.to_string(),
+                )),
                 "duration" => duration_value = value.parse().unwrap_or(0.0),
                 _ => {}
             }
@@ -291,41 +400,12 @@ pub async fn verify_imeta_blobs(
 
         // 5. If image (poster frame) is claimed, verify sidecar + blob.
         if !image_value.is_empty() {
-            let img_hash = extract_hash_from_media_url(&image_value)
-                .ok_or_else(|| format!("imeta image URL has no extractable hash: {image_value}"))?;
+            verify_image_blob(ctx, storage, "image", "poster", &image_value).await?;
+        }
 
-            let img_sidecar = storage
-                .get_sidecar(ctx, img_hash)
-                .await
-                .map_err(|_| format!("imeta image references nonexistent poster: {img_hash}"))?;
-
-            const IMAGE_MIMES: &[&str] = &["image/jpeg", "image/png", "image/gif", "image/webp"];
-            if !IMAGE_MIMES.contains(&img_sidecar.mime_type.as_str()) {
-                return Err(format!(
-                    "imeta image poster MIME must be image type, got {}",
-                    img_sidecar.mime_type
-                ));
-            }
-
-            if let Some(url_ext) = extract_ext_from_media_url(&image_value) {
-                if url_ext != img_sidecar.ext {
-                    return Err(format!(
-                        "imeta image extension ({url_ext}) does not match stored extension ({})",
-                        img_sidecar.ext
-                    ));
-                }
-            }
-
-            let img_key = format!("{img_hash}.{}", img_sidecar.ext);
-            let img_exists = storage
-                .head(&img_key)
-                .await
-                .map_err(|e| format!("storage error checking poster image: {e}"))?;
-            if !img_exists {
-                return Err(format!(
-                    "imeta image references missing poster frame: {img_hash}"
-                ));
-            }
+        // 6. Themed HTML-app previews must point at real local image blobs.
+        for (key, value) in &preview_values {
+            verify_image_blob(ctx, storage, key, "preview", value).await?;
         }
     }
     Ok(())
@@ -586,6 +666,54 @@ mod tests {
             "filename Q3-budget.pdf".into(),
         ];
         assert!(validate_imeta_tags(&[tag], BASE).is_ok());
+    }
+
+    #[test]
+    fn test_imeta_html_app_with_themed_previews_passes() {
+        let tag = vec![
+            "imeta".into(),
+            format!("url /media/{HASH}.html"),
+            "m text/html".into(),
+            format!("x {HASH}"),
+            "size 4096".into(),
+            "filename diagram.html".into(),
+            format!("preview-light /media/{HASH}.png"),
+            format!("preview-dark /media/{HASH}.webp"),
+        ];
+        assert!(validate_imeta_tags(&[tag], BASE).is_ok());
+    }
+
+    #[test]
+    fn test_imeta_preview_rejected_on_non_html() {
+        let tag = vec![
+            "imeta".into(),
+            format!("url /media/{HASH}.png"),
+            "m image/png".into(),
+            format!("x {HASH}"),
+            "size 4096".into(),
+            format!("preview-light /media/{HASH}.png"),
+        ];
+        let err = validate_imeta_tags(&[tag], BASE).unwrap_err();
+        assert!(err.contains("only valid for text/html"), "{err}");
+    }
+
+    #[test]
+    fn test_imeta_preview_rejects_external_and_thumb_urls() {
+        for bad in [
+            "preview-dark https://evil.example/x.png".to_string(),
+            format!("preview-dark /media/{HASH}.thumb.jpg"),
+            format!("preview-dark /media/{HASH}.svg"),
+        ] {
+            let tag = vec![
+                "imeta".into(),
+                format!("url /media/{HASH}.html"),
+                "m text/html".into(),
+                format!("x {HASH}"),
+                "size 4096".into(),
+                bad.clone(),
+            ];
+            assert!(validate_imeta_tags(&[tag], BASE).is_err(), "accepted {bad}");
+        }
     }
 
     #[test]
