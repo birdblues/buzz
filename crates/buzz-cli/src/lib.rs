@@ -392,12 +392,18 @@ pub enum MessagesCmd {
         /// Also publish to the Nostr network
         #[arg(long, default_value_t = false)]
         broadcast: bool,
-        /// Attach file(s) — uploads and includes as imeta tags
+        /// Attach file(s) — uploads and includes as imeta tags. Images/videos embed inline; an HTML file becomes a sandboxed app card on clients that support it.
         #[arg(long = "file")]
         files: Vec<String>,
         /// Pubkey to mention (hex or npub; repeatable). Supplying any explicit identity permits unresolved or ambiguous @Name text as presentation-only; uniquely resolved member names still notify.
         #[arg(long = "mention")]
         mentions: Vec<String>,
+        /// Light-theme preview image (png/jpeg/webp) shown on the app card for each HTML --file
+        #[arg(long = "preview-light")]
+        preview_light: Option<String>,
+        /// Dark-theme preview image for each HTML --file (defaults to --preview-light when omitted)
+        #[arg(long = "preview-dark")]
+        preview_dark: Option<String>,
     },
     /// Send a code diff / patch to a channel
     SendDiff {

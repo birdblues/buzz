@@ -34,6 +34,11 @@ pub struct BlobDescriptor {
     /// Duration in seconds for video/audio (optional).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration: Option<f64>,
+    /// Original file name (basename) of the uploaded file. Filled in locally
+    /// after a successful upload — the relay response does not carry it, so it
+    /// must stay optional for deserialization.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
 }
 
 /// Build an `imeta` tag array from a BlobDescriptor (NIP-92 media metadata).
@@ -57,16 +62,61 @@ pub fn build_imeta_tag(d: &BlobDescriptor) -> Vec<String> {
     if let Some(dur) = d.duration {
         tag.push(format!("duration {dur}"));
     }
+    if let Some(ref name) = d.filename {
+        tag.push(format!("filename {name}"));
+    }
     tag
 }
 
+/// Whether an uploaded MIME renders as inline media (image/video) in clients.
+/// Anything else is a generic attachment and is referenced as a plain link.
+pub fn is_inline_media_mime(mime: &str) -> bool {
+    mime.starts_with("image/") || mime.starts_with("video/")
+}
+
+/// Escape a filename for use as Markdown link text, mirroring the desktop
+/// composer (`imetaMediaMarkdown.ts`): backslash, `[` and `]` are escaped so a
+/// hostile name cannot break out of `[label](url)`.
+pub fn escape_markdown_label(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    for ch in name.chars() {
+        match ch {
+            '\\' | '[' | ']' => {
+                out.push('\\');
+                out.push(ch);
+            }
+            '\n' | '\r' => out.push(' '),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+/// Detect the upload MIME from magic bytes only — never from the extension.
+///
+/// `infer` recognises canonical HTML (`<!DOCTYPE html`, `<html`, … after
+/// optional ASCII whitespace); a UTF-8 BOM or an unusual prefix falls through
+/// to `application/octet-stream`, which the relay would then store as an
+/// opaque `.bin` download rather than a runnable app.
+pub fn detect_upload_mime(bytes: &[u8]) -> String {
+    infer::get(bytes)
+        .map(|t| t.mime_type().to_string())
+        .unwrap_or_else(|| "application/octet-stream".to_string())
+}
+
 /// MIME types accepted for upload.
+///
+/// `text/html` rides the relay's generic-file path (`PUT /upload` only) and is
+/// stored as an inert download on `/media/*`; clients that advertise an
+/// app-content door (NIP-11 `app_content_url`) can additionally run it in a
+/// sandbox. See `commands/messages.rs` for the `--preview-*` companions.
 const ALLOWED_MIMES: &[&str] = &[
     "image/jpeg",
     "image/png",
     "image/gif",
     "image/webp",
     "video/mp4",
+    "text/html",
 ];
 
 /// Maximum file size for image uploads (50 MB).
@@ -1171,13 +1221,15 @@ impl BuzzClient {
             .map_err(|e| CliError::Other(format!("failed to read {file_path}: {e}")))?;
 
         // 2. Detect MIME from magic bytes
-        let mime = infer::get(&bytes)
-            .map(|t| t.mime_type().to_string())
-            .unwrap_or_else(|| "application/octet-stream".to_string());
+        let mime = detect_upload_mime(&bytes);
 
         if !ALLOWED_MIMES.contains(&mime.as_str()) {
             return Err(CliError::Usage(format!("unsupported file type: {mime}")));
         }
+        let filename = std::path::Path::new(file_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(str::to_string);
 
         // 3. Size check
         let max = if mime.starts_with("video/") {
@@ -1245,11 +1297,18 @@ impl BuzzClient {
         // (404 or 405), fall back to the legacy /media/upload endpoint.  The 404/405 switch
         // itself is not retried; only transient failures on the selected legacy endpoint are.
         match result {
-            Ok(desc) => return Ok(desc),
+            Ok(mut desc) => {
+                desc.filename = filename;
+                return Ok(desc);
+            }
+            // The legacy `/media/upload` alias is media-only (the relay rejects
+            // anything that is not an image or video there), so generic files
+            // such as HTML never fall back — their 404/405 is final.
             Err(CliError::Relay { status: s, body: _ })
-                if should_retry_legacy_upload(
-                    reqwest::StatusCode::from_u16(s).unwrap_or(reqwest::StatusCode::NOT_FOUND),
-                ) =>
+                if is_inline_media_mime(&mime)
+                    && should_retry_legacy_upload(
+                        reqwest::StatusCode::from_u16(s).unwrap_or(reqwest::StatusCode::NOT_FOUND),
+                    ) =>
             {
                 // Fall through to legacy endpoint below.
             }
@@ -1285,6 +1344,10 @@ impl BuzzClient {
             }
         })
         .await
+        .map(|mut desc| {
+            desc.filename = filename;
+            desc
+        })
     }
 
     /// Download a Blossom media blob using BUD-01 `t=get` auth.
@@ -2593,5 +2656,64 @@ mod tests {
             built.headers().get("x-auth-tag").is_none(),
             "x-auth-tag header must not be present when no auth tag is configured"
         );
+    }
+    #[test]
+    fn detect_upload_mime_recognises_canonical_html_only() {
+        assert_eq!(
+            super::detect_upload_mime(b"<!DOCTYPE html><html></html>"),
+            "text/html"
+        );
+        assert_eq!(
+            super::detect_upload_mime(b"\n  <html lang=\"ko\"><body></body></html>"),
+            "text/html"
+        );
+        // A UTF-8 BOM defeats the sniff — the relay would store this as an opaque .bin.
+        assert_eq!(
+            super::detect_upload_mime(b"\xEF\xBB\xBF<!DOCTYPE html><html></html>"),
+            "application/octet-stream"
+        );
+        assert_eq!(
+            super::detect_upload_mime(b"<svg xmlns=\"x\"></svg>"),
+            "application/octet-stream"
+        );
+        assert_eq!(
+            super::detect_upload_mime(b"plain text"),
+            "application/octet-stream"
+        );
+    }
+
+    #[test]
+    fn escape_markdown_label_neutralises_link_breakouts() {
+        assert_eq!(super::escape_markdown_label("diagram.html"), "diagram.html");
+        assert_eq!(super::escape_markdown_label("a](x)[b"), "a\\](x)\\[b");
+        assert_eq!(super::escape_markdown_label("back\\slash"), "back\\\\slash");
+        assert_eq!(super::escape_markdown_label("multi\nline"), "multi line");
+    }
+
+    #[test]
+    fn imeta_tag_carries_filename_when_present() {
+        let mut desc = super::BlobDescriptor {
+            url: "http://relay.test/media/abc.html".into(),
+            sha256: "abc".into(),
+            size: 10,
+            mime_type: "text/html".into(),
+            uploaded: 0,
+            dim: None,
+            blurhash: None,
+            thumb: None,
+            duration: None,
+            filename: None,
+        };
+        assert!(!super::build_imeta_tag(&desc)
+            .iter()
+            .any(|f| f.starts_with("filename ")));
+        desc.filename = Some("diagram.html".into());
+        assert!(super::build_imeta_tag(&desc).contains(&"filename diagram.html".to_string()));
+        // Relay responses never include `filename`; deserialization must tolerate that.
+        let parsed: super::BlobDescriptor = serde_json::from_str(
+            r#"{"url":"u","sha256":"s","size":1,"type":"text/html","uploaded":0}"#,
+        )
+        .unwrap();
+        assert_eq!(parsed.filename, None);
     }
 }
