@@ -72,6 +72,7 @@ bool _isPublicV4(List<int> b) {
   if (a == 172 && (c & 0xf0) == 16) return false;
   if (a == 192 && c == 168) return false;
   if (a == 192 && c == 0 && (b[2] == 0 || b[2] == 2)) return false;
+  if (a == 192 && c == 88 && b[2] == 99) return false; // 6to4 relay anycast
   if (a == 198 && (c == 18 || c == 19)) return false;
   if (a == 198 && c == 51 && b[2] == 100) return false;
   if (a == 203 && c == 0 && b[2] == 113) return false;
@@ -123,24 +124,64 @@ bool isPublicAddress(InternetAddress address) {
 Future<List<InternetAddress>> lookupHostAddresses(String host) =>
     InternetAddress.lookup(host);
 
-/// An HTTP client whose every connection goes to an address that passed
-/// [isPublicAddress] at connect time, so the resolution the fetcher checked
-/// is the one the socket uses. TLS still validates against the URL's host.
+/// The addresses a preview may connect to for [host]: the literal itself,
+/// or the DNS answers, keeping only those that pass [isPublicAddress] and
+/// listing IPv4 first (dart:io tries one address, and IPv4 is the one a
+/// phone can most reliably reach). Throws when nothing public is left.
+///
+/// Answers from `InternetAddress.lookup` carry the name they were looked up
+/// by in `InternetAddress.host`; the pinned client relies on that for TLS.
+Future<List<InternetAddress>> resolvePublicHostAddresses(String host) async {
+  final literal = InternetAddress.tryParse(host);
+  final addresses = literal != null
+      ? [literal]
+      : await lookupHostAddresses(host);
+  final public = addresses.where(isPublicAddress).toList()
+    ..sort(
+      (a, b) => a.type == b.type
+          ? 0
+          : a.type == InternetAddressType.IPv4
+          ? -1
+          : 1,
+    );
+  if (public.isEmpty) {
+    throw const SocketException(
+      'link preview host did not resolve to a public address',
+    );
+  }
+  return public;
+}
+
+/// An HTTP client that connects only to addresses [resolveHost] returned,
+/// so the answer the fetcher checked is the one the socket goes to (no DNS
+/// rebinding between check and connect), while TLS still verifies the
+/// certificate and sends SNI for the URL's host.
+///
+/// `HttpClient.connectionFactory` hands back a plain socket as-is — with a
+/// factory set, dart:io never upgrades a direct https connection itself
+/// (`http_impl.dart`, `_getConnectionTarget`) — so the factory must do the
+/// handshake. `SecureSocket.startConnect` given the looked-up
+/// [InternetAddress] connects to that address and verifies against
+/// `address.host`, the name it was resolved from (`secure_socket.dart`
+/// `secure`, `socket.address.host`). Plain http never reaches a socket:
+/// previews are https only.
 http.Client pinnedLinkPreviewHttpClient({
-  ResolveHostAddresses resolveHost = lookupHostAddresses,
+  ResolveHostAddresses resolveHost = resolvePublicHostAddresses,
+  SecurityContext? securityContext,
 }) {
-  final inner = HttpClient()
+  final inner = HttpClient(context: securityContext)
     ..connectionTimeout = linkPreviewRequestTimeout
     ..findProxy = ((_) => 'DIRECT')
     ..connectionFactory = (url, proxyHost, proxyPort) async {
-      final addresses = await resolveHost(url.host);
-      final address = addresses.firstWhere(
-        isPublicAddress,
-        orElse: () => throw const SocketException(
-          'link preview host did not resolve to a public address',
-        ),
+      if (url.scheme != 'https') {
+        throw const SocketException('link previews connect over https only');
+      }
+      final address = (await resolveHost(url.host)).first;
+      return SecureSocket.startConnect(
+        address,
+        url.port,
+        context: securityContext,
       );
-      return Socket.startConnect(address, url.port);
     };
   return IOClient(inner);
 }

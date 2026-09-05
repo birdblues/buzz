@@ -104,9 +104,16 @@ What happens as you type:
 2. **Fetch, guarded.** Same rules as the desktop native command:
    https only, no credentials, default port; the host must resolve to global
    unicast addresses — loopback, RFC 1918, link-local, CGNAT, documentation,
-   multicast, ULA, and IPv4-mapped / NAT64 forms of those are refused — and
-   the socket is pinned to the checked addresses (`HttpClient.connectionFactory`),
-   so a rebinding DNS answer cannot redirect the connect; redirects are
+   multicast, ULA, 6to4 anycast, and IPv4-mapped / NAT64 forms of those are
+   refused — and the socket is pinned to the checked addresses, so a
+   rebinding DNS answer cannot redirect the connect. The pin is an
+   `HttpClient.connectionFactory` that opens `SecureSocket.startConnect` on
+   the looked-up `InternetAddress`: with a factory set dart:io does not
+   negotiate TLS itself, and a looked-up address carries the name it was
+   resolved from, so the handshake verifies the certificate and sends SNI
+   for the URL's host while the bytes go to the checked address
+   (`link_preview_pinned_client_test.dart` proves both against a local
+   https server). Redirects are
    followed by hand, at most 3, each hop re-checked; 4 s per request, 10 s
    total; 256 KiB of HTML, 2 MiB per image, 64 KiB of oEmbed.
 3. **Sanitize.** An image must declare `image/jpeg|png|webp`, its bytes must
