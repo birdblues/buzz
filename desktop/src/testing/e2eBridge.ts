@@ -1078,6 +1078,7 @@ type MockManagedAgentRuntimeRow = {
   pid: number | null;
   error: string | null;
   logPath: string | null;
+  exitCause?: "crash" | "intentional" | "unknown";
 };
 
 type WsHandler = (message: unknown) => void;
