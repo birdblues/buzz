@@ -16,6 +16,8 @@ import 'package:nostr/nostr.dart' as nostr;
 import 'package:buzz/features/channels/channel.dart';
 import 'package:buzz/features/channels/channel_management_provider.dart';
 import 'package:buzz/features/channels/compose_bar.dart';
+import 'package:buzz/shared/link_preview/link_preview_fetcher.dart';
+import 'package:buzz/shared/link_preview/link_preview_metadata.dart';
 import 'package:buzz/features/channels/channels_provider.dart';
 import 'package:buzz/features/channels/photo_library.dart';
 import 'package:buzz/features/channels/voice_note_play_pause_icon.dart';
@@ -192,11 +194,16 @@ Widget _buildComposeBar({
   String composeBarKey = 'compose-bar',
   VoiceNoteRecorder Function()? voiceNoteRecorderFactory,
   VoiceNotePlayerController Function()? voiceNotePlayerFactory,
+  LinkPreviewFetcher? linkPreviewFetcher,
 }) {
   return ProviderScope(
     overrides: [
       customEmojiListProvider.overrideWithValue(customEmoji),
       mediaUploadServiceProvider.overrideWithValue(uploadService),
+      // Never let a test reach the network for a preview.
+      linkPreviewFetcherProvider.overrideWithValue(
+        linkPreviewFetcher ?? _NoLinkPreviews(),
+      ),
       if (voiceNoteRecorderFactory != null)
         voiceNoteRecorderFactoryProvider.overrideWithValue(
           voiceNoteRecorderFactory,
@@ -5486,6 +5493,130 @@ void main() {
       expect(controller.selection.baseOffset, 6);
     });
   });
+
+  group('link previews', () {
+    const url = 'https://example.com/post';
+    final fetcher = _FakeLinkPreviews({
+      url: const LinkPreviewCapture(
+        metadata: LinkPreviewMetadata(
+          title: 'A page',
+          siteName: 'Example',
+          description: 'About the page',
+        ),
+      ),
+    });
+
+    testWidgets('a link in the draft shows a card and sends its snapshot', (
+      tester,
+    ) async {
+      List<List<String>>? sentTags;
+      await tester.pumpWidget(
+        _buildComposeBar(
+          uploadService: _testUploadService(nostr.Keys.generate().nsec),
+          linkPreviewFetcher: fetcher,
+          onSend: (content, mentionPubkeys, {mediaTags = const []}) async {
+            sentTags = mediaTags;
+          },
+        ),
+      );
+
+      await _expandComposer(tester);
+      await tester.enterText(find.byType(TextField), 'look $url');
+      // One frame applies the text and arms the debounce; the next fires it.
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('composer-link-preview:$url')),
+        findsOneWidget,
+      );
+      expect(find.text('A page'), findsOneWidget);
+
+      await tester.tap(find.byIcon(LucideIcons.arrowUp));
+      await tester.pumpAndSettle();
+
+      expect(sentTags, isNotNull);
+      expect(
+        sentTags,
+        anyElement(
+          equals([
+            'link-preview',
+            'snapshot',
+            '1',
+            url,
+            'A page',
+            'Example',
+            'About the page',
+            '',
+            '',
+            '',
+            '',
+          ]),
+        ),
+      );
+      expect(
+        find.byKey(const ValueKey('composer-link-preview:$url')),
+        findsNothing,
+      );
+    });
+
+    testWidgets('hiding previews sends the none marker instead', (
+      tester,
+    ) async {
+      List<List<String>>? sentTags;
+      await tester.pumpWidget(
+        _buildComposeBar(
+          uploadService: _testUploadService(nostr.Keys.generate().nsec),
+          linkPreviewFetcher: fetcher,
+          onSend: (content, mentionPubkeys, {mediaTags = const []}) async {
+            sentTags = mediaTags;
+          },
+        ),
+      );
+
+      await _expandComposer(tester);
+      await tester.enterText(find.byType(TextField), 'look $url');
+      // One frame applies the text and arms the debounce; the next fires it.
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(const ValueKey('composer-hide-link-previews')),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('composer-link-preview:$url')),
+        findsNothing,
+      );
+
+      await tester.tap(find.byIcon(LucideIcons.arrowUp));
+      await tester.pumpAndSettle();
+      expect(sentTags, anyElement(equals(['link-preview', 'none'])));
+      expect(sentTags!.where((tag) => tag[0] == 'link-preview'), hasLength(1));
+    });
+
+    testWidgets('a draft without links sends no preview tags', (tester) async {
+      List<List<String>>? sentTags;
+      await tester.pumpWidget(
+        _buildComposeBar(
+          uploadService: _testUploadService(nostr.Keys.generate().nsec),
+          linkPreviewFetcher: fetcher,
+          onSend: (content, mentionPubkeys, {mediaTags = const []}) async {
+            sentTags = mediaTags;
+          },
+        ),
+      );
+
+      await _expandComposer(tester);
+      await tester.enterText(find.byType(TextField), 'hello');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(LucideIcons.arrowUp));
+      await tester.pumpAndSettle();
+      expect(sentTags!.where((tag) => tag[0] == 'link-preview'), isEmpty);
+    });
+  });
 }
 
 MediaUploadService _testUploadService(String nsec) {
@@ -5597,4 +5728,26 @@ Channel _makeChannel({required String name, required String channelType}) {
     createdAt: DateTime(2024),
     memberCount: 5,
   );
+}
+
+class _NoLinkPreviews extends LinkPreviewFetcher {
+  _NoLinkPreviews()
+    : super(
+        client: http_testing.MockClient((_) async => http.Response('', 404)),
+      );
+
+  @override
+  Future<LinkPreviewCapture?> fetch(Uri url) async => null;
+}
+
+class _FakeLinkPreviews extends LinkPreviewFetcher {
+  _FakeLinkPreviews(this.captures)
+    : super(
+        client: http_testing.MockClient((_) async => http.Response('', 404)),
+      );
+
+  final Map<String, LinkPreviewCapture> captures;
+
+  @override
+  Future<LinkPreviewCapture?> fetch(Uri url) async => captures[url.toString()];
 }

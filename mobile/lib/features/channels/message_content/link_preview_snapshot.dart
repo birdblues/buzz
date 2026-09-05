@@ -83,6 +83,62 @@ class LinkPreviewSnapshot {
   );
 }
 
+/// The tag a sender attaches to send a message without any preview.
+const linkPreviewSuppressionTag = ['link-preview', 'none'];
+
+/// [value] cut to [maxBytes] of UTF-8 on a character boundary, with control
+/// characters (newlines too, unless [allowNewlines]) replaced by spaces —
+/// the shape the relay accepts, applied before signing.
+String sanitizeLinkPreviewText(
+  String value,
+  int maxBytes, {
+  bool allowNewlines = false,
+}) {
+  final buffer = StringBuffer();
+  var bytes = 0;
+  for (final rune in value.runes) {
+    final safe = _isControl(rune, allowNewline: allowNewlines) ? 0x20 : rune;
+    final length = utf8.encode(String.fromCharCode(safe)).length;
+    if (bytes + length > maxBytes) break;
+    buffer.writeCharCode(safe);
+    bytes += length;
+  }
+  return buffer.toString();
+}
+
+/// The snapshot tag for one link, or null when [canonicalUrl] is not a
+/// valid canonical URL. Media pairs are passed through as the relay
+/// returned them; the relay re-validates them on ingest.
+List<String>? buildLinkPreviewSnapshotTag({
+  required String canonicalUrl,
+  required String title,
+  required String siteName,
+  required String description,
+  String imageUrl = '',
+  String imageSha256 = '',
+  String faviconUrl = '',
+  String faviconSha256 = '',
+}) {
+  if (!isValidLinkPreviewCanonicalUrl(canonicalUrl)) return null;
+  return [
+    'link-preview',
+    'snapshot',
+    linkPreviewSnapshotVersion,
+    canonicalUrl,
+    sanitizeLinkPreviewText(title, _maxTitleBytes),
+    sanitizeLinkPreviewText(siteName, _maxSiteNameBytes),
+    sanitizeLinkPreviewText(
+      description,
+      _maxDescriptionBytes,
+      allowNewlines: true,
+    ),
+    imageUrl,
+    imageSha256,
+    faviconUrl,
+    faviconSha256,
+  ];
+}
+
 /// Whether the sender suppressed link previews for this message.
 bool hasLinkPreviewSuppression(List<List<String>> tags) {
   return tags.any(
@@ -149,8 +205,8 @@ bool _validText(String value, int maxBytes, {bool allowNewlines = false}) {
 
 /// Blanks the parts of [content] that desktop never previews (code, and
 /// markdown image syntax whose URL is an attachment, not a link), keeping
-/// offsets so callers can order previews by where the link appears.
-@visibleForTesting
+/// offsets so callers can order previews by where the link appears. The
+/// composer uses the same mask to decide which links to preview.
 String maskHiddenLinkPreviewContent(String content) {
   String blank(Match match) => match[0]!.replaceAll(RegExp(r'[^\n]'), ' ');
   return content

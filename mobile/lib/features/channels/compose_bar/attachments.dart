@@ -330,6 +330,7 @@ class _ComposeDraftPayload {
     required String text,
     required List<BlobDescriptor> attachments,
     required List<CustomEmoji> customEmoji,
+    List<List<String>> linkPreviewTags = const [],
   }) {
     var content = text;
     final mediaTags = <List<String>>[];
@@ -338,6 +339,7 @@ class _ComposeDraftPayload {
       content += '\n${attachment.toMarkdownImage()}';
     }
     mediaTags.addAll(buildCustomEmojiTags(content, customEmoji));
+    mediaTags.addAll(linkPreviewTags);
     return _ComposeDraftPayload(content: content, mediaTags: mediaTags);
   }
 }

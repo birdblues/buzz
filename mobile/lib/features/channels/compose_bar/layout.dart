@@ -4,6 +4,9 @@ class _ComposeBarLayout extends HookWidget {
   final Widget? voiceNoteRecorder;
   final List<_PendingAttachment> attachments;
   final ValueChanged<int> onRemoveAttachment;
+  final List<ComposerLinkPreview> linkPreviews;
+  final bool linkPreviewsSuppressed;
+  final VoidCallback onSuppressLinkPreviews;
   final String? uploadError;
   final bool isExpanded;
   final TextEditingController controller;
@@ -33,6 +36,9 @@ class _ComposeBarLayout extends HookWidget {
     required this.voiceNoteRecorder,
     required this.attachments,
     required this.onRemoveAttachment,
+    required this.linkPreviews,
+    required this.linkPreviewsSuppressed,
+    required this.onSuppressLinkPreviews,
     required this.uploadError,
     required this.isExpanded,
     required this.controller,
@@ -100,6 +106,13 @@ class _ComposeBarLayout extends HookWidget {
       ),
       mainAxisSize: MainAxisSize.min,
       children: [
+        if (linkPreviews.isNotEmpty && !linkPreviewsSuppressed) ...[
+          _LinkPreviewStrip(
+            previews: linkPreviews,
+            onSuppress: onSuppressLinkPreviews,
+          ),
+          const SizedBox(height: Grid.xxs),
+        ],
         if (attachments.isNotEmpty) ...[
           _AttachmentStrip(
             attachments: attachments,
