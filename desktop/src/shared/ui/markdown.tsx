@@ -53,8 +53,7 @@ import {
 } from "./markdown/CodeBlock";
 import { EntityLinkAnchor, useOpenEntityLink } from "./markdown/entityLinks";
 import { ExternalLinkAnchor } from "./markdown/ExternalLinkAnchor";
-import { AppCard } from "./markdown/AppCard";
-import { FileCard } from "./markdown/FileCard";
+import { useImetaCard } from "./markdown/imetaCards";
 import {
   AuthoredDeepLinkAnchor,
   ChannelDeepLinkAnchor,
@@ -119,12 +118,7 @@ import {
   useMarkdownRuntime,
 } from "./markdown/runtimeContext";
 import { AgentSnapshotCard } from "./markdown/AgentSnapshotCard";
-import {
-  resolveAppCard,
-  resolveFileCard,
-  resolveSnapshotCard,
-} from "./markdownFileCard";
-import { useAppContentAvailable } from "@/shared/lib/appContent";
+import { resolveSnapshotCard } from "./markdownFileCard";
 import type { MarkdownProps, MarkdownRuntime } from "./markdown/types";
 import { SpoilerInline } from "./markdown/SpoilerInline";
 import {
@@ -1239,15 +1233,19 @@ export function createMarkdownComponents(
       resolveChannelReferences,
       snapshotSharedBy,
     } = useMarkdownRuntime();
-    const appContentAvailable = useAppContentAvailable();
+    const label = getReactNodeText(children);
+    const imetaCard = useImetaCard(
+      href ? imetaByUrl?.get(href) : undefined,
+      href,
+      label,
+      snapshotSharedBy,
+    );
     if (!interactive) {
       return <span className="font-medium text-current">{children}</span>;
     }
     if (hasBlockMedia(React.Children.toArray(children))) {
       return <>{children}</>;
     }
-
-    const label = getReactNodeText(children);
 
     const audioAttachment = renderAudioMessageAttachment(
       href ? imetaByUrl?.get(href) : undefined,
@@ -1287,38 +1285,8 @@ export function createMarkdownComponents(
       );
     }
 
-    // Sandboxed HTML apps: preview card + Run, only when the relay has a door.
-    const appCard = resolveAppCard(
-      href ? imetaByUrl?.get(href) : undefined,
-      href,
-      label,
-      appContentAvailable,
-    );
-    if (appCard) {
-      return (
-        <AppCard
-          downloadHref={appCard.downloadHref}
-          filename={appCard.filename}
-          previewDark={appCard.previewDark}
-          previewLight={appCard.previewLight}
-          sha256={appCard.sha256}
-          sharedBy={snapshotSharedBy}
-          size={appCard.size}
-        />
-      );
-    }
-
-    // Render non-media imeta links as download cards; media uses `img`.
-    const card = resolveFileCard(
-      href ? imetaByUrl?.get(href) : undefined,
-      href,
-      label,
-    );
-    if (card) {
-      return (
-        <FileCard href={card.href} filename={card.filename} size={card.size} />
-      );
-    }
+    // Sandboxed HTML apps (preview + Run) and generic download cards.
+    if (imetaCard) return imetaCard;
 
     // Keep Buzz channel/message navigation in-app.
     if (href) {
