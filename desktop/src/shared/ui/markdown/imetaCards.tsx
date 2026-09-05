@@ -1,4 +1,4 @@
-import type * as React from "react";
+import * as React from "react";
 import { useAppContentAvailable } from "@/shared/lib/appContent";
 import {
   type FileCardImetaEntry,
@@ -7,6 +7,7 @@ import {
 } from "../markdownFileCard";
 import { AppCard } from "./AppCard";
 import { FileCard } from "./FileCard";
+import type { ImetaLookup } from "./types";
 
 /**
  * Resolve an imeta-backed link into its card: a sandboxed HTML app (preview +
@@ -42,4 +43,23 @@ export function useImetaCard(
     );
   }
   return null;
+}
+
+/**
+ * True when a paragraph's children include a link that renders as an app card
+ * (a block-level `<div>`), so `MarkdownParagraph` can emit `<div>` instead of
+ * `<p>` and avoid invalid `<p><div>` nesting. Availability is irrelevant
+ * here: when the relay has no app door the link degrades to an inline
+ * FileCard, which is fine inside a `<div>` too.
+ */
+export function paragraphHasAppCard(
+  children: React.ReactNode[],
+  imetaByUrl: ImetaLookup | undefined,
+): boolean {
+  return children.some((child) => {
+    if (!React.isValidElement<{ href?: string }>(child)) return false;
+    const href = child.props.href;
+    if (typeof href !== "string") return false;
+    return resolveAppCard(imetaByUrl?.get(href), href, "", true) !== null;
+  });
 }

@@ -53,7 +53,7 @@ import {
 } from "./markdown/CodeBlock";
 import { EntityLinkAnchor, useOpenEntityLink } from "./markdown/entityLinks";
 import { ExternalLinkAnchor } from "./markdown/ExternalLinkAnchor";
-import { useImetaCard } from "./markdown/imetaCards";
+import { paragraphHasAppCard, useImetaCard } from "./markdown/imetaCards";
 import {
   AuthoredDeepLinkAnchor,
   ChannelDeepLinkAnchor,
@@ -1533,7 +1533,11 @@ export function createMarkdownComponents(
         return <ImageMosaic>{imageChildren}</ImageMosaic>;
       }
 
-      if (hasBlockMedia(childArray) || hasAudioAttachment) {
+      if (
+        hasBlockMedia(childArray) ||
+        hasAudioAttachment ||
+        paragraphHasAppCard(childArray, imetaByUrl)
+      ) {
         return <div>{children}</div>;
       }
 
