@@ -73,9 +73,11 @@ class LinkPreviewCard extends StatelessWidget {
           ],
         ),
         const SizedBox(height: Grid.quarter),
+        // One line each, like desktop's compact card, so the text block stays
+        // the height of the thumbnail beside it.
         Text(
           title,
-          maxLines: 2,
+          maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: context.textTheme.bodyMedium?.copyWith(
             color: colors.onSurface,
@@ -86,7 +88,7 @@ class LinkPreviewCard extends StatelessWidget {
           const SizedBox(height: Grid.quarter),
           Text(
             description,
-            maxLines: 2,
+            maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: context.textTheme.bodySmall?.copyWith(
               color: colors.onSurfaceVariant,
@@ -120,7 +122,7 @@ class LinkPreviewCard extends StatelessWidget {
           border: Border.all(color: colors.outlineVariant),
         ),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             SizedBox(
               width: thumbnailWidth,

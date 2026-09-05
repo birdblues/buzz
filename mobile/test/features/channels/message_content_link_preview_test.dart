@@ -227,7 +227,11 @@ void main() {
 
     await tester.tap(find.text('Example post'));
     expect(opened, 1);
-    // Newlines collapse in the compact card.
+    // Newlines collapse in the compact card, and every line clamps to one
+    // like desktop's compact card so the block matches the thumbnail height.
     expect(find.text('One Two'), findsOneWidget);
+    expect(tester.widget<Text>(find.text('Example post')).maxLines, 1);
+    expect(tester.widget<Text>(find.text('One Two')).maxLines, 1);
+    expect(tester.widget<Text>(find.text('example.com')).maxLines, 1);
   });
 }

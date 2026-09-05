@@ -67,11 +67,12 @@ Rules, in the order they are applied:
 The card is the desktop **compact** presentation: a 104×64 thumbnail on the
 left when there is an image (favicon, then a broken-image glyph, as fallbacks),
 hostname (favicon + host without `www.`), title (falls back to the hostname),
-description collapsed to one paragraph and clipped to two lines. Without an
-image it is the quote-style variant with a rule on the left. The whole card is
-one button; tapping opens the canonical URL in the system browser. Nothing on
-the card is interactive beyond that, and nothing in it comes from anywhere but
-the signed tag and relay blobs.
+description collapsed to one paragraph. Host, title and description are one
+line each with an ellipsis, as on desktop, so the text block stays the height
+of the thumbnail. Without an image it is the quote-style variant with a rule
+on the left. The whole card is one button; tapping opens the canonical URL in
+the system browser. Nothing on the card is interactive beyond that, and nothing
+in it comes from anywhere but the signed tag and relay blobs.
 
 Not in phase 1: the rich (large image) style and the style preference, the
 "remove preview for everyone" control, tweet-specific layout, and mobile
