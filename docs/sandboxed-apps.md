@@ -145,18 +145,24 @@ app door `http://192.168.1.99:3001`.
    the fetch (check the relay's door log) or at the stamped policy, not ATS.
 4. On the iPad: (a) an archify app renders and is interactive; (b) the probe
    page below shows every escape as blocked — row 9 (`RTCPeerConnection`) is
-   the native script, and the page's own `location.href` must read
-   `about:blank`; (c) link taps, `window.open`, form submits do nothing;
+   the native script, and row 20 must read `origin=null href=about:blank`;
+   (c) link taps, `window.open`, form submits do nothing;
    (d) no blank page; (e) reopening after 10 minutes mints a fresh token;
    (f) the listener-targeted net probe with the `3999`/`3478` listeners up on
    the mac mini reports zero hits (send the run id and time); (g) light/dark
-   preview follows the app theme; (h) a forum post card / the compose-note
-   preview shows the inert pill, not a cropped card.
+   preview follows the app theme; (h) a forum post card shows the inert
+   pill, not a cropped card — needs a forum channel with an HTML attachment
+   (none existed on 2026-09-05). The compose-note preview cannot be reached:
+   `lib/features/pulse/` is not referenced from the rest of the mobile app,
+   so that call site is covered by widget tests only.
 
 ## Sandbox probe
 
 Upload `docs/sandbox-probe.html` as an app and Run it. Every row must read
-**blocked**; if any reads *allowed*, do not ship.
+**blocked**; if any reads *allowed*, do not ship. Row 20 also prints the
+document's `location.href` and origin (`null` on both clients); rows 4–6
+(fetch) are the proof that the policy is enforced, rows 12–13 that the origin
+is opaque, row 9 that the native WebRTC removal ran.
 
 ## Fonts
 

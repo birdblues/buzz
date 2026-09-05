@@ -40,6 +40,8 @@
       var a = allowed === true;
       cell.textContent = a ? 'ALLOWED' : 'blocked';
       cell.className = a ? 'allowed' : 'blocked';
+      // A string result is "blocked, but here is what I saw" (rows 3 and 20).
+      if (typeof allowed === 'string') detail.textContent = allowed.slice(0, 160);
       results.push(a);
     }, function (err) {
       cell.textContent = 'blocked';
@@ -123,6 +125,15 @@
     ['<meta http-equiv=refresh>', function () {
       var m = document.createElement('meta'); m.httpEquiv = 'refresh'; m.content = '0;url=https://example.com/?refresh'; document.head.appendChild(m);
       return new Promise(function (resolve) { setTimeout(function () { resolve(false); }, 2000); });
+    }],
+    ['document origin is opaque (shows location.href)', function () {
+      // Desktop: the sandbox iframe (CSP `sandbox`) → origin "null" with a
+      // buzz-media:// href. Mobile: loadHtmlString without a base URL →
+      // about:blank, origin "null". Anything else means the app runs with a
+      // real origin and could keep storage or reach same-origin resources.
+      var origin = typeof self.origin === 'string' ? self.origin : (location.origin || 'null');
+      if (origin !== 'null') return true;
+      return 'origin=null href=' + location.href;
     }],
   ];
   total = attempts.length;
