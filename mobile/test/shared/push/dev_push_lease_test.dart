@@ -319,13 +319,15 @@ void main() {
     );
   });
 
-  test('descriptor accepts fork-advertised NIP-11 fields', () {
-    // The top-level allowlist is exact; the fork relay advertises these
-    // (crates/buzz-relay/src/nip11.rs) and push must keep working.
+  test('descriptor ignores unknown top-level NIP-11 fields', () {
+    // NIP-11 is extensible. Before this, any top-level key outside an exact
+    // allowlist made the whole descriptor unparseable and silently disabled
+    // push — the fork relay's `app_content_url` did exactly that.
     final information = _descriptorJson(relay.public)
       ..['app_content_url'] = 'http://relay.example:3001'
       ..['admin_api'] = 'http://relay.example:3000'
-      ..['gif'] = {'provider': 'tenor', 'search': '/gif', 'share': '/gif/s'};
+      ..['gif'] = {'provider': 'tenor', 'search': '/gif', 'share': '/gif/s'}
+      ..['some_future_field'] = {'nested': true};
 
     expect(
       BuzzPushLeaseDescriptor.fromRelayInformation(information),
