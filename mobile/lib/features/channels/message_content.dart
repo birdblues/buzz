@@ -31,6 +31,8 @@ import 'media_viewer_page.dart';
 import 'message_gesture_region.dart';
 import 'message_content/app_card.dart';
 import 'message_content/link_normalizer.dart';
+import 'message_content/link_preview_card.dart';
+import 'message_content/link_preview_snapshot.dart';
 import 'message_media.dart';
 import 'voice_note_attachment.dart';
 
@@ -209,6 +211,18 @@ class MessageContent extends HookConsumerWidget {
         ? _extractTrailingImageGallery(content, imetaByUrl)
         : null;
     final markdownContent = trailingGallery?.content ?? content;
+    // External links preview only from the sender's signed snapshot tags
+    // (`docs/link-previews.md`); this client never fetches the linked site.
+    // Cropped surfaces show none, like app cards.
+    final relayBaseUrl = ref.watch(
+      relayConfigProvider.select((config) => config.baseUrl),
+    );
+    final linkPreviews = useMemoized(
+      () => maxLines == null
+          ? parseLinkPreviewSnapshots(tags, content, relayBaseUrl: relayBaseUrl)
+          : const <LinkPreviewSnapshot>[],
+      [tags, content, relayBaseUrl, maxLines],
+    );
     final customEmoji = _mergeCustomEmoji(
       customEmojiFromTags(tags),
       ref.watch(customEmojiListProvider),
@@ -330,27 +344,45 @@ class MessageContent extends HookConsumerWidget {
         ],
       ),
     );
-    if (trailingGallery == null) return markdown;
+    if (trailingGallery == null && linkPreviews.isEmpty) return markdown;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (trailingGallery.content.trim().isNotEmpty) markdown,
-        _MessageMediaShell(
-          child: _MessageImageCarousel(
-            key: ValueKey(
-              trailingGallery.items.map((item) => item.url).join('\u0000'),
+        if (trailingGallery == null ||
+            trailingGallery.content.trim().isNotEmpty)
+          markdown,
+        if (trailingGallery != null)
+          _MessageMediaShell(
+            child: _MessageImageCarousel(
+              key: ValueKey(
+                trailingGallery.items.map((item) => item.url).join('\u0000'),
+              ),
+              items: trailingGallery.items,
+              leadingOverflow: mediaCarouselLeadingOverflow,
+              trailingOverflow: mediaCarouselTrailingOverflow,
+              onReply: onMediaReply,
+              onMore: onMediaMore,
             ),
-            items: trailingGallery.items,
-            leadingOverflow: mediaCarouselLeadingOverflow,
-            trailingOverflow: mediaCarouselTrailingOverflow,
-            onReply: onMediaReply,
-            onMore: onMediaMore,
           ),
-        ),
+        for (final snapshot in linkPreviews)
+          _MessageMediaShell(
+            child: LinkPreviewCard(
+              snapshot: snapshot,
+              onOpen: () => unawaited(_openExternalLink(snapshot.canonicalUrl)),
+            ),
+          ),
       ],
     );
+  }
+
+  /// Link preview cards only ever hold an https URL that passed
+  /// [parseLinkPreviewSnapshots], so they open straight in the browser.
+  Future<void> _openExternalLink(String url) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null || uri.scheme != 'https') return;
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
   Widget _buildMedia(
