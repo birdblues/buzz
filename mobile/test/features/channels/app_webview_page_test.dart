@@ -2,38 +2,66 @@ import 'package:buzz/features/channels/app_webview_page.dart';
 import 'package:buzz/features/channels/message_content/app_card.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
 const _sha = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
-final _initial = Uri.parse('http://192.168.1.99:3001/app/$_sha.html');
 
 void main() {
-  group('isAllowedAppNavigation', () {
-    test('allows only the app document itself', () {
+  group('decideAppNavigation', () {
+    test('allows exactly the first main-frame load of the app document', () {
       expect(
-        isAllowedAppNavigation(
-          initial: _initial,
-          requested: _initial.toString(),
+        decideAppNavigation(
+          request: const NavigationRequest(
+            url: 'about:blank',
+            isMainFrame: true,
+          ),
+          initialPending: true,
         ),
-        isTrue,
+        NavigationDecision.navigate,
+      );
+      // The same request again (reload, window.open, a same-URL form post).
+      expect(
+        decideAppNavigation(
+          request: const NavigationRequest(
+            url: 'about:blank',
+            isMainFrame: true,
+          ),
+          initialPending: false,
+        ),
+        NavigationDecision.prevent,
+      );
+      // A subframe pointing at the document URL.
+      expect(
+        decideAppNavigation(
+          request: const NavigationRequest(
+            url: 'about:blank',
+            isMainFrame: false,
+          ),
+          initialPending: true,
+        ),
+        NavigationDecision.prevent,
       );
     });
 
-    test('refuses every other navigation', () {
+    test('refuses every other navigation, even while the first is pending', () {
       for (final requested in [
         'https://example.com/?leak=1',
-        'http://192.168.1.99:3001/app/$_sha.html?x=1',
-        'http://192.168.1.99:3001/app/$_sha.html#frag',
+        'http://192.168.1.99:3001/app/$_sha.html',
         'http://192.168.1.99:3000/media/$_sha.html',
-        'http://192.168.1.99:3001/app/${'f' * 64}.html',
-        'about:blank',
+        'about:blank#frag',
+        'about:srcdoc',
         'javascript:void(0)',
         'data:text/html,hi',
         'blob:null/abc',
+        'file:///etc/passwd',
         '',
       ]) {
         expect(
-          isAllowedAppNavigation(initial: _initial, requested: requested),
-          isFalse,
+          decideAppNavigation(
+            request: NavigationRequest(url: requested, isMainFrame: true),
+            initialPending: true,
+          ),
+          NavigationDecision.prevent,
           reason: requested,
         );
       }

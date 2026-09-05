@@ -1,37 +1,78 @@
+import 'dart:async';
+
 import 'package:flutter/cupertino.dart' show CupertinoPageRoute;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
+import '../../shared/relay/app_content.dart';
 import '../../shared/relay/media_auth.dart';
+import '../../shared/relay/media_image.dart';
 import '../../shared/relay/relay_info.dart';
 import '../../shared/theme/theme.dart';
 import '../../shared/widgets/buzz_loading_indicator.dart';
 import '../../shared/widgets/frosted_app_bar.dart';
 import '../../shared/widgets/frosted_scaffold.dart';
 
-/// Whether the sandbox WebView may perform [requested].
+/// The only document the sandbox WebView ever navigates to: the app is
+/// handed over as a string (`loadHtmlString` without a base URL), which
+/// WebKit loads as `about:blank` with an opaque origin.
+final appSandboxDocumentUri = Uri.parse('about:blank');
+
+/// Decides one navigation inside the sandbox WebView.
 ///
-/// Only the app's own document URL is ever allowed — the first load. Every
-/// other request (a link tap, `location=`, `<meta refresh>`, a form post, a
-/// subframe load) is refused, so a document cannot carry data out by
-/// navigating. This is the mobile half of the navigation lock; the response
-/// CSP (`sandbox`, `connect-src 'none'`) is the other.
-bool isAllowedAppNavigation({required Uri initial, required String requested}) {
-  final uri = Uri.tryParse(requested);
-  if (uri == null) return false;
-  return uri.toString() == initial.toString();
+/// Exactly one navigation is ever allowed: the first main-frame load of the
+/// app document itself ([appSandboxDocumentUri]). Everything else — a
+/// reload, `window.open`, a form post, any subframe load, a link tap,
+/// `location=`, `<meta refresh>`, `javascript:`/`data:`/`blob:` URLs — is
+/// refused, so a document cannot carry data out by navigating. This is the
+/// mobile half of the navigation lock; the stamped CSP is the other.
+NavigationDecision decideAppNavigation({
+  required NavigationRequest request,
+  required bool initialPending,
+}) {
+  if (!initialPending || !request.isMainFrame) {
+    return NavigationDecision.prevent;
+  }
+  final requested = Uri.tryParse(request.url);
+  if (requested == null ||
+      requested.toString() != appSandboxDocumentUri.toString()) {
+    return NavigationDecision.prevent;
+  }
+  return NavigationDecision.navigate;
 }
+
+/// Asks the native side whether the WebRTC-removal user script hook is
+/// installed (`ios/Runner/SandboxWebViewHardening.swift`). Apps only run when
+/// it is: WebKit ignores the CSP `webrtc 'block'` directive, so without the
+/// hook a page could reach the network over ICE. Android has no hook yet and
+/// therefore never runs apps. Override in tests.
+final sandboxHardeningProbeProvider = Provider<Future<bool> Function()>((ref) {
+  return () async {
+    if (defaultTargetPlatform != TargetPlatform.iOS) return false;
+    try {
+      const channel = MethodChannel('buzz/sandbox_webview');
+      return await channel.invokeMethod<bool>('isHardeningInstalled') ?? false;
+    } on PlatformException {
+      return false;
+    } on MissingPluginException {
+      return false;
+    }
+  };
+});
 
 /// Full-screen sandbox for one HTML app blob (`docs/sandboxed-apps.md`).
 ///
-/// Mints a fresh blob-scoped token, loads
-/// `{app_content_url}/app/{sha256}.html` with it in the `Authorization`
-/// header (never in the URL), and locks navigation to that one request. No
-/// JavaScript channels are registered, so the page has no bridge into the
-/// app. WebRTC is removed natively before the page's script runs — see
-/// `ios/Runner/SandboxWebViewHardening.swift`.
+/// The page never lets the WebView touch the network: the document is
+/// fetched here with a fresh blob-scoped token in the `Authorization` header
+/// (no redirects, size-capped — see [fetchAppDocument]), the sandbox CSP is
+/// stamped into it ([stampSandboxCsp]), and the result is loaded as
+/// `about:blank` with an opaque origin. Navigation is locked to that one
+/// load, no JavaScript channels are registered, and WebRTC is removed
+/// natively before the page's script runs.
 class AppWebViewPage extends ConsumerStatefulWidget {
   final String sha256;
   final String filename;
@@ -70,65 +111,121 @@ class _AppWebViewPageState extends ConsumerState<AppWebViewPage> {
   bool _loading = true;
   String? _error;
 
+  /// Bumped on every (re)load. Work started for an older generation — the
+  /// fetch, the WebView callbacks — checks it and drops out once stale, so a
+  /// late error or finish can never overwrite the current load's state.
+  int _generation = 0;
+
   @override
   void initState() {
     super.initState();
-    _load();
+    // Off the initState stack: the first steps can fail synchronously and
+    // report through setState.
+    unawaited(Future<void>.microtask(_load));
   }
 
-  void _load() {
-    _controller = null;
-    _loading = true;
-    _error = null;
+  void _retry() {
+    setState(() {
+      _controller = null;
+      _loading = true;
+      _error = null;
+    });
+    unawaited(_load());
+  }
+
+  bool _stale(int generation) => generation != _generation || !mounted;
+
+  Future<void> _load() async {
+    final generation = ++_generation;
 
     final appContentUrl = ref.read(appContentUrlProvider);
     if (appContentUrl == null) {
-      _fail('This relay does not serve sandboxed apps.');
+      _fail(generation, 'This relay does not serve sandboxed apps.');
       return;
     }
     final headers = ref
         .read(mediaGetAuthServiceProvider)
         .signAppContentAuth(widget.sha256);
     if (headers == null) {
-      _fail('No signing key is available for this community.');
+      _fail(generation, 'No signing key is available for this community.');
+      return;
+    }
+    final hardened = await ref.read(sandboxHardeningProbeProvider)();
+    if (_stale(generation)) return;
+    if (!hardened) {
+      _fail(
+        generation,
+        'Sandbox hardening is unavailable on this device, so apps cannot run.',
+      );
       return;
     }
 
-    final uri = appContentUri(appContentUrl, widget.sha256);
+    final String html;
+    try {
+      html = await fetchAppDocument(
+        appContentUri(appContentUrl, widget.sha256),
+        headers: headers,
+        client: ref.read(mediaHttpClientProvider),
+      );
+    } on AppContentFetchException catch (error) {
+      _fail(generation, _describeFetchError(error));
+      return;
+    } catch (error) {
+      _fail(generation, 'Could not load this app: $error');
+      return;
+    }
+    if (_stale(generation)) return;
+
+    var initialPending = true;
     final controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setNavigationDelegate(
         NavigationDelegate(
-          onNavigationRequest: (request) =>
-              isAllowedAppNavigation(initial: uri, requested: request.url)
-              ? NavigationDecision.navigate
-              : NavigationDecision.prevent,
-          onPageFinished: (_) {
-            if (!mounted) return;
-            setState(() => _loading = false);
-          },
-          onHttpError: (error) {
-            final status = error.response?.statusCode;
-            _fail(
-              status == null
-                  ? 'The relay refused this app.'
-                  : 'The relay refused this app (HTTP $status).',
+          onNavigationRequest: (request) {
+            final decision = decideAppNavigation(
+              request: request,
+              initialPending: initialPending,
             );
+            if (decision == NavigationDecision.navigate) {
+              initialPending = false;
+            }
+            return decision;
+          },
+          onPageFinished: (_) {
+            if (_stale(generation)) return;
+            setState(() => _loading = false);
           },
           onWebResourceError: (error) {
             if (error.isForMainFrame == false) return;
-            _fail('Could not load this app: ${error.description}');
+            _fail(
+              generation,
+              'Could not render this app: ${error.description}',
+            );
           },
         ),
       )
-      ..loadRequest(uri, headers: headers);
-    _controller = controller;
+      ..loadHtmlString(stampSandboxCsp(html));
+    setState(() => _controller = controller);
   }
 
-  void _fail(String message) {
-    _error = message;
-    _loading = false;
-    if (mounted) setState(() {});
+  String _describeFetchError(AppContentFetchException error) {
+    return switch (error.statusCode) {
+      401 => 'The relay rejected the app token. Try again.',
+      403 => 'You are not allowed to open this app on this relay.',
+      404 => 'This app is no longer on the relay.',
+      413 => 'This app is too large to run.',
+      final status? => 'The relay refused this app (HTTP $status).',
+      null => error.message,
+    };
+  }
+
+  void _fail(int generation, String message) {
+    if (_stale(generation)) return;
+    setState(() {
+      _controller = null;
+      _error = message;
+      _loading = false;
+    });
   }
 
   @override
@@ -188,8 +285,7 @@ class _AppWebViewPageState extends ConsumerState<AppWebViewPage> {
               const Center(
                 child: BuzzLoadingIndicator(semanticLabel: 'Loading app'),
               ),
-            if (error != null)
-              _AppLoadError(message: error, onRetry: () => setState(_load)),
+            if (error != null) _AppLoadError(message: error, onRetry: _retry),
           ],
         ),
       ),

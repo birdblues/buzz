@@ -106,6 +106,12 @@ class MessageContent extends HookConsumerWidget {
   /// their sender ("App shared by …"). Null where no author is in scope.
   final String? authorLabel;
 
+  /// Whether sandboxed HTML apps may render as cards. Preview surfaces that
+  /// crop the body with a box instead of [maxLines] (forum post cards, the
+  /// compose-note preview) turn this off: a cropped card could hide its
+  /// safety chrome and Run button, so they show the inert link instead.
+  final bool allowAppCards;
+
   /// Called when a #channel link is tapped.
   final void Function(String channelId)? onChannelTap;
 
@@ -149,6 +155,7 @@ class MessageContent extends HookConsumerWidget {
     this.channelNames = const {},
     this.tags = const [],
     this.authorLabel,
+    this.allowAppCards = true,
     this.onChannelTap,
     this.onMentionTap,
     this.onMediaReply,
@@ -191,9 +198,13 @@ class MessageContent extends HookConsumerWidget {
         '${entry.key}\u0000${entry.value}',
     ].join('\u0001');
     final imetaByUrl = parseImetaTags(tags);
-    // HTML apps render as cards only when the relay advertises an app door;
-    // otherwise they stay ordinary links (fail closed).
-    final appContentAvailable = ref.watch(appContentUrlProvider) != null;
+    // HTML apps render as cards only when the relay advertises an app door
+    // and this surface shows full messages; otherwise they stay inert links
+    // (fail closed).
+    final appContentAvailable =
+        allowAppCards &&
+        maxLines == null &&
+        ref.watch(appContentUrlProvider) != null;
     final trailingGallery = maxLines == null
         ? _extractTrailingImageGallery(content, imetaByUrl)
         : null;
@@ -350,11 +361,12 @@ class MessageContent extends HookConsumerWidget {
     bool appContentAvailable = false,
   }) {
     final mediaKind = classifyMediaUrl(imageUrl, imeta: imeta);
-    if (mediaKind == MessageMediaKind.app &&
-        imeta != null &&
-        appContentAvailable &&
-        maxLines == null) {
-      return _buildAppCard(context, ref, imeta, imageUrl, '');
+    if (mediaKind == MessageMediaKind.app && imeta != null) {
+      // Never hand HTML to the image decoder: without a door (or on a
+      // preview surface) the attachment is an inert download link.
+      return appContentAvailable
+          ? _buildAppCard(context, ref, imeta, imageUrl, '')
+          : _buildInertAppLink(context, ref, imeta, imageUrl);
     }
     if (mediaKind == MessageMediaKind.audio) {
       return _MessageMediaShell(
@@ -389,6 +401,59 @@ class MessageContent extends HookConsumerWidget {
     );
   }
 
+  String _appFilename(ImetaEntry imeta, String url, String label) {
+    return switch ((imeta.filename?.trim(), label.trim())) {
+      (final name?, _) when name.isNotEmpty => name,
+      (_, final text) when text.isNotEmpty => text,
+      _ => Uri.tryParse(url)?.pathSegments.lastOrNull ?? 'app.html',
+    };
+  }
+
+  Future<void> _downloadAttachment(
+    BuildContext context,
+    WidgetRef ref,
+    String url,
+    String filename,
+  ) async {
+    final auth = ref.read(mediaGetAuthServiceProvider);
+    try {
+      await ref.read(openDownloadedFileProvider)(
+        url,
+        auth.headersFor(url),
+        filename,
+      );
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        const SnackBar(content: Text('Could not open attachment')),
+      );
+    }
+  }
+
+  /// An HTML app referenced with image syntax where no card may render: a
+  /// plain, inert pill that downloads on tap. Nothing is fetched to draw it.
+  Widget _buildInertAppLink(
+    BuildContext context,
+    WidgetRef ref,
+    ImetaEntry imeta,
+    String url,
+  ) {
+    final filename = _appFilename(imeta, url, '');
+    return GestureDetector(
+      onTap: () => _downloadAttachment(context, ref, url, filename),
+      child: _TokenPill(
+        key: ValueKey('app-link:${imeta.sha256}'),
+        icon: LucideIcons.appWindow,
+        interactive: true,
+        semanticLabel: 'Download $filename',
+        text: filename,
+        textStyle: (baseStyle ?? context.textTheme.bodyMedium)?.copyWith(
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
   /// Sandboxed HTML app attachment (`docs/sandboxed-apps.md`): a static
   /// preview card; Run opens [AppWebViewPage], Download saves the blob.
   Widget _buildAppCard(
@@ -399,11 +464,7 @@ class MessageContent extends HookConsumerWidget {
     String label,
   ) {
     final sha256 = imeta.sha256!;
-    final filename = switch ((imeta.filename?.trim(), label.trim())) {
-      (final name?, _) when name.isNotEmpty => name,
-      (_, final text) when text.isNotEmpty => text,
-      _ => Uri.tryParse(url)?.pathSegments.lastOrNull ?? 'app.html',
-    };
+    final filename = _appFilename(imeta, url, label);
     return _MessageMediaShell(
       child: AppCard(
         sha256: sha256,
@@ -419,21 +480,7 @@ class MessageContent extends HookConsumerWidget {
             sharedBy: authorLabel,
           ),
         ),
-        onDownload: () async {
-          final auth = ref.read(mediaGetAuthServiceProvider);
-          try {
-            await ref.read(openDownloadedFileProvider)(
-              url,
-              auth.headersFor(url),
-              filename,
-            );
-          } catch (_) {
-            if (!context.mounted) return;
-            ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-              const SnackBar(content: Text('Could not open attachment')),
-            );
-          }
-        },
+        onDownload: () => _downloadAttachment(context, ref, url, filename),
       ),
     );
   }
@@ -458,10 +505,7 @@ class MessageContent extends HookConsumerWidget {
       return true;
     });
 
-    if (imeta != null &&
-        imeta.isApp &&
-        appContentAvailable &&
-        maxLines == null) {
+    if (imeta != null && imeta.isApp && appContentAvailable) {
       return _buildAppCard(context, ref, imeta, url, text);
     }
     final baseStyle = fallbackStyle ?? linkStyle;

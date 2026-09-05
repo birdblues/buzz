@@ -21,13 +21,14 @@ pub(crate) const SCRIPT: &str = r#"(function () {
   var kill = [
     'RTCPeerConnection', 'webkitRTCPeerConnection', 'RTCDataChannel', 'RTCSessionDescription',
     'RTCIceCandidate', 'RTCRtpSender', 'RTCRtpReceiver', 'RTCRtpTransceiver', 'RTCDtlsTransport',
-    'RTCIceTransport', 'RTCSctpTransport', 'RTCCertificate'
+    'RTCIceTransport', 'RTCSctpTransport', 'RTCCertificate', 'WebTransport'
   ];
   for (var i = 0; i < kill.length; i++) {
     try { Object.defineProperty(window, kill[i], { value: undefined, writable: false, configurable: false, enumerable: false }); } catch (e) {}
   }
   try { Object.defineProperty(Navigator.prototype, 'sendBeacon', { value: function () { return false; }, writable: false, configurable: false }); } catch (e) {}
   try { Object.defineProperty(Navigator.prototype, 'mediaDevices', { value: undefined, configurable: false }); } catch (e) {}
+  try { Object.defineProperty(Navigator.prototype, 'webkitGetUserMedia', { value: undefined, writable: false, configurable: false }); } catch (e) {}
 })();"#;
 
 #[cfg(test)]
@@ -41,6 +42,8 @@ mod tests {
             "RTCPeerConnection",
             "webkitRTCPeerConnection",
             "RTCDataChannel",
+            "WebTransport",
+            "webkitGetUserMedia",
         ] {
             assert!(SCRIPT.contains(name), "missing {name}");
         }

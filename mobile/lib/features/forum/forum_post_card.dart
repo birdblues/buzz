@@ -184,6 +184,7 @@ class ForumPostCard extends HookConsumerWidget {
                 child: IgnorePointer(
                   child: MessageContent(
                     content: preview,
+                    allowAppCards: false,
                     mentionNames: mentionNames,
                     agentMentionPubkeys: agentMentionPubkeys,
                     tags: post.tags,

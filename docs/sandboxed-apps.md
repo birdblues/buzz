@@ -18,10 +18,10 @@ Three independent layers; any one failing leaves the other two:
 
 | Layer | Where | What it guarantees |
 |---|---|---|
-| Response CSP `sandbox allow-scripts; default-src 'none'; connect-src 'none'; webrtc 'block'; …` | relay app door **and** re-stamped by the desktop proxy | opaque origin, no fetch/XHR/WS/beacon, no forms, no plugins. **WebKit ignores `webrtc 'block'`** — see the subframe script below |
-| Subframe script | desktop `sandbox_frame_hardening.rs` (`initialization_script_for_all_frames`); mobile `ios/Runner/SandboxWebViewHardening.swift` (document-start `WKUserScript`, all frames of the sandbox web view) | `RTCPeerConnection` & co. are undefined and `sendBeacon` returns false before app code runs; properties are non-configurable. Observed before the fix: ICE gathering reached a public STUN server from inside the sandbox |
+| Response CSP `sandbox allow-scripts; default-src 'none'; connect-src 'none'; webrtc 'block'; …` | relay app door, re-stamped by the desktop proxy, and stamped as a `<meta>` policy into the document by the mobile client (`sandbox` is not expressible in `<meta>`; the opaque origin there comes from loading the document as `about:blank`) | opaque origin, no fetch/XHR/WS/beacon, no forms, no plugins. Neither client trusts the relay's headers to survive the LAN. **WebKit ignores `webrtc 'block'`** — see the subframe script below |
+| Subframe script | desktop `sandbox_frame_hardening.rs` (`initialization_script_for_all_frames`); mobile `ios/Runner/SandboxWebViewHardening.swift` (document-start `WKUserScript`, all frames of the sandbox web view; the app refuses to run when the hook is not installed) | `RTCPeerConnection` & co., `WebTransport`, `webkitGetUserMedia` are undefined and `sendBeacon` returns false before app code runs; properties are non-configurable. Observed before the fix: ICE gathering reached a public STUN server from inside the sandbox |
 | Embedder sandbox | desktop `<iframe sandbox="allow-scripts">`; mobile `NavigationDelegate` | survives in-frame navigation; no top navigation, popups, downloads, forms |
-| Navigation lock | desktop `navigation_policy.rs` (`WebviewWindowBuilder::on_navigation`), parent CSP `frame-src buzz-media:`; mobile: every request after the first is `prevent` | a frame cannot carry data out by navigating itself to an external URL |
+| Navigation lock | desktop `navigation_policy.rs` (`WebviewWindowBuilder::on_navigation`), parent CSP `frame-src buzz-media:`; mobile: exactly one navigation is allowed — the first main-frame load of the `about:blank` document — every later request, subframe, reload or `window.open` is `prevent` | a frame cannot carry data out by navigating itself to an external URL |
 
 Tokens never appear in a URL. The app door authenticates by
 `Authorization` header only, with a **blob-scoped** kind:24242 event (`x`
@@ -124,9 +124,11 @@ app door `http://192.168.1.99:3001`.
 | App card: theme-matched preview (`Theme.of(context).brightness`), Run, Download, sender in the chrome. Never in clamped previews (`maxLines`) | `mobile/lib/features/channels/message_content/app_card.dart`, wired from `message_content.dart` (`_buildAppCard`, for both `[…]()` and `![…]()` syntax) |
 | NIP-11 `app_content_url` discovery with the desktop's validation (bare origin, relay hostname, distinct origin); re-asked on every reconnect; remembered per relay so a community switch cannot reuse another relay's door | `mobile/lib/shared/relay/relay_info.dart` — `appContentUrlProvider`, null = HTML stays a link |
 | Blob-scoped token: `t=get`, `x`, `expiration = now + 300 s`, **no `server` tag**, minted fresh on every Run (never memoized) | `mobile/lib/shared/relay/media_auth.dart` `signAppContentAuth` |
-| Sandbox page: `CupertinoPageRoute` (slides in from the right, like the desktop drawer; stacks inside the pane in the wide shell), `loadRequest(uri, headers: {Authorization})`, JS unrestricted, **no JavaScript channels**, `onNavigationRequest` allows the initial URL only, error + retry states | `mobile/lib/features/channels/app_webview_page.dart` |
-| ATS: `NSAppTransportSecurity → NSAllowsLocalNetworking = true` (WKWebView obeys ATS; the Dart client does not) | `mobile/ios/Runner/Info.plist` |
-| WebRTC + `sendBeacon` removal. `webview_flutter` has no user-script API, so `WKWebView.load(_:)` is swizzled: a request for `/app/<sha256>.html` registers the document-start script (all frames) on that web view before the navigation starts. The script itself no-ops for a top-level document outside that path | `mobile/ios/Runner/SandboxWebViewHardening.swift`, installed from `AppDelegate` |
+| Document fetch **in Dart**, the way the desktop proxy does it: `Authorization` header (never a URL token), **no redirects** (a 3xx fails — a custom header must never follow one), `text/html` only, ≤ 8 MiB. The WebView itself never touches the network, so a LAN MITM cannot strip the policy and no ATS exception is needed | `mobile/lib/shared/relay/app_content.dart` (`fetchAppDocument`) |
+| CSP stamped by the client: the relay/desktop policy minus `sandbox`, inserted as the first element (after a leading doctype) so no script can precede it; the document is then loaded with `loadHtmlString` and no base URL → `about:blank`, opaque origin, no storage | `app_content.dart` (`stampSandboxCsp`, `appSandboxCsp`) |
+| Sandbox page: `CupertinoPageRoute` (slides in from the right, like the desktop drawer; stacks inside the pane in the wide shell), JS unrestricted, **no JavaScript channels**, `onNavigationRequest` allows exactly the first main-frame `about:blank` load and prevents everything else, generation-fenced retry, error states per relay status | `mobile/lib/features/channels/app_webview_page.dart` (`decideAppNavigation`) |
+| Fail closed on the native hook: before running, Dart asks `buzz/sandbox_webview` → `isHardeningInstalled`; false (hook failed, or a platform without one — Android today) shows an error instead of the app | `app_webview_page.dart` (`sandboxHardeningProbeProvider`), `AppDelegate.swift` |
+| WebRTC + `sendBeacon` removal. `webview_flutter` has no user-script API, so `WKWebView.loadHTMLString(_:baseURL:)` — the sandbox page's only entry point — is swizzled to register the document-start script (all frames) on that web view before the load. `WKUserContentController` is shared by reference with the live page; `webview_flutter` adds its own channel scripts the same way after creation | `mobile/ios/Runner/SandboxWebViewHardening.swift`, installed from `AppDelegate` |
 | Pretendard 1.3.9 (OFL) as a Flutter font family | `mobile/pubspec.yaml`, `mobile/assets/fonts/Pretendard-*.otf` |
 | NIP-11 allowlist widened with `app_content_url`, `admin_api`, `gif`. The push descriptor parser rejects any unknown top-level NIP-11 field, so advertising the door would otherwise have silently disabled push on mobile | `mobile/lib/shared/push/dev_push_lease.dart` |
 
@@ -137,18 +139,19 @@ app door `http://192.168.1.99:3001`.
    mac-mini session (or commit them) — it cannot resolve packages.
 2. Release build → `xcrun devicectl device install app` (`Buzz.app`) → launch
    `dev.birdblues.buzz.mobile`.
-3. Confirm the built `Info.plist` carries
-   `NSAppTransportSecurity/NSAllowsLocalNetworking`. If the WebView still
-   refuses `http://<lan-ip>:3001` (blank page, ATS error in the console), that
-   iOS does not treat a raw private IP as local networking — add an
-   `NSExceptionDomains` entry for the relay host instead.
+3. The built `Info.plist` needs **no** `NSAppTransportSecurity` entry: the
+   document is fetched by the Dart `http` client (not subject to ATS) and the
+   WebView only ever loads `about:blank`. A blank page therefore points at
+   the fetch (check the relay's door log) or at the stamped policy, not ATS.
 4. On the iPad: (a) an archify app renders and is interactive; (b) the probe
    page below shows every escape as blocked — row 9 (`RTCPeerConnection`) is
-   the native script; (c) link taps, `window.open`, form submits do nothing;
-   (d) no ATS error/blank page over `http://<lan-ip>:3001`; (e) reopening
-   after 10 minutes mints a fresh token; (f) the listener-targeted net probe
-   with the `3999`/`3478` listeners up on the mac mini reports zero hits
-   (send the run id and time); (g) light/dark preview follows the app theme.
+   the native script, and the page's own `location.href` must read
+   `about:blank`; (c) link taps, `window.open`, form submits do nothing;
+   (d) no blank page; (e) reopening after 10 minutes mints a fresh token;
+   (f) the listener-targeted net probe with the `3999`/`3478` listeners up on
+   the mac mini reports zero hits (send the run id and time); (g) light/dark
+   preview follows the app theme; (h) a forum post card / the compose-note
+   preview shows the inert pill, not a cropped card.
 
 ## Sandbox probe
 

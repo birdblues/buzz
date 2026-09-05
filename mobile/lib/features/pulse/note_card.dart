@@ -159,6 +159,7 @@ class NoteCard extends HookConsumerWidget {
                 const SizedBox(height: Grid.half),
                 MessageContent(
                   content: note.content,
+                  authorLabel: displayName,
                   tags: note.tags,
                   baseStyle: messageBodyTextStyle.copyWith(
                     color: context.colors.onSurface,

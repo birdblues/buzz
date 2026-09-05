@@ -90,27 +90,23 @@ class AppCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (preview != null)
-            Semantics(
-              button: true,
-              label: 'Run $filename',
-              child: GestureDetector(
-                key: const ValueKey('app-card-preview'),
-                behavior: HitTestBehavior.opaque,
-                onTap: onRun,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(
-                    maxHeight: maxPreviewHeight,
-                  ),
-                  child: ColoredBox(
-                    color: colors.surface,
-                    child: MediaImage(
-                      url: preview,
-                      fit: BoxFit.contain,
-                      width: double.infinity,
-                      semanticLabel: 'Preview of $filename',
-                      errorBuilder: (context, error, stackTrace) =>
-                          const SizedBox.shrink(),
-                    ),
+            // Tapping the preview also runs; assistive tech gets the one Run
+            // button below rather than two identical actions.
+            GestureDetector(
+              key: const ValueKey('app-card-preview'),
+              behavior: HitTestBehavior.opaque,
+              onTap: onRun,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: maxPreviewHeight),
+                child: ColoredBox(
+                  color: colors.surface,
+                  child: MediaImage(
+                    url: preview,
+                    fit: BoxFit.contain,
+                    width: double.infinity,
+                    semanticLabel: 'Preview of $filename',
+                    errorBuilder: (context, error, stackTrace) =>
+                        const SizedBox.shrink(),
                   ),
                 ),
               ),

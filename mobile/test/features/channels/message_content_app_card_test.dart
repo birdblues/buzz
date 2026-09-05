@@ -39,13 +39,15 @@ Widget _testable(
   Widget child, {
   List<Override> overrides = const [],
   ThemeData? theme,
+  http.Client? mediaClient,
 }) {
   return ProviderScope(
     overrides: [
       mediaHttpClientProvider.overrideWithValue(
-        http_testing.MockClient(
-          (_) async => http.Response.bytes(_pngBytes, 200),
-        ),
+        mediaClient ??
+            http_testing.MockClient(
+              (_) async => http.Response.bytes(_pngBytes, 200),
+            ),
       ),
       ...overrides,
     ],
@@ -176,6 +178,69 @@ void main() {
     await tester.pump();
 
     expect(find.byKey(const ValueKey('app-card:$_sha')), findsOneWidget);
+  });
+
+  testWidgets('image syntax without a door renders an inert link, no fetch', (
+    tester,
+  ) async {
+    var requests = 0;
+    await tester.pumpWidget(
+      _testable(
+        const MessageContent(content: '![app]($_url)', tags: [_appTag]),
+        overrides: [appContentUrlProvider.overrideWithValue(null)],
+        mediaClient: http_testing.MockClient((_) async {
+          requests += 1;
+          return http.Response.bytes(_pngBytes, 200);
+        }),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.byType(AppCard), findsNothing);
+    expect(find.byType(MediaImage), findsNothing);
+    expect(find.byKey(const ValueKey('app-link:$_sha')), findsOneWidget);
+    expect(find.text('sequence.html'), findsOneWidget);
+    expect(requests, 0, reason: 'HTML is never handed to the image decoder');
+  });
+
+  testWidgets('allowAppCards: false keeps cropped previews card-free', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _testable(
+        const MessageContent(
+          content: '[sequence.html]($_url)',
+          tags: [_appTag],
+          allowAppCards: false,
+        ),
+        overrides: [appContentUrlProvider.overrideWithValue(_door)],
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byType(AppCard), findsNothing);
+    expect(find.byType(MediaImage), findsNothing);
+    expect(
+      find.textContaining('sequence.html', findRichText: true),
+      findsWidgets,
+    );
+
+    await tester.pumpWidget(
+      _testable(
+        const MessageContent(
+          content: '![app]($_url)',
+          tags: [_appTag],
+          allowAppCards: false,
+        ),
+        overrides: [appContentUrlProvider.overrideWithValue(_door)],
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byType(AppCard), findsNothing);
+    expect(find.byType(MediaImage), findsNothing);
+    expect(find.byKey(const ValueKey('app-link:$_sha')), findsOneWidget);
   });
 
   testWidgets('Download fetches the blob with the media auth headers', (

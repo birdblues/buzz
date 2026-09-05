@@ -28,6 +28,7 @@ import os.log
     keychainAccessGroup: pushKeychainAccessGroup
   )
   private var qrScannerChannel: FlutterMethodChannel?
+  private var sandboxWebViewChannel: FlutterMethodChannel?
   private var inlinePhotoPickerSupportChannel: FlutterMethodChannel?
   private var concentricSheetSurfaceChannel: FlutterMethodChannel?
   private var nativeAttachmentPopoverCoordinator: NativeAttachmentPopoverCoordinator?
@@ -66,6 +67,17 @@ import os.log
     }
     apnsRegistrationBuffer.attach { [weak self] update in
       self?.pushChannel?.invokeMethod(update.method, arguments: update.arguments)
+    }
+    sandboxWebViewChannel = FlutterMethodChannel(
+      name: "buzz/sandbox_webview",
+      binaryMessenger: messenger
+    )
+    sandboxWebViewChannel?.setMethodCallHandler { call, result in
+      guard call.method == "isHardeningInstalled" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      result(SandboxWebViewHardening.isInstalled)
     }
     qrScannerChannel = FlutterMethodChannel(
       name: "buzz/qr_scanner",

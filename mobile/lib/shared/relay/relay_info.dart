@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -66,6 +67,9 @@ Future<String?> fetchAppContentUrl(
   return validateAppContentUrl(advertised, relayBaseUrl);
 }
 
+/// How long to wait before re-asking after a failed NIP-11 lookup.
+const appContentDiscoveryRetryDelay = Duration(seconds: 30);
+
 /// One NIP-11 answer, remembered together with the relay it came from so a
 /// community switch can never reuse another relay's door.
 @immutable
@@ -98,6 +102,10 @@ final appContentDiscoveryProvider = FutureProvider<AppContentDiscovery>((
     appContentUrl = await fetchAppContentUrl(baseUrl, client: client);
   } catch (error) {
     debugPrint('NIP-11 app_content_url lookup failed: $error');
+    // A transport failure while the session stays connected would otherwise
+    // leave the door unknown until the next reconnect; ask again shortly.
+    final retry = Timer(appContentDiscoveryRetryDelay, ref.invalidateSelf);
+    ref.onDispose(retry.cancel);
   }
   return AppContentDiscovery(
     relayBaseUrl: baseUrl,
