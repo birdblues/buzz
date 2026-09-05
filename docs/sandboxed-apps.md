@@ -81,6 +81,12 @@ buzz messages send --channel <UUID> --content "…" \
 Do not build or run the Flutter app on the M-series dev Mac; verify on a
 physical iPad from the Intel Mac session.
 
+**Assignment (2026-09-05):** items 1–8 below are the Intel-Mac session's work
+— `mobile/` has no changes on this branch yet, so implementation comes first.
+Test fixtures are already in `#test`: an archify sequence app with light/dark
+previews, `sandbox-probe.html`, and a listener-targeted `sandbox-net-probe.html`.
+Relay: `ws://192.168.1.99:3000`, app door `http://192.168.1.99:3001`.
+
 1. `pubspec.yaml`: add `webview_flutter`. `ios/Runner/Info.plist`: add
    `NSAppTransportSecurity` → `NSAllowsLocalNetworking = true` (WKWebView
    obeys ATS; the Dart `http` client does not).
@@ -102,6 +108,16 @@ physical iPad from the Intel Mac session.
    but the initial URL, top bar with sender + "sandbox" + close.
 7. Bundle Pretendard (same release as the desktop/skill assets) as a Flutter
    font family for future SVG previews.
+7b. **WebKit ignores the CSP `webrtc 'block'` directive** — on the desktop
+   the probe reached a public STUN server over UDP from inside the sandbox
+   until a user script removed WebRTC. Add a document-start `WKUserScript`
+   (webview_flutter: `runJavaScript` is too late; use the platform
+   `WKUserScript` injection) that defines `RTCPeerConnection`,
+   `webkitRTCPeerConnection`, `RTCDataChannel` & co. as non-configurable
+   `undefined` and makes `navigator.sendBeacon` return `false`. Mirror
+   `desktop/src-tauri/src/sandbox_frame_hardening.rs`; the mobile page is the
+   top frame, so apply it unconditionally (no `window.top === window` guard).
+   Probe row 9 (`RTCPeerConnection + ICE gather`) is the check.
 8. On the iPad: (a) an archify app renders and is interactive; (b) the probe
    page below shows every escape as blocked; (c) link taps, `window.open`,
    form submits do nothing; (d) no ATS error/blank page over
