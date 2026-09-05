@@ -113,6 +113,82 @@ impl std::fmt::Debug for KlipyConfig {
 /// WebSocket close-frame delivery after the final delayed cancellation.
 pub const MAX_DRAIN_JITTER_MS: u64 = 20_000;
 
+/// Sandboxed app-content door: serves uploaded `text/html` blobs from a
+/// *separate origin* (a second TCP listener) under a CSP `sandbox`, for the
+/// desktop/mobile "run this app" surface. Off unless both
+/// `BUZZ_APP_CONTENT_BIND_ADDR` and `BUZZ_APP_CONTENT_URL` are set.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppContentConfig {
+    /// Address the app-content listener binds to (e.g. `0.0.0.0:3001`).
+    pub bind_addr: SocketAddr,
+    /// Public origin clients use to reach that listener — bare
+    /// `scheme://host[:port]`, no path/query/userinfo. Advertised via NIP-11
+    /// as `app_content_url`.
+    pub public_url: String,
+    /// Largest HTML blob the door will serve. Executable content in a webview
+    /// must stay far below the generic 100 MB file cap.
+    pub max_bytes: u64,
+}
+
+/// Default `BUZZ_APP_CONTENT_MAX_BYTES` (8 MiB).
+pub const DEFAULT_APP_CONTENT_MAX_BYTES: u64 = 8 * 1024 * 1024;
+
+/// Parse the three `BUZZ_APP_CONTENT_*` values into a config, or `None` when
+/// the feature is off. Both `bind_addr` and `public_url` must be set together;
+/// a lone value is a startup error rather than a silently half-configured door.
+pub(crate) fn parse_app_content_config(
+    bind_addr: Option<&str>,
+    public_url: Option<&str>,
+    max_bytes: Option<&str>,
+) -> Result<Option<AppContentConfig>, ConfigError> {
+    let bind_addr = bind_addr.map(str::trim).filter(|s| !s.is_empty());
+    let public_url = public_url.map(str::trim).filter(|s| !s.is_empty());
+    let (bind_addr, public_url) = match (bind_addr, public_url) {
+        (None, None) => return Ok(None),
+        (Some(bind), Some(url)) => (bind, url),
+        _ => {
+            return Err(ConfigError::InvalidValue(
+                "BUZZ_APP_CONTENT_BIND_ADDR and BUZZ_APP_CONTENT_URL must be set together"
+                    .to_string(),
+            ))
+        }
+    };
+
+    let bind_addr: SocketAddr = bind_addr.parse().map_err(|_| {
+        ConfigError::InvalidValue(format!("invalid BUZZ_APP_CONTENT_BIND_ADDR: {bind_addr}"))
+    })?;
+
+    let parsed = url::Url::parse(public_url).map_err(|_| {
+        ConfigError::InvalidValue(format!("invalid BUZZ_APP_CONTENT_URL: {public_url}"))
+    })?;
+    let is_bare_origin = matches!(parsed.scheme(), "http" | "https")
+        && parsed.host_str().is_some()
+        && parsed.username().is_empty()
+        && parsed.password().is_none()
+        && parsed.query().is_none()
+        && parsed.fragment().is_none()
+        && matches!(parsed.path(), "" | "/");
+    if !is_bare_origin {
+        return Err(ConfigError::InvalidValue(format!(
+            "BUZZ_APP_CONTENT_URL must be a bare http(s) origin with no path, query, or credentials: {public_url}"
+        )));
+    }
+    let public_url = public_url.trim_end_matches('/').to_string();
+
+    let max_bytes = match max_bytes.map(str::trim).filter(|s| !s.is_empty()) {
+        None => DEFAULT_APP_CONTENT_MAX_BYTES,
+        Some(raw) => raw.parse::<u64>().ok().filter(|n| *n > 0).ok_or_else(|| {
+            ConfigError::InvalidValue(format!("invalid BUZZ_APP_CONTENT_MAX_BYTES: {raw}"))
+        })?,
+    };
+
+    Ok(Some(AppContentConfig {
+        bind_addr,
+        public_url,
+        max_bytes,
+    }))
+}
+
 /// Relay runtime configuration, loaded from environment variables.
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -196,6 +272,8 @@ pub struct Config {
     pub health_port: u16,
     /// TCP port for the Prometheus metrics exporter (`GET /metrics`).
     pub metrics_port: u16,
+    /// Sandboxed app-content door (second listener). `None` = feature off.
+    pub app_content: Option<AppContentConfig>,
 
     /// When true, NIP-42 pubkey-only authentication (no API token) is
     /// restricted to pubkeys in the `pubkey_allowlist` table. Users with valid
@@ -825,6 +903,20 @@ impl Config {
             .and_then(|v| v.parse().ok())
             .unwrap_or(9102);
 
+        let app_content = parse_app_content_config(
+            std::env::var("BUZZ_APP_CONTENT_BIND_ADDR").ok().as_deref(),
+            std::env::var("BUZZ_APP_CONTENT_URL").ok().as_deref(),
+            std::env::var("BUZZ_APP_CONTENT_MAX_BYTES").ok().as_deref(),
+        )?;
+        if let Some(ref app) = app_content {
+            tracing::info!(
+                bind = %app.bind_addr,
+                url = %app.public_url,
+                max_bytes = app.max_bytes,
+                "app-content door enabled"
+            );
+        }
+
         let s3_addressing_style = match std::env::var("BUZZ_S3_ADDRESSING_STYLE") {
             Ok(value) => value.parse().map_err(ConfigError::InvalidValue)?,
             Err(std::env::VarError::NotPresent) => buzz_media::config::S3AddressingStyle::default(),
@@ -1224,6 +1316,7 @@ impl Config {
             uds_path,
             health_port,
             metrics_port,
+            app_content,
             pubkey_allowlist_enabled,
             require_relay_membership,
             huddle_audio_available,
@@ -2373,6 +2466,66 @@ mod tests {
         assert!(
             matches!(result, Err(ConfigError::InvalidValue(ref msg)) if msg.contains("BUZZ_GIT_REPO_PATH")),
             "expected InvalidValue mentioning BUZZ_GIT_REPO_PATH, got {result:?}"
+        );
+    }
+    #[test]
+    fn app_content_config_off_when_both_unset() {
+        assert_eq!(parse_app_content_config(None, None, None).unwrap(), None);
+        assert_eq!(
+            parse_app_content_config(Some(""), Some("  "), None).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn app_content_config_requires_both_values() {
+        assert!(parse_app_content_config(Some("0.0.0.0:3001"), None, None).is_err());
+        assert!(parse_app_content_config(None, Some("http://relay.example:3001"), None).is_err());
+    }
+
+    #[test]
+    fn app_content_config_parses_bare_origin_and_default_cap() {
+        let cfg = parse_app_content_config(
+            Some("0.0.0.0:3001"),
+            Some("http://192.168.1.99:3001/"),
+            None,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(cfg.bind_addr, "0.0.0.0:3001".parse().unwrap());
+        assert_eq!(cfg.public_url, "http://192.168.1.99:3001");
+        assert_eq!(cfg.max_bytes, DEFAULT_APP_CONTENT_MAX_BYTES);
+    }
+
+    #[test]
+    fn app_content_config_rejects_non_bare_origins() {
+        for bad in [
+            "192.168.1.99:3001",
+            "http://relay.example/app",
+            "http://relay.example/?x=1",
+            "http://user:pw@relay.example",
+            "ws://relay.example:3001",
+            "http://relay.example#frag",
+        ] {
+            assert!(
+                parse_app_content_config(Some("0.0.0.0:3001"), Some(bad), None).is_err(),
+                "{bad} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn app_content_config_validates_max_bytes() {
+        let ok = parse_app_content_config(Some("0.0.0.0:3001"), Some("http://h:1"), Some("1024"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(ok.max_bytes, 1024);
+        assert!(
+            parse_app_content_config(Some("0.0.0.0:3001"), Some("http://h:1"), Some("0")).is_err()
+        );
+        assert!(
+            parse_app_content_config(Some("0.0.0.0:3001"), Some("http://h:1"), Some("big"))
+                .is_err()
         );
     }
 }

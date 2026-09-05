@@ -301,6 +301,20 @@ pub fn build_health_router(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
+/// Build the app-content router served on its own listener (`Config::app_content`).
+///
+/// Exactly one route. No CORS, no SPA fallback, no upload, no WebSocket, no
+/// NIP-11 — anything but `/app/{sha}.html` is a 404. Reuses the relay's
+/// method-only HTTP span so no request line (and thus no header token or
+/// path) is ever logged from this door.
+pub fn build_app_content_router(state: Arc<AppState>) -> Router {
+    Router::new()
+        .route("/app/{sha256_ext}", get(api::app_content::get_app_content))
+        .fallback(|| async { StatusCode::NOT_FOUND })
+        .layer(http_trace_layer())
+        .with_state(state)
+}
+
 /// Content-negotiated: NIP-11 JSON for plain HTTP, WebSocket upgrade otherwise.
 async fn nip11_or_ws_handler(
     State(state): State<Arc<AppState>>,
