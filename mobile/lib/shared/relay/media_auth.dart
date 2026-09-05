@@ -5,9 +5,15 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:nostr/nostr.dart' as nostr;
 
 import 'relay_provider.dart';
+import 'sha256_hex.dart';
 
 const _mediaGetAuthKind = 24242;
 const _mediaGetAuthLifetimeSeconds = 600;
+
+/// Lifetime of a sandboxed-app door token. The relay caps `expiration` at
+/// now + 600 s with 60 s of clock-skew tolerance; minting half of that keeps
+/// a device clock that runs ahead of the relay well inside the cap.
+const appContentAuthLifetimeSeconds = 300;
 
 /// Re-sign this long before the cached auth event expires, so an in-flight
 /// request signed just before the boundary still lands well within validity.
@@ -80,6 +86,48 @@ class MediaGetAuthService {
       // unsigned fetch still works. Once the flag is on, this request will 403
       // instead of crashing the widget tree because local key material is bad.
       return const {};
+    }
+  }
+
+  /// Mints a fresh, blob-scoped kind-24242 header for the sandboxed app
+  /// door (`GET {app_content_url}/app/{sha256}.html`).
+  ///
+  /// Unlike [headersFor] the event carries `x` (the blob hash) and **no
+  /// `server` tag**, so a leaked token opens exactly one blob, briefly. It
+  /// is never memoized: every Run gets its own token, so reopening an app
+  /// after the previous token expired just works. Returns null when there is
+  /// no signing key or [sha256] is not a lowercase 64-hex hash.
+  Map<String, String>? signAppContentAuth(String sha256) {
+    final nsec = _nsec;
+    if (nsec == null || nsec.isEmpty) return null;
+    if (!isSha256Hex(sha256)) return null;
+    try {
+      final privkeyHex = nostr.Nip19.decode(payload: nsec).data;
+      if (privkeyHex.isEmpty) {
+        throw Exception('Invalid nsec');
+      }
+      final expiration =
+          (_now().millisecondsSinceEpoch ~/ 1000) +
+          appContentAuthLifetimeSeconds;
+      final event = nostr.Event.from(
+        kind: _mediaGetAuthKind,
+        content: 'Get buzz-app',
+        tags: [
+          ['t', 'get'],
+          ['x', sha256],
+          ['expiration', '$expiration'],
+        ],
+        secretKey: privkeyHex,
+        verify: false,
+      );
+      final encoded = base64Url
+          .encode(utf8.encode(event.toJson()))
+          .replaceAll('=', '');
+      return Map<String, String>.unmodifiable({
+        'Authorization': 'Nostr $encoded',
+      });
+    } catch (_) {
+      return null;
     }
   }
 

@@ -1,7 +1,13 @@
 import 'package:flutter/foundation.dart';
 
+import '../../shared/relay/sha256_hex.dart';
+
 /// Media presentation selected for a message attachment URL.
-enum MessageMediaKind { image, video, audio }
+///
+/// [app] is a sandboxed HTML app — `m text/html` with a verifiable blob hash
+/// (see `docs/sandboxed-apps.md`). It renders as a static preview card and
+/// only runs in the sandbox WebView on an explicit tap, never inline.
+enum MessageMediaKind { image, video, audio, app }
 
 /// Parsed metadata from a NIP-92 `imeta` tag.
 @immutable
@@ -16,6 +22,15 @@ class ImetaEntry {
   final String? filename;
   final int? size;
 
+  /// Blob SHA-256 (`x`) as lowercase hex, or null when absent or malformed.
+  final String? sha256;
+
+  /// Fork-local themed preview images for a sandboxed HTML app
+  /// (`preview-light` / `preview-dark`). Plain image blobs on the relay;
+  /// nothing in them can run.
+  final String? previewLight;
+  final String? previewDark;
+
   const ImetaEntry({
     required this.url,
     this.mimeType,
@@ -26,11 +41,19 @@ class ImetaEntry {
     this.duration,
     this.filename,
     this.size,
+    this.sha256,
+    this.previewLight,
+    this.previewDark,
   });
 
   bool get isVideo => mimeType?.startsWith('video/') == true;
 
   bool get isAudio => mimeType?.startsWith('audio/') == true;
+
+  /// A sandboxed HTML app: `text/html` plus the blob hash the app door needs.
+  /// Without the hash there is nothing to ask the door for, so the attachment
+  /// stays an ordinary link.
+  bool get isApp => mimeType == 'text/html' && sha256 != null;
 
   String? get posterUrl => image ?? thumb;
 
@@ -61,6 +84,9 @@ Map<String, ImetaEntry> parseImetaTags(List<List<String>> tags) {
     double? duration;
     String? filename;
     int? size;
+    String? sha256;
+    String? previewLight;
+    String? previewDark;
 
     for (final part in tag.skip(1)) {
       final separator = part.indexOf(' ');
@@ -92,6 +118,13 @@ Map<String, ImetaEntry> parseImetaTags(List<List<String>> tags) {
           filename = value;
         case 'size':
           size = int.tryParse(value);
+        case 'x':
+          final hash = value.trim().toLowerCase();
+          sha256 = isSha256Hex(hash) ? hash : null;
+        case 'preview-light':
+          previewLight = value;
+        case 'preview-dark':
+          previewDark = value;
       }
     }
 
@@ -106,6 +139,9 @@ Map<String, ImetaEntry> parseImetaTags(List<List<String>> tags) {
       duration: duration,
       filename: filename,
       size: size,
+      sha256: sha256,
+      previewLight: previewLight,
+      previewDark: previewDark,
     );
   }
   return byUrl;
@@ -113,6 +149,9 @@ Map<String, ImetaEntry> parseImetaTags(List<List<String>> tags) {
 
 /// Classifies [url] using authoritative [imeta] before extension fallback.
 MessageMediaKind? classifyMediaUrl(String url, {ImetaEntry? imeta}) {
+  // Apps are decided by imeta alone: an `.html` URL without a hash is a link.
+  if (imeta != null && imeta.isApp) return MessageMediaKind.app;
+
   final mimeType = imeta?.mimeType;
   if (mimeType != null) {
     final filename = imeta?.filename?.toLowerCase();

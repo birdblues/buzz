@@ -39,6 +39,7 @@
 		42C129326CE4E1B8E617B9CD /* Pods_RunnerTests.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CD6B899582D0416ADBD8A68F /* Pods_RunnerTests.framework */; };
 		74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74858FAE1ED2DC5600515810 /* AppDelegate.swift */; };
 		BZZ00000000000000000023 /* PushNativeState.swift in Sources */ = {isa = PBXBuildFile; fileRef = BZZ00000000000000000024 /* PushNativeState.swift */; };
+		BZZ00000000000000000030 /* SandboxWebViewHardening.swift in Sources */ = {isa = PBXBuildFile; fileRef = BZZ00000000000000000031 /* SandboxWebViewHardening.swift */; };
 		BZZ00000000000000000026 /* PushEndpointGrantStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BZZ00000000000000000027 /* PushEndpointGrantStore.swift */; };
 		BZZ00000000000000000029 /* PushSnapshotBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = BZZ0000000000000000002A /* PushSnapshotBridge.swift */; };
 		BZZ0000000000000000002B /* BuzzCommunicationNotificationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BZZ0000000000000000002C /* BuzzCommunicationNotificationTests.swift */; };
@@ -121,6 +122,7 @@
 		74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Runner-Bridging-Header.h"; sourceTree = "<group>"; };
 		74858FAE1ED2DC5600515810 /* AppDelegate.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		BZZ00000000000000000024 /* PushNativeState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushNativeState.swift; sourceTree = "<group>"; };
+		BZZ00000000000000000031 /* SandboxWebViewHardening.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SandboxWebViewHardening.swift; sourceTree = "<group>"; };
 		BZZ00000000000000000027 /* PushEndpointGrantStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushEndpointGrantStore.swift; sourceTree = "<group>"; };
 		BZZ0000000000000000002A /* PushSnapshotBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushSnapshotBridge.swift; sourceTree = "<group>"; };
 		BZZ0000000000000000002C /* BuzzCommunicationNotificationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BuzzCommunicationNotificationTests.swift; sourceTree = "<group>"; };
@@ -247,6 +249,7 @@
 				1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */,
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
 				BZZ00000000000000000024 /* PushNativeState.swift */,
+				BZZ00000000000000000031 /* SandboxWebViewHardening.swift */,
 				BZZ00000000000000000027 /* PushEndpointGrantStore.swift */,
 				BZZ0000000000000000002A /* PushSnapshotBridge.swift */,
 				331C809A294A618700263BE5 /* MediaSanitizer.swift */,
@@ -574,6 +577,7 @@
 			files = (
 				74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */,
 				BZZ00000000000000000023 /* PushNativeState.swift in Sources */,
+				BZZ00000000000000000030 /* SandboxWebViewHardening.swift in Sources */,
 				BZZ00000000000000000026 /* PushEndpointGrantStore.swift in Sources */,
 				BZZ00000000000000000029 /* PushSnapshotBridge.swift in Sources */,
 				331C809B294A63AB00263BE5 /* MediaSanitizer.swift in Sources */,

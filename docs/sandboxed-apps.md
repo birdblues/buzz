@@ -19,7 +19,7 @@ Three independent layers; any one failing leaves the other two:
 | Layer | Where | What it guarantees |
 |---|---|---|
 | Response CSP `sandbox allow-scripts; default-src 'none'; connect-src 'none'; webrtc 'block'; …` | relay app door **and** re-stamped by the desktop proxy | opaque origin, no fetch/XHR/WS/beacon, no forms, no plugins. **WebKit ignores `webrtc 'block'`** — see the subframe script below |
-| Subframe script | desktop `sandbox_frame_hardening.rs` (`initialization_script_for_all_frames`) | in every non-main frame, `RTCPeerConnection` & co. are undefined and `sendBeacon` returns false before app code runs; properties are non-configurable. Observed before the fix: ICE gathering reached a public STUN server from inside the sandbox |
+| Subframe script | desktop `sandbox_frame_hardening.rs` (`initialization_script_for_all_frames`); mobile `ios/Runner/SandboxWebViewHardening.swift` (document-start `WKUserScript`, all frames of the sandbox web view) | `RTCPeerConnection` & co. are undefined and `sendBeacon` returns false before app code runs; properties are non-configurable. Observed before the fix: ICE gathering reached a public STUN server from inside the sandbox |
 | Embedder sandbox | desktop `<iframe sandbox="allow-scripts">`; mobile `NavigationDelegate` | survives in-frame navigation; no top navigation, popups, downloads, forms |
 | Navigation lock | desktop `navigation_policy.rs` (`WebviewWindowBuilder::on_navigation`), parent CSP `frame-src buzz-media:`; mobile: every request after the first is `prevent` | a frame cannot carry data out by navigating itself to an external URL |
 
@@ -107,55 +107,48 @@ Report back by cross-session message to the mac-mini session (it shows as
 "buzz 웹앱 구현" in your ListAgents) with one line per item 2–6 and the run id
 from item 5. Then continue with the mobile checklist below.
 
-## Mobile — checklist for the Intel-Mac session (real iPad)
+## Mobile — code on the mac mini, build and verify on the Intel Mac (real iPad)
 
-Do not build or run the Flutter app on the M-series dev Mac; verify on a
-physical iPad from the Intel Mac session.
+The M-series dev Mac has no Flutter toolchain or pub cache, so the mobile
+code is written there and **analyzed, built, installed and verified from the
+Intel-Mac session** on a physical iPad. Test fixtures are in `#test`: an
+archify sequence app with light/dark previews, `sandbox-probe.html`, and a
+listener-targeted `sandbox-net-probe.html`. Relay: `ws://192.168.1.99:3000`,
+app door `http://192.168.1.99:3001`.
 
-**Assignment (2026-09-05):** items 1–8 below are the Intel-Mac session's work
-— `mobile/` has no changes on this branch yet, so implementation comes first.
-Test fixtures are already in `#test`: an archify sequence app with light/dark
-previews, `sandbox-probe.html`, and a listener-targeted `sandbox-net-probe.html`.
-Relay: `ws://192.168.1.99:3000`, app door `http://192.168.1.99:3001`.
+### Implementation (2026-09-05)
 
-1. `pubspec.yaml`: add `webview_flutter`. `ios/Runner/Info.plist`: add
-   `NSAppTransportSecurity` → `NSAllowsLocalNetworking = true` (WKWebView
-   obeys ATS; the Dart `http` client does not).
-2. `lib/features/channels/message_media.dart`: parse imeta `x`,
-   `preview-light`, `preview-dark`; add `MessageMediaKind.app` for
-   `m == text/html && x`.
-3. `lib/features/channels/message_content.dart` `_buildLink`: when the link's
-   imeta resolves to an app → `AppCard` (preview chosen by
-   `Theme.of(context).brightness`, Run, Download). Widget test.
-4. `lib/shared/relay/relay_info.dart`: read NIP-11 `app_content_url`, same
-   validation as desktop (bare origin, relay hostname, distinct port).
-5. `lib/shared/relay/media_auth.dart`: `signAppContentAuth(sha256)` — `t=get`,
-   `x`, `expiration = now + 300 s`, **no `server` tag**. Leave the existing
-   server-scoped signer untouched. The relay caps `expiration` at `now + 600`
-   with **no clock-skew tolerance**, so minting the full 600 s returns 401
-   whenever the device clock is a second ahead of the relay (seen on a second
-   Mac); 300 s leaves ±300 s headroom.
-6. `AppWebViewPage` (pushed with `CupertinoPageRoute` — slides in from the
-   right): `loadRequest(uri, headers: {'Authorization': …})`,
-   `javaScriptMode: unrestricted`, **no JavaScript channels**,
-   `NavigationDelegate.onNavigationRequest` returns `prevent` for anything
-   but the initial URL, top bar with sender + "sandbox" + close.
-7. Bundle Pretendard (same release as the desktop/skill assets) as a Flutter
-   font family for future SVG previews.
-7b. **WebKit ignores the CSP `webrtc 'block'` directive** — on the desktop
-   the probe reached a public STUN server over UDP from inside the sandbox
-   until a user script removed WebRTC. Add a document-start `WKUserScript`
-   (webview_flutter: `runJavaScript` is too late; use the platform
-   `WKUserScript` injection) that defines `RTCPeerConnection`,
-   `webkitRTCPeerConnection`, `RTCDataChannel` & co. as non-configurable
-   `undefined` and makes `navigator.sendBeacon` return `false`. Mirror
-   `desktop/src-tauri/src/sandbox_frame_hardening.rs`; the mobile page is the
-   top frame, so apply it unconditionally (no `window.top === window` guard).
-   Probe row 9 (`RTCPeerConnection + ICE gather`) is the check.
-8. On the iPad: (a) an archify app renders and is interactive; (b) the probe
-   page below shows every escape as blocked; (c) link taps, `window.open`,
-   form submits do nothing; (d) no ATS error/blank page over
-   `http://<lan-ip>:3001`; (e) reopening after 10 minutes mints a fresh token.
+| Piece | Where |
+|---|---|
+| imeta `x`, `preview-light`, `preview-dark`; `MessageMediaKind.app` (= `text/html` + a lowercase 64-hex `x`) | `mobile/lib/features/channels/message_media.dart` |
+| App card: theme-matched preview (`Theme.of(context).brightness`), Run, Download, sender in the chrome. Never in clamped previews (`maxLines`) | `mobile/lib/features/channels/message_content/app_card.dart`, wired from `message_content.dart` (`_buildAppCard`, for both `[…]()` and `![…]()` syntax) |
+| NIP-11 `app_content_url` discovery with the desktop's validation (bare origin, relay hostname, distinct origin); re-asked on every reconnect; remembered per relay so a community switch cannot reuse another relay's door | `mobile/lib/shared/relay/relay_info.dart` — `appContentUrlProvider`, null = HTML stays a link |
+| Blob-scoped token: `t=get`, `x`, `expiration = now + 300 s`, **no `server` tag**, minted fresh on every Run (never memoized) | `mobile/lib/shared/relay/media_auth.dart` `signAppContentAuth` |
+| Sandbox page: `CupertinoPageRoute` (slides in from the right, like the desktop drawer; stacks inside the pane in the wide shell), `loadRequest(uri, headers: {Authorization})`, JS unrestricted, **no JavaScript channels**, `onNavigationRequest` allows the initial URL only, error + retry states | `mobile/lib/features/channels/app_webview_page.dart` |
+| ATS: `NSAppTransportSecurity → NSAllowsLocalNetworking = true` (WKWebView obeys ATS; the Dart client does not) | `mobile/ios/Runner/Info.plist` |
+| WebRTC + `sendBeacon` removal. `webview_flutter` has no user-script API, so `WKWebView.load(_:)` is swizzled: a request for `/app/<sha256>.html` registers the document-start script (all frames) on that web view before the navigation starts. The script itself no-ops for a top-level document outside that path | `mobile/ios/Runner/SandboxWebViewHardening.swift`, installed from `AppDelegate` |
+| Pretendard 1.3.9 (OFL) as a Flutter font family | `mobile/pubspec.yaml`, `mobile/assets/fonts/Pretendard-*.otf` |
+| NIP-11 allowlist widened with `app_content_url`, `admin_api`, `gif`. The push descriptor parser rejects any unknown top-level NIP-11 field, so advertising the door would otherwise have silently disabled push on mobile | `mobile/lib/shared/push/dev_push_lease.dart` |
+
+### Intel-Mac session: build and verify
+
+1. `flutter pub get` → `flutter analyze` → `dart format --set-exit-if-changed` →
+   `flutter test`. Send the `pubspec.lock` / `Podfile.lock` hunks back to the
+   mac-mini session (or commit them) — it cannot resolve packages.
+2. Release build → `xcrun devicectl device install app` (`Buzz.app`) → launch
+   `dev.birdblues.buzz.mobile`.
+3. Confirm the built `Info.plist` carries
+   `NSAppTransportSecurity/NSAllowsLocalNetworking`. If the WebView still
+   refuses `http://<lan-ip>:3001` (blank page, ATS error in the console), that
+   iOS does not treat a raw private IP as local networking — add an
+   `NSExceptionDomains` entry for the relay host instead.
+4. On the iPad: (a) an archify app renders and is interactive; (b) the probe
+   page below shows every escape as blocked — row 9 (`RTCPeerConnection`) is
+   the native script; (c) link taps, `window.open`, form submits do nothing;
+   (d) no ATS error/blank page over `http://<lan-ip>:3001`; (e) reopening
+   after 10 minutes mints a fresh token; (f) the listener-targeted net probe
+   with the `3999`/`3478` listeners up on the mac mini reports zero hits
+   (send the run id and time); (g) light/dark preview follows the app theme.
 
 ## Sandbox probe
 
@@ -171,4 +164,4 @@ Pretendard (OFL) is the one fixed face:
 - archify skill `scripts/embed-fonts.mjs`: subsets the woff2 to the
   characters used and inlines it into the HTML (the sandbox blocks font
   downloads).
-- Mobile: bundle the same release.
+- Mobile: bundled as the `Pretendard` font family (same 1.3.9 release).

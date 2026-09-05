@@ -246,6 +246,7 @@ class _ThreadMessage extends HookConsumerWidget {
                                   ),
                                 MessageContent(
                                   content: message.content,
+                                  authorLabel: displayName,
                                   mentionNames: resolvedMentionNames,
                                   agentMentionPubkeys: agentMentionPubkeys,
                                   channelNames: channelNames,

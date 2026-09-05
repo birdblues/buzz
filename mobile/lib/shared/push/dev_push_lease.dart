@@ -68,6 +68,12 @@ class BuzzPushLeaseDescriptor {
         'self',
         'pairing_relay_url',
         'push',
+        // Fork-advertised fields (crates/buzz-relay/src/nip11.rs). This
+        // allowlist is exact, so any new relay field would otherwise make the
+        // whole push descriptor unparseable and silently disable push.
+        'admin_api',
+        'app_content_url',
+        'gif',
       },
       name: 'NIP-11 document',
     );

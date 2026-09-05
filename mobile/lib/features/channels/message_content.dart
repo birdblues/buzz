@@ -25,9 +25,11 @@ import '../../shared/custom_emoji/custom_emoji_provider.dart';
 import '../../shared/custom_emoji/custom_emoji_render.dart';
 import '../../shared/emoji/emoji_data_provider.dart';
 import '../../shared/emoji/emoji_only.dart';
+import 'app_webview_page.dart';
 import 'channels_provider.dart';
 import 'media_viewer_page.dart';
 import 'message_gesture_region.dart';
+import 'message_content/app_card.dart';
 import 'message_content/link_normalizer.dart';
 import 'message_media.dart';
 import 'voice_note_attachment.dart';
@@ -100,6 +102,10 @@ class MessageContent extends HookConsumerWidget {
   /// Raw event tags, used for `imeta` media metadata lookups.
   final List<List<String>> tags;
 
+  /// Display name of the message author, shown on attachment cards that name
+  /// their sender ("App shared by …"). Null where no author is in scope.
+  final String? authorLabel;
+
   /// Called when a #channel link is tapped.
   final void Function(String channelId)? onChannelTap;
 
@@ -142,6 +148,7 @@ class MessageContent extends HookConsumerWidget {
     this.agentMentionPubkeys = const {},
     this.channelNames = const {},
     this.tags = const [],
+    this.authorLabel,
     this.onChannelTap,
     this.onMentionTap,
     this.onMediaReply,
@@ -184,6 +191,9 @@ class MessageContent extends HookConsumerWidget {
         '${entry.key}\u0000${entry.value}',
     ].join('\u0001');
     final imetaByUrl = parseImetaTags(tags);
+    // HTML apps render as cards only when the relay advertises an app door;
+    // otherwise they stay ordinary links (fail closed).
+    final appContentAvailable = ref.watch(appContentUrlProvider) != null;
     final trailingGallery = maxLines == null
         ? _extractTrailingImageGallery(content, imetaByUrl)
         : null;
@@ -279,9 +289,15 @@ class MessageContent extends HookConsumerWidget {
           style,
           resolvedChannelTap,
           resolvedChannelNames,
+          appContentAvailable,
         ),
-        imageBuilder: (context, imageUrl) =>
-            _buildMedia(context, imageUrl, imetaByUrl[imageUrl]),
+        imageBuilder: (context, imageUrl) => _buildMedia(
+          context,
+          ref,
+          imageUrl,
+          imetaByUrl[imageUrl],
+          appContentAvailable: appContentAvailable,
+        ),
         textAlign: textAlign,
         maxLines: maxLines,
         inlineComponents: [
@@ -326,8 +342,20 @@ class MessageContent extends HookConsumerWidget {
     );
   }
 
-  Widget _buildMedia(BuildContext context, String imageUrl, ImetaEntry? imeta) {
+  Widget _buildMedia(
+    BuildContext context,
+    WidgetRef ref,
+    String imageUrl,
+    ImetaEntry? imeta, {
+    bool appContentAvailable = false,
+  }) {
     final mediaKind = classifyMediaUrl(imageUrl, imeta: imeta);
+    if (mediaKind == MessageMediaKind.app &&
+        imeta != null &&
+        appContentAvailable &&
+        maxLines == null) {
+      return _buildAppCard(context, ref, imeta, imageUrl, '');
+    }
     if (mediaKind == MessageMediaKind.audio) {
       return _MessageMediaShell(
         child: Padding(
@@ -361,6 +389,55 @@ class MessageContent extends HookConsumerWidget {
     );
   }
 
+  /// Sandboxed HTML app attachment (`docs/sandboxed-apps.md`): a static
+  /// preview card; Run opens [AppWebViewPage], Download saves the blob.
+  Widget _buildAppCard(
+    BuildContext context,
+    WidgetRef ref,
+    ImetaEntry imeta,
+    String url,
+    String label,
+  ) {
+    final sha256 = imeta.sha256!;
+    final filename = switch ((imeta.filename?.trim(), label.trim())) {
+      (final name?, _) when name.isNotEmpty => name,
+      (_, final text) when text.isNotEmpty => text,
+      _ => Uri.tryParse(url)?.pathSegments.lastOrNull ?? 'app.html',
+    };
+    return _MessageMediaShell(
+      child: AppCard(
+        sha256: sha256,
+        filename: filename,
+        size: imeta.size,
+        previewLight: imeta.previewLight,
+        previewDark: imeta.previewDark,
+        sharedBy: authorLabel,
+        onRun: () => Navigator.of(context).push(
+          AppWebViewPage.route(
+            sha256: sha256,
+            filename: filename,
+            sharedBy: authorLabel,
+          ),
+        ),
+        onDownload: () async {
+          final auth = ref.read(mediaGetAuthServiceProvider);
+          try {
+            await ref.read(openDownloadedFileProvider)(
+              url,
+              auth.headersFor(url),
+              filename,
+            );
+          } catch (_) {
+            if (!context.mounted) return;
+            ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+              const SnackBar(content: Text('Could not open attachment')),
+            );
+          }
+        },
+      ),
+    );
+  }
+
   Widget _buildLink(
     BuildContext context,
     WidgetRef ref,
@@ -371,6 +448,7 @@ class MessageContent extends HookConsumerWidget {
     TextStyle? fallbackStyle,
     void Function(String channelId) resolvedChannelTap,
     Map<String, String> resolvedChannelNames,
+    bool appContentAvailable,
   ) {
     String text = '';
     linkText.visitChildren((span) {
@@ -380,10 +458,16 @@ class MessageContent extends HookConsumerWidget {
       return true;
     });
 
+    if (imeta != null &&
+        imeta.isApp &&
+        appContentAvailable &&
+        maxLines == null) {
+      return _buildAppCard(context, ref, imeta, url, text);
+    }
     final baseStyle = fallbackStyle ?? linkStyle;
     if (imeta != null &&
         classifyMediaUrl(url, imeta: imeta) == MessageMediaKind.audio) {
-      return _buildMedia(context, url, imeta);
+      return _buildMedia(context, ref, url, imeta);
     }
     final uri = Uri.tryParse(url);
     final buzzLink = uri?.scheme == 'buzz'

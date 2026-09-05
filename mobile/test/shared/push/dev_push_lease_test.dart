@@ -319,6 +319,20 @@ void main() {
     );
   });
 
+  test('descriptor accepts fork-advertised NIP-11 fields', () {
+    // The top-level allowlist is exact; the fork relay advertises these
+    // (crates/buzz-relay/src/nip11.rs) and push must keep working.
+    final information = _descriptorJson(relay.public)
+      ..['app_content_url'] = 'http://relay.example:3001'
+      ..['admin_api'] = 'http://relay.example:3000'
+      ..['gif'] = {'provider': 'tenor', 'search': '/gif', 'share': '/gif/s'};
+
+    expect(
+      BuzzPushLeaseDescriptor.fromRelayInformation(information),
+      isA<BuzzPushLeaseDescriptor>(),
+    );
+  });
+
   test('descriptor rejects unknown push fields', () {
     final information = _descriptorJson(relay.public);
     (information['push'] as Map<String, dynamic>)['future'] = true;
