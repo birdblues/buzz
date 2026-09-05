@@ -70,8 +70,8 @@ hostname (favicon + host without `www.`), title (falls back to the hostname),
 description collapsed to one paragraph. Host, title and description are one
 line each with an ellipsis, as on desktop, so the text block stays the height
 of the thumbnail. Without an image it is the quote-style variant with a rule
-on the left. The whole card is one button; tapping opens the canonical URL in
-the system browser. Nothing on the card is interactive beyond that, and nothing
+on the left. The whole card is one button; tapping hands the canonical URL to
+the OS (Safari, or the app registered for that link). Nothing on the card is interactive beyond that, and nothing
 in it comes from anywhere but the signed tag and relay blobs.
 
 Not in phase 1: the rich (large image) style and the style preference, the
@@ -86,10 +86,12 @@ authoring. Buzz-native `buzz://` entity links stay chips, as on desktop.
    is attached. Inspect with `buzz messages get` if in doubt: the event should
    carry one `link-preview snapshot 1 …` tag.
 2. On the iPad: the message shows a compact card below the body with the site
-   favicon and host, the title, a description, and a thumbnail. Tap it: Safari
-   opens the link. Nothing is fetched from the linked host by the app (the
-   sandbox listeners from `docs/sandboxed-apps.md` are not needed; the check
-   is that the thumbnail URL is the relay's `/media/…`).
+   favicon and host, the title, a description, and a thumbnail. Tap it: the
+   link leaves the app — Safari, or the app that owns the link (a `youtu.be`
+   link opens YouTube through its universal link). Nothing is fetched from the
+   linked host by the app (the sandbox listeners from `docs/sandboxed-apps.md`
+   are not needed; the check is that the thumbnail URL is the relay's
+   `/media/…`).
 3. Post the same link and remove the preview in the desktop composer before
    sending. The iPad shows the plain link and no card.
 4. Search for the message and open the inbox: the preview rows show no card.
