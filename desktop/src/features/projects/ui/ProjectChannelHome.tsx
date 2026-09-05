@@ -21,6 +21,7 @@ import type { EntityLinkTab } from "@/shared/lib/entityLink";
 import { useThreadPanelWidth } from "@/shared/hooks/useThreadPanelWidth";
 import { SIDEBAR_WIDTH_MIN } from "@/shared/layout/sidebarLayout";
 import { cn } from "@/shared/lib/cn";
+import { useAppSandboxAuxiliary } from "@/features/apps/ui/useAppSandboxAuxiliary";
 import { Button } from "@/shared/ui/button";
 import { DrawerPanelIcon } from "@/shared/ui/DrawerPanelIcon";
 import { useOptionalSidebar } from "@/shared/ui/sidebar";
@@ -99,6 +100,7 @@ export function ProjectChannelHome({
   targetMessageEvents?: RelayEvent[];
   targetMessageId?: string | null;
 }) {
+  const appSandboxAuxiliary = useAppSandboxAuxiliary();
   const { goChannel, goProject, goProjects } = useAppNavigation();
   const sidebar = useOptionalSidebar();
   const identityQuery = useIdentityQuery();
@@ -314,65 +316,81 @@ export function ProjectChannelHome({
                 }
                 currentIdentity={identityQuery.data}
                 currentProfile={profileQuery.data}
-                idleAuxiliaryPanel={workspaceSheet}
-                idleAuxiliaryHeaderActions={{
-                  actions: (
-                    <>
-                      {workspaceCreateAction ? (
-                        <Tooltip disableHoverableContent>
-                          <TooltipTrigger asChild>
-                            <Button
-                              aria-label={workspaceCreateAction.label}
-                              className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
-                              data-testid="project-home-workspace-sheet-create"
-                              disabled={workspaceCreateAction.disabled}
-                              onClick={workspaceCreateAction.onClick}
-                              size="icon"
-                              title={
-                                workspaceCreateAction.title ??
-                                workspaceCreateAction.label
-                              }
-                              type="button"
-                              variant="ghost"
-                            >
-                              <Plus className="h-4 w-4" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            {workspaceCreateAction.label}
-                          </TooltipContent>
-                        </Tooltip>
-                      ) : null}
-                      <Tooltip disableHoverableContent>
-                        <TooltipTrigger asChild>
-                          <Button
-                            aria-label={expandLabel}
-                            className="shrink-0"
-                            data-testid="project-home-workspace-sheet-expand"
-                            onClick={handleExpandWorkspace}
-                            size="icon"
-                            title={expandLabel}
-                            type="button"
-                            variant="ghost"
-                          >
-                            <Maximize2 />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>{expandLabel}</TooltipContent>
-                      </Tooltip>
-                    </>
-                  ),
-                  backLabel: workspaceDetail?.backLabel,
-                  onBack: workspaceDetail?.onBack,
-                }}
-                idleAuxiliaryOverridesThread={workspaceSheetOpen}
+                idleAuxiliaryPanel={
+                  appSandboxAuxiliary?.idleAuxiliaryPanel ?? workspaceSheet
+                }
+                idleAuxiliaryHeaderActions={
+                  appSandboxAuxiliary
+                    ? undefined
+                    : {
+                        actions: (
+                          <>
+                            {workspaceCreateAction ? (
+                              <Tooltip disableHoverableContent>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    aria-label={workspaceCreateAction.label}
+                                    className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+                                    data-testid="project-home-workspace-sheet-create"
+                                    disabled={workspaceCreateAction.disabled}
+                                    onClick={workspaceCreateAction.onClick}
+                                    size="icon"
+                                    title={
+                                      workspaceCreateAction.title ??
+                                      workspaceCreateAction.label
+                                    }
+                                    type="button"
+                                    variant="ghost"
+                                  >
+                                    <Plus className="h-4 w-4" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  {workspaceCreateAction.label}
+                                </TooltipContent>
+                              </Tooltip>
+                            ) : null}
+                            <Tooltip disableHoverableContent>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  aria-label={expandLabel}
+                                  className="shrink-0"
+                                  data-testid="project-home-workspace-sheet-expand"
+                                  onClick={handleExpandWorkspace}
+                                  size="icon"
+                                  title={expandLabel}
+                                  type="button"
+                                  variant="ghost"
+                                >
+                                  <Maximize2 />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>{expandLabel}</TooltipContent>
+                            </Tooltip>
+                          </>
+                        ),
+                        backLabel: workspaceDetail?.backLabel,
+                        onBack: workspaceDetail?.onBack,
+                      }
+                }
+                idleAuxiliaryOverridesThread={
+                  appSandboxAuxiliary
+                    ? appSandboxAuxiliary.idleAuxiliaryOverridesThread
+                    : workspaceSheetOpen
+                }
                 idleAuxiliaryTitle={
-                  workspaceSheetTab
-                    ? projectHomeWorkspaceSheetTitle(workspaceSheetTab)
-                    : ""
+                  appSandboxAuxiliary
+                    ? appSandboxAuxiliary.idleAuxiliaryTitle
+                    : workspaceSheetTab
+                      ? projectHomeWorkspaceSheetTitle(workspaceSheetTab)
+                      : ""
                 }
                 onAddFiles={handleAddFiles}
-                onCloseIdleAuxiliaryPanel={closeWorkspaceSheet}
+                onCloseIdleAuxiliaryPanel={
+                  appSandboxAuxiliary
+                    ? appSandboxAuxiliary.onCloseIdleAuxiliaryPanel
+                    : closeWorkspaceSheet
+                }
                 onCloseForumPost={ignoreForumPost}
                 onSelectForumPost={ignoreForumPostSelect}
                 selectedForumPostId={null}

@@ -12,6 +12,8 @@ import { applyCommunity } from "@/shared/api/tauriWorkspace";
 import { getIdentity } from "@/shared/api/tauriIdentity";
 import { clearTrayAgentActivity } from "@/shared/api/trayMenu";
 import { getOverrides } from "@/shared/features";
+import { resetAppSandboxStore } from "@/features/apps/appSandboxStore";
+import { resetAppContentAvailability } from "@/shared/lib/appContent";
 import { resetMediaCaches } from "@/shared/lib/mediaUrl";
 import { resetLinkPreviewMetadataCache } from "@/shared/lib/useResolvedLinkPreviews";
 import { clearSearchHitEventCache } from "@/app/navigation/searchHitEventCache";
@@ -77,6 +79,8 @@ async function resetCommunityState({
   }
   resetSidebarRelayConnectionCardState();
   resetMediaCaches();
+  resetAppContentAvailability();
+  resetAppSandboxStore();
   resetLinkPreviewMetadataCache();
   resetVideoPlayerState();
   resetAudioMediaLoadScheduler();

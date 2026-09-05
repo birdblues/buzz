@@ -6,6 +6,7 @@ import { getCachedSearchHitEvent } from "@/app/navigation/searchHitEventCache";
 import { useAppNavigation } from "@/app/navigation/useAppNavigation";
 import { useChannelsQuery } from "@/features/channels/hooks";
 import { useOpenChannelDirectoryQuery } from "@/features/channels/openChannelDirectory";
+import { useAppSandboxAuxiliary } from "@/features/apps/ui/useAppSandboxAuxiliary";
 import { ChannelScreen } from "@/features/channels/ui/ChannelScreen";
 import { HuddleStartingView } from "@/features/huddle/components/HuddleStartingView";
 import { huddleWindowChannelId } from "@/features/huddle/lib/huddleWindow";
@@ -126,6 +127,7 @@ export function ChannelRouteScreen({
   const channelsQuery = useChannelsQuery();
   const projectsQuery = useProjectsQuery();
   const identityQuery = useIdentityQuery();
+  const appSandboxAuxiliary = useAppSandboxAuxiliary();
   const profileQuery = useProfileQuery();
   const channels = channelsQuery.data ?? [];
   const memberChannel =
@@ -310,6 +312,7 @@ export function ChannelRouteScreen({
 
   return (
     <ChannelScreen
+      {...(appSandboxAuxiliary ?? {})}
       activeChannel={activeChannel}
       autoSendDraftKey={autoSendDraftKey}
       currentIdentity={identityQuery.data}

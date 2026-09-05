@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { resolveFileCard, resolveSnapshotCard } from "./markdownFileCard.ts";
+import {
+  resolveAppCard,
+  resolveFileCard,
+  resolveSnapshotCard,
+} from "./markdownFileCard.ts";
 
 // A generic-file URL (non-media extension) does not match the relay-media
 // proxy regex, so `rewriteRelayUrl` passes it through unchanged — assertions
@@ -321,4 +325,69 @@ test("resolveSnapshotCard: .TEAM.PNG classifies as team snapshot card", () => {
   );
   assert.ok(card !== null);
   assert.equal(card.snapshotKind, "team");
+});
+
+const HTML_SHA = "c".repeat(64);
+const HTML_URL = `https://relay.example/media/${HTML_SHA}.html`;
+const APP_PREVIEW_URL = `https://relay.example/media/${"d".repeat(64)}.png`;
+
+test("resolveAppCard: text/html with a hash becomes an app card when the door exists", () => {
+  const card = resolveAppCard(
+    { m: "text/html", x: HTML_SHA, filename: "diagram.html", size: 700 },
+    HTML_URL,
+    "",
+    true,
+  );
+  assert.ok(card);
+  assert.equal(card.sha256, HTML_SHA);
+  assert.equal(card.filename, "diagram.html");
+  assert.equal(card.size, 700);
+  assert.equal(card.downloadHref, HTML_URL);
+  assert.equal(card.previewLight, undefined);
+});
+
+test("resolveAppCard: falls through when the relay has no app door", () => {
+  assert.equal(
+    resolveAppCard({ m: "text/html", x: HTML_SHA }, HTML_URL, "", false),
+    null,
+  );
+  // …and the plain download card still claims it.
+  assert.ok(resolveFileCard({ m: "text/html", x: HTML_SHA }, HTML_URL, ""));
+});
+
+test("resolveAppCard: requires a 64-hex hash and text/html", () => {
+  assert.equal(resolveAppCard({ m: "text/html" }, HTML_URL, "", true), null);
+  assert.equal(
+    resolveAppCard({ m: "text/html", x: "abc" }, HTML_URL, "", true),
+    null,
+  );
+  assert.equal(
+    resolveAppCard({ m: "application/pdf", x: HTML_SHA }, HTML_URL, "", true),
+    null,
+  );
+  assert.equal(resolveAppCard(undefined, HTML_URL, "", true), null);
+  assert.equal(
+    resolveAppCard({ m: "text/html", x: HTML_SHA }, undefined, "", true),
+    null,
+  );
+});
+
+test("resolveAppCard: previews are rewritten through the media proxy, non-http ignored", () => {
+  const card = resolveAppCard(
+    {
+      m: "text/html",
+      x: HTML_SHA.toUpperCase(),
+      previewLight: APP_PREVIEW_URL,
+      previewDark: "javascript:alert(1)",
+    },
+    HTML_URL,
+    "fallback name",
+    true,
+  );
+  assert.ok(card);
+  assert.equal(card.sha256, HTML_SHA, "hash is lowercased");
+  assert.equal(card.filename, "fallback name");
+  assert.ok(card.previewLight, "http preview kept");
+  assert.notEqual(card.previewLight, "javascript:alert(1)");
+  assert.equal(card.previewDark, undefined, "non-http preview dropped");
 });

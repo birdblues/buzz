@@ -53,6 +53,7 @@ import {
 } from "./markdown/CodeBlock";
 import { EntityLinkAnchor, useOpenEntityLink } from "./markdown/entityLinks";
 import { ExternalLinkAnchor } from "./markdown/ExternalLinkAnchor";
+import { AppCard } from "./markdown/AppCard";
 import { FileCard } from "./markdown/FileCard";
 import {
   AuthoredDeepLinkAnchor,
@@ -118,7 +119,12 @@ import {
   useMarkdownRuntime,
 } from "./markdown/runtimeContext";
 import { AgentSnapshotCard } from "./markdown/AgentSnapshotCard";
-import { resolveFileCard, resolveSnapshotCard } from "./markdownFileCard";
+import {
+  resolveAppCard,
+  resolveFileCard,
+  resolveSnapshotCard,
+} from "./markdownFileCard";
+import { useAppContentAvailable } from "@/shared/lib/appContent";
 import type { MarkdownProps, MarkdownRuntime } from "./markdown/types";
 import { SpoilerInline } from "./markdown/SpoilerInline";
 import {
@@ -1233,6 +1239,7 @@ export function createMarkdownComponents(
       resolveChannelReferences,
       snapshotSharedBy,
     } = useMarkdownRuntime();
+    const appContentAvailable = useAppContentAvailable();
     if (!interactive) {
       return <span className="font-medium text-current">{children}</span>;
     }
@@ -1276,6 +1283,27 @@ export function createMarkdownComponents(
               snapshotCard.snapshotKind,
             );
           }}
+        />
+      );
+    }
+
+    // Sandboxed HTML apps: preview card + Run, only when the relay has a door.
+    const appCard = resolveAppCard(
+      href ? imetaByUrl?.get(href) : undefined,
+      href,
+      label,
+      appContentAvailable,
+    );
+    if (appCard) {
+      return (
+        <AppCard
+          downloadHref={appCard.downloadHref}
+          filename={appCard.filename}
+          previewDark={appCard.previewDark}
+          previewLight={appCard.previewLight}
+          sha256={appCard.sha256}
+          sharedBy={snapshotSharedBy}
+          size={appCard.size}
         />
       );
     }
