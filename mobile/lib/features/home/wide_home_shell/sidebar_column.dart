@@ -1,7 +1,7 @@
 part of '../wide_home_shell.dart';
 
 /// The collapsible sidebar: the channel list page with the shell's navigation
-/// rows pinned under its community header, plus the quick-actions launcher.
+/// rows pinned under its community header, and the profile card as its footer.
 class _SidebarColumn extends ConsumerWidget {
   const _SidebarColumn({
     required this.settingsPageBuilder,
@@ -49,29 +49,16 @@ class _SidebarColumn extends ConsumerWidget {
                   child: Column(
                     children: [
                       Expanded(
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            ChannelsPage(
-                              settingsPageBuilder: settingsPageBuilder,
-                              onSettingsTransitionProgress: (_) {},
-                              pinnedHeader: _SidebarNavRows(
-                                hasUnreadInbox: hasUnreadInbox,
-                              ),
-                              pinnedHeaderHeight: _SidebarNavRows.height,
-                              // Settings lives in the profile card below,
-                              // like the desktop app.
-                              showProfileAvatar: false,
-                            ),
-                            ChannelQuickActionsLauncher(
-                              visible: !collapsed,
-                              navigationBarHeight: mobileTabBarHeight,
-                              navigationBarBottomGap: mobileTabBarBottomGap,
-                              navigationBarWidth: 0,
-                              systemBottomInset: 0,
-                              rightInset: Grid.xs,
-                            ),
-                          ],
+                        child: ChannelsPage(
+                          settingsPageBuilder: settingsPageBuilder,
+                          onSettingsTransitionProgress: (_) {},
+                          pinnedHeader: _SidebarNavRows(
+                            hasUnreadInbox: hasUnreadInbox,
+                          ),
+                          pinnedHeaderHeight: _SidebarNavRows.height,
+                          // Settings lives in the profile card below,
+                          // like the desktop app.
+                          showProfileAvatar: false,
                         ),
                       ),
                       Divider(

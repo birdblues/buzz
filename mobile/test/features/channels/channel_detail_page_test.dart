@@ -2676,7 +2676,9 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.text('Join this channel from Manage to participate.'),
+        find.text(
+          'Join this channel from the channel list or Manage to participate.',
+        ),
         findsOneWidget,
       );
       expect(find.text('Message…'), findsNothing);
@@ -2695,7 +2697,9 @@ void main() {
 
       expect(find.text('Join channel'), findsNothing);
       expect(
-        find.text('Join this channel from Manage to participate.'),
+        find.text(
+          'Join this channel from the channel list or Manage to participate.',
+        ),
         findsNothing,
       );
 

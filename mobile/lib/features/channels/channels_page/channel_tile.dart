@@ -112,27 +112,6 @@ class _ChannelTile extends ConsumerWidget {
                   color: context.colors.onSurface.withValues(alpha: 0.4),
                 ),
               ],
-              if (!channel.isMember && !channel.isDm)
-                Padding(
-                  padding: const EdgeInsets.only(right: Grid.xxs),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: Grid.half + 2,
-                      vertical: 3,
-                    ),
-                    decoration: BoxDecoration(
-                      color: context.colors.primary.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(Radii.sm),
-                    ),
-                    child: Text(
-                      'Open',
-                      style: context.textTheme.labelSmall?.copyWith(
-                        color: context.colors.primary,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ),
             ],
           ),
         ),

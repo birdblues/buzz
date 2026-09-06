@@ -10,7 +10,6 @@ import '../../shared/layout/pane_scope.dart';
 import '../../shared/theme/theme.dart';
 import '../../shared/widgets/frosted_app_bar.dart';
 import '../../shared/widgets/frosted_scaffold.dart';
-import '../../shared/widgets/mobile_tab_footer_backdrop.dart';
 import '../activity/activity_page.dart';
 import '../channels/channel_detail_page.dart';
 import '../channels/channels_page.dart';

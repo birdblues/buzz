@@ -796,7 +796,8 @@ class ChannelsNotifier extends AsyncNotifier<List<Channel>> {
     }
   }
 
-  /// Loads the directory when Browse channels opens after startup or an error.
+  /// Loads the directory for the channel list's open channels after startup
+  /// or an error; a no-op while it is loading or loaded for this scope.
   Future<void> ensureDirectoryLoaded() async {
     final directoryState = ref.read(channelDirectoryLoadStatusProvider);
     final scope = channelDirectoryScope(

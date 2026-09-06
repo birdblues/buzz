@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -25,7 +24,6 @@ import 'package:buzz/shared/community/community_relay_name_provider.dart';
 import 'package:buzz/shared/relay/relay.dart';
 import 'package:buzz/shared/theme/theme.dart';
 import 'package:buzz/shared/widgets/avatar_image.dart';
-import 'package:buzz/shared/widgets/buzz_loading_indicator.dart';
 import 'package:buzz/shared/widgets/frosted_app_bar.dart';
 import 'package:buzz/shared/widgets/masked_avatar_badge.dart';
 import 'package:buzz/shared/widgets/skeleton.dart';
@@ -44,6 +42,7 @@ void main() {
     Gradient? topSectionGradient,
     ValueChanged<double>? onSettingsTransitionProgress,
     ValueListenable<int>? tabReselection,
+    List<NavigatorObserver> navigatorObservers = const [],
   }) {
     return ProviderScope(
       overrides: [
@@ -66,6 +65,7 @@ void main() {
       ],
       child: MaterialApp(
         theme: AppTheme.light(topSectionGradient: topSectionGradient),
+        navigatorObservers: navigatorObservers,
         builder: (context, child) => MediaQuery(
           data: MediaQuery.of(context).copyWith(
             disableAnimations: disableAnimations,
@@ -75,25 +75,10 @@ void main() {
           ),
           child: child!,
         ),
-        home: Stack(
-          children: [
-            ChannelsPage(
-              settingsPageBuilder: _buildSettingsPage,
-              onSettingsTransitionProgress:
-                  onSettingsTransitionProgress ?? (_) {},
-              tabReselection: tabReselection,
-            ),
-            const Positioned.fill(
-              child: ChannelQuickActionsLauncher(
-                visible: true,
-                navigationBarHeight: 60,
-                navigationBarBottomGap: 12,
-                navigationBarWidth: 218,
-                systemBottomInset: 0,
-                rightInset: 16,
-              ),
-            ),
-          ],
+        home: ChannelsPage(
+          settingsPageBuilder: _buildSettingsPage,
+          onSettingsTransitionProgress: onSettingsTransitionProgress ?? (_) {},
+          tabReselection: tabReselection,
         ),
       ),
     );
@@ -148,13 +133,17 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('general'), findsOneWidget);
-    expect(find.text('design-forum'), findsNothing);
+    expect(find.text('design-forum'), findsOneWidget);
     expect(find.text('Alice'), findsOneWidget);
     expect(find.text('Channels'), findsOneWidget);
-    expect(find.text('FORUMS'), findsNothing);
+    expect(find.text('Forums'), findsOneWidget);
     expect(find.text('DMs'), findsOneWidget);
     expect(find.text('Community'), findsOneWidget);
-    expect(find.byTooltip('Create or start conversation'), findsOneWidget);
+    // Each section adds from its header, like the desktop sidebar.
+    expect(find.byTooltip('Create channel'), findsOneWidget);
+    expect(find.byTooltip('New forum'), findsOneWidget);
+    expect(find.byTooltip('New message'), findsOneWidget);
+    expect(find.byTooltip('Create or start conversation'), findsNothing);
     expect(find.byTooltip('Channels options'), findsOneWidget);
     expect(find.byIcon(LucideIcons.ellipsisVertical), findsWidgets);
     expect(find.byIcon(LucideIcons.arrowUpDown), findsNothing);
@@ -325,8 +314,9 @@ void main() {
     await tester.pumpAndSettle();
 
     final lastChannel = tester.getRect(find.text('general'));
-    final divider = tester.getRect(find.byType(Divider).last);
-    final nextSectionHeader = tester.getRect(find.text('DMs'));
+    // The first section divider now separates Channels from Forums.
+    final divider = tester.getRect(find.byType(Divider).first);
+    final nextSectionHeader = tester.getRect(find.text('Forums'));
 
     expect(
       divider.top - lastChannel.bottom,
@@ -1270,208 +1260,28 @@ void main() {
     );
   });
 
-  testWidgets('quick actions slide behind navigation when leaving home', (
+  testWidgets('lists open channels to join, dimmed after joined rows and A–Z', (
     tester,
   ) async {
-    Widget buildLauncher({required bool visible}) {
-      return ProviderScope(
-        overrides: [profileProvider.overrideWith(() => _FakeProfileNotifier())],
-        child: MaterialApp(
-          theme: AppTheme.light(),
-          home: Stack(
-            children: [
-              Positioned.fill(
-                child: ChannelQuickActionsLauncher(
-                  visible: visible,
-                  navigationBarHeight: 60,
-                  navigationBarBottomGap: 12,
-                  navigationBarWidth: 218,
-                  systemBottomInset: 0,
-                  rightInset: 16,
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    await tester.pumpWidget(buildLauncher(visible: true));
-    await tester.pumpAndSettle();
-    Transform motionTransform() => tester.widget<Transform>(
-      find.byKey(const Key('channel-quick-actions-transform')),
-    );
-
-    expect(motionTransform().transform.getTranslation().x, 0);
-
-    await tester.pumpWidget(buildLauncher(visible: false));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 110));
-    final midpoint = motionTransform().transform.getTranslation().x;
-    expect(midpoint, lessThan(0));
-    expect(midpoint, greaterThan(-279));
-
-    await tester.pumpAndSettle();
-    expect(motionTransform().transform.getTranslation().x, closeTo(-279, 0.01));
-    final hiddenOpacity = tester.widget<Opacity>(
-      find.byKey(const Key('channel-quick-actions-opacity')),
-    );
-    expect(hiddenOpacity.opacity, 0);
-    final hiddenPointerGate = tester.widget<IgnorePointer>(
-      find
-          .ancestor(
-            of: find.byKey(const Key('channel-quick-actions-transform')),
-            matching: find.byType(IgnorePointer),
-          )
-          .first,
-    );
-    expect(hiddenPointerGate.ignoring, isTrue);
-  });
-
-  testWidgets('quick actions spring into spaced muted cards', (tester) async {
-    await tester.pumpWidget(
-      buildTestable(
-        overrides: [
-          channelsProvider.overrideWith(() => _FakeNotifier(testChannels)),
-        ],
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    final surface = find.byKey(const Key('quick-actions-surface'));
-    expect(tester.getSize(surface), const Size.square(56));
-
-    await tester.tap(find.byTooltip('Create or start conversation'));
-    await tester.pump();
-
-    var largestHeight = tester.getSize(surface).height;
-    for (var frame = 0; frame < 20; frame++) {
-      await tester.pump(const Duration(milliseconds: 16));
-      largestHeight = max(largestHeight, tester.getSize(surface).height);
-    }
-    await tester.pumpAndSettle();
-
-    expect(largestHeight, greaterThan(216));
-    expect(tester.getSize(surface).height, closeTo(216, 0.01));
-    final screenWidth = MediaQuery.sizeOf(tester.element(surface)).width;
-    final surfaceRect = tester.getRect(surface);
-    expect(surfaceRect.left, closeTo(20, 0.01));
-    expect(surfaceRect.right, closeTo(screenWidth - 20, 0.01));
-
-    final menuRect = tester.getRect(
-      find.byKey(const Key('quick-actions-menu')),
-    );
-    final createCard = find.byKey(
-      const Key('quick-action-create-channel-card'),
-    );
-    final dmCard = find.byKey(const Key('quick-action-new-dm-card'));
-    final browseCard = find.byKey(
-      const Key('quick-action-browse-channels-card'),
-    );
-    final createRect = tester.getRect(createCard);
-    final dmRect = tester.getRect(dmCard);
-    final browseRect = tester.getRect(browseCard);
-
-    expect(createRect.left - menuRect.left, closeTo(8, 0.01));
-    expect(menuRect.right - createRect.right, closeTo(8, 0.01));
-    expect(dmRect.left - menuRect.left, closeTo(8, 0.01));
-    expect(menuRect.right - dmRect.right, closeTo(8, 0.01));
-    expect(browseRect.left - menuRect.left, closeTo(8, 0.01));
-    expect(menuRect.right - browseRect.right, closeTo(8, 0.01));
-    expect(dmRect.top - createRect.bottom, closeTo(8, 0.01));
-    expect(browseRect.top - dmRect.bottom, closeTo(8, 0.01));
-    expect(dmRect.width, createRect.width);
-    expect(browseRect.width, createRect.width);
-    expect(dmRect.width, closeTo(menuRect.width - 16, 0.01));
-
-    final cardScheme = Theme.of(tester.element(createCard)).colorScheme;
-    final expectedCardColor = Color.alphaBlend(
-      cardScheme.onPrimary.withValues(alpha: 0.1),
-      cardScheme.primary,
-    );
-    final createMaterial = tester.widget<Material>(
-      find.descendant(of: createCard, matching: find.byType(Material)).first,
-    );
-    final dmMaterial = tester.widget<Material>(
-      find.descendant(of: dmCard, matching: find.byType(Material)).first,
-    );
-    final browseMaterial = tester.widget<Material>(
-      find.descendant(of: browseCard, matching: find.byType(Material)).first,
-    );
-    expect(createMaterial.color, expectedCardColor);
-    expect(dmMaterial.color, expectedCardColor);
-    expect(browseMaterial.color, expectedCardColor);
-    expect(
-      (createMaterial.borderRadius as BorderRadius).topLeft.x,
-      closeTo(12, 0.01),
-    );
-    expect(
-      (dmMaterial.borderRadius as BorderRadius).topLeft.x,
-      closeTo(12, 0.01),
-    );
-
-    expect(find.text('Start a new stream channel'), findsNothing);
-    expect(
-      tester.widget<Text>(find.text('Create channel')).style?.fontSize,
-      16,
-    );
-    expect(
-      tester.widget<Text>(find.text('New direct message')).style?.fontSize,
-      16,
-    );
-    expect(
-      tester.widget<Text>(find.text('Browse channels')).style?.fontSize,
-      16,
-    );
-    expect(find.text('Message one or more people'), findsNothing);
-  });
-
-  testWidgets('browse action lists only channels eligible to join', (
-    tester,
-  ) async {
+    tester.view.physicalSize = const Size(800, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
     final channels = [
       ...testChannels,
-      Channel(
-        id: 'open-to-join',
-        name: 'announcements',
-        channelType: 'stream',
-        visibility: 'open',
-        description: 'Community announcements',
-        createdBy: 'abc',
-        createdAt: DateTime(2025),
-        memberCount: 8,
-      ),
-      Channel(
+      _discoverable(id: 'zebra', name: 'zebra-talk'),
+      _discoverable(id: 'open-to-join', name: 'announcements'),
+      _discoverable(
         id: 'private-channel',
         name: 'private-planning',
-        channelType: 'stream',
         visibility: 'private',
-        description: 'Private planning',
-        createdBy: 'abc',
-        createdAt: DateTime(2025),
-        memberCount: 4,
       ),
-      Channel(
+      _discoverable(
         id: 'archived-channel',
         name: 'old-announcements',
-        channelType: 'stream',
-        visibility: 'open',
-        description: 'Archived announcements',
-        createdBy: 'abc',
-        createdAt: DateTime(2025),
-        memberCount: 3,
         archivedAt: DateTime(2025, 1, 2),
       ),
-      Channel(
-        id: 'unjoined-dm',
-        name: 'Hidden DM',
-        channelType: 'dm',
-        visibility: 'open',
-        description: 'Direct message',
-        createdBy: 'abc',
-        createdAt: DateTime(2025),
-        memberCount: 2,
-      ),
+      _discoverable(id: 'unjoined-dm', name: 'Hidden DM', channelType: 'dm'),
+      _discoverable(id: 'open-forum', name: 'town-hall', channelType: 'forum'),
     ];
 
     await tester.pumpWidget(
@@ -1484,70 +1294,76 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Create or start conversation'));
-    await tester.pump();
-    await tester.tap(
-      find.byKey(const Key('quick-action-browse-channels-card')),
-    );
-    await tester.pumpAndSettle();
-
     expect(
-      find.byKey(const Key('browse-channel-open-to-join')),
+      find.byKey(const Key('unjoined-channel-open-to-join')),
       findsOneWidget,
     );
-    expect(find.byKey(const Key('browse-channel-1')), findsNothing);
+    expect(find.byKey(const Key('join-channel-open-to-join')), findsOneWidget);
+    expect(find.byKey(const Key('unjoined-channel-1')), findsNothing);
     expect(
-      find.byKey(const Key('browse-channel-private-channel')),
+      find.byKey(const Key('unjoined-channel-private-channel')),
       findsNothing,
     );
+    expect(find.text('private-planning'), findsNothing);
     expect(
-      find.byKey(const Key('browse-channel-archived-channel')),
+      find.byKey(const Key('unjoined-channel-archived-channel')),
       findsNothing,
     );
-    expect(find.byKey(const Key('browse-channel-unjoined-dm')), findsNothing);
+    expect(find.byKey(const Key('unjoined-channel-unjoined-dm')), findsNothing);
+
+    // Joined rows first, then the open ones A–Z.
+    final generalY = tester.getTopLeft(find.text('general')).dy;
+    final announcementsY = tester.getTopLeft(find.text('announcements')).dy;
+    final zebraY = tester.getTopLeft(find.text('zebra-talk')).dy;
+    expect(generalY, lessThan(announcementsY));
+    expect(announcementsY, lessThan(zebraY));
+    // Dimmed against a member row.
+    final memberColor = tester.widget<Text>(find.text('general')).style!.color!;
+    final openColor = tester
+        .widget<Text>(find.text('announcements'))
+        .style!
+        .color!;
+    expect(openColor.a, lessThan(memberColor.a));
+
+    // An open forum lists under Forums, after the joined one.
+    final forumRow = find.byKey(const Key('unjoined-channel-open-forum'));
+    expect(forumRow, findsOneWidget);
+    expect(
+      tester.getTopLeft(forumRow).dy,
+      greaterThan(tester.getTopLeft(find.text('design-forum')).dy),
+    );
+    expect(
+      tester.getTopLeft(forumRow).dy,
+      lessThan(tester.getTopLeft(find.text('DMs')).dy),
+    );
+
+    // They collapse with their section.
+    await tester.tap(find.text('Channels'));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const Key('unjoined-channel-open-to-join')),
+      findsNothing,
+    );
+    expect(find.text('general'), findsNothing);
   });
 
-  testWidgets('browse action explains when no channels are discoverable', (
+  testWidgets('shows the directory failure in the list and retries it', (
     tester,
   ) async {
-    await tester.pumpWidget(
-      buildTestable(
-        disableAnimations: true,
-        overrides: [
-          channelsProvider.overrideWith(() => _FakeNotifier(testChannels)),
-        ],
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.byTooltip('Create or start conversation'));
-    await tester.pump();
-    await tester.tap(
-      find.byKey(const Key('quick-action-browse-channels-card')),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.text('No open channels available to join.'), findsOneWidget);
-  });
-
-  testWidgets('browse action retries an initial directory request problem', (
-    tester,
-  ) async {
-    final joinable = Channel(
+    final joinable = _discoverable(
       id: 'retry-discovery',
       name: 'community-help',
-      channelType: 'stream',
-      visibility: 'open',
-      description: 'Help from the community',
-      createdBy: 'abc',
-      createdAt: DateTime(2025),
-      memberCount: 0,
     );
     late _RetryingDirectoryNotifier notifier;
     await tester.pumpWidget(
       buildTestable(
         disableAnimations: true,
         overrides: [
+          relaySessionProvider.overrideWith(
+            () => _ReconnectingRelaySession(
+              initialStatus: SessionStatus.connected,
+            ),
+          ),
           channelsProvider.overrideWith(
             () => notifier = _RetryingDirectoryNotifier(
               initialChannels: testChannels,
@@ -1559,46 +1375,38 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Create or start conversation'));
-    await tester.pump();
-    await tester.tap(
-      find.byKey(const Key('quick-action-browse-channels-card')),
-    );
-    await tester.pumpAndSettle();
-
     expect(find.text('Couldn’t load open channels.'), findsOneWidget);
-    expect(find.text('No open channels available to join.'), findsNothing);
-    expect(find.byKey(const Key('browse-channels-retry')), findsOneWidget);
+    expect(find.byKey(const Key('channels-directory-retry')), findsOneWidget);
+    expect(find.text('No conversations yet'), findsNothing);
 
-    await tester.tap(find.byKey(const Key('browse-channels-retry')));
+    await tester.tap(find.byKey(const Key('channels-directory-retry')));
     await tester.pumpAndSettle();
 
     expect(notifier.retryCount, 1);
     expect(find.text('Couldn’t load open channels.'), findsNothing);
     expect(
-      find.byKey(const Key('browse-channel-retry-discovery')),
+      find.byKey(const Key('unjoined-channel-retry-discovery')),
       findsOneWidget,
     );
   });
 
-  testWidgets('browse action exposes retry when refresh supersedes loading', (
+  testWidgets('exposes retry when a refresh supersedes the directory load', (
     tester,
   ) async {
-    final joinable = Channel(
+    final joinable = _discoverable(
       id: 'superseded-directory',
       name: 'community-help',
-      channelType: 'stream',
-      visibility: 'open',
-      description: 'Help from the community',
-      createdBy: 'abc',
-      createdAt: DateTime(2025),
-      memberCount: 0,
     );
     late _SupersededDirectoryNotifier notifier;
     await tester.pumpWidget(
       buildTestable(
         disableAnimations: true,
         overrides: [
+          relaySessionProvider.overrideWith(
+            () => _ReconnectingRelaySession(
+              initialStatus: SessionStatus.connected,
+            ),
+          ),
           channelsProvider.overrideWith(
             () => notifier = _SupersededDirectoryNotifier(
               initialChannels: testChannels,
@@ -1610,104 +1418,275 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Create or start conversation'));
-    await tester.pump();
-    await tester.tap(
-      find.byKey(const Key('quick-action-browse-channels-card')),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.byType(BuzzLoadingIndicator), findsOneWidget);
+    expect(find.byKey(const Key('channels-directory-loading')), findsOneWidget);
 
     notifier.supersedeLoadingDirectory();
     await tester.pumpAndSettle();
 
-    expect(find.byType(BuzzLoadingIndicator), findsNothing);
-    expect(find.text('Couldn’t load open channels.'), findsOneWidget);
-    expect(find.byKey(const Key('browse-channels-retry')), findsOneWidget);
+    expect(find.byKey(const Key('channels-directory-loading')), findsNothing);
+    expect(find.byKey(const Key('channels-directory-retry')), findsOneWidget);
 
-    await tester.tap(find.byKey(const Key('browse-channels-retry')));
+    await tester.tap(find.byKey(const Key('channels-directory-retry')));
     await tester.pumpAndSettle();
 
     expect(notifier.retryCount, 1);
     expect(
-      find.byKey(const Key('browse-channel-superseded-directory')),
+      find.byKey(const Key('unjoined-channel-superseded-directory')),
       findsOneWidget,
     );
   });
 
-  testWidgets('browse action scrolls and joins an offscreen channel', (
+  testWidgets('requests the directory with the list and again on reconnect', (
     tester,
   ) async {
-    final channels = List.generate(
-      500,
-      (index) => Channel(
-        id: 'directory-$index',
-        name: 'channel-${index.toString().padLeft(3, '0')}',
-        channelType: 'stream',
-        visibility: 'open',
-        description: '',
-        createdBy: 'abc',
-        createdAt: DateTime(2025),
-        memberCount: 0,
-      ),
-    );
-    late _RecordingChannelActions actions;
+    late _CountingDirectoryNotifier notifier;
+    late _ReconnectingRelaySession session;
     await tester.pumpWidget(
       buildTestable(
-        disableAnimations: true,
         overrides: [
-          channelsProvider.overrideWith(() => _FakeNotifier(channels)),
-          channelActionsProvider.overrideWith(
-            (ref) => actions = _RecordingChannelActions(ref),
+          relaySessionProvider.overrideWith(
+            () => session = _ReconnectingRelaySession(
+              initialStatus: SessionStatus.connected,
+            ),
+          ),
+          channelsProvider.overrideWith(
+            () => notifier = _CountingDirectoryNotifier(testChannels),
           ),
         ],
       ),
     );
     await tester.pumpAndSettle();
+    expect(notifier.ensureDirectoryCalls, 1);
 
-    await tester.tap(find.byTooltip('Create or start conversation'));
+    session.setReconnecting();
+    await tester.pumpAndSettle();
+    expect(notifier.ensureDirectoryCalls, 1);
+
+    session.connect();
+    await tester.pumpAndSettle();
+    expect(notifier.ensureDirectoryCalls, 2);
+  });
+
+  testWidgets('Join joins the channel in place and opens it as a member', (
+    tester,
+  ) async {
+    final open = _discoverable(id: 'open-to-join', name: 'announcements');
+    final observer = _RecordingNavigatorObserver();
+    late _JoiningChannelActions actions;
+    late _FakeNotifier notifier;
+    await tester.pumpWidget(
+      buildTestable(
+        disableAnimations: true,
+        navigatorObservers: [observer],
+        overrides: [
+          channelsProvider.overrideWith(
+            () => notifier = _FakeNotifier([...testChannels, open]),
+          ),
+          channelActionsProvider.overrideWith(
+            (ref) => actions = _JoiningChannelActions(
+              ref,
+              onJoin: () => notifier.setChannels([
+                ...testChannels,
+                open.copyWith(isMember: true),
+              ]),
+            ),
+          ),
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+    final pushedBefore = observer.pushed.length;
+
+    await tester.tap(find.byKey(const Key('join-channel-open-to-join')));
+    // Let the join and the navigation it triggers run without building the
+    // pushed channel page, which needs a relay of its own.
+    await tester.idle();
+
+    expect(actions.joinedChannelIds, ['open-to-join']);
+    expect(
+      observer.pushed.length,
+      pushedBefore + 1,
+      reason: 'the joined channel opened',
+    );
+
+    // Drop the pushed page before it builds, then let the list catch up.
+    tester
+        .state<NavigatorState>(find.byType(Navigator).first)
+        .removeRoute(observer.pushed.last);
     await tester.pump();
-    await tester.tap(
-      find.byKey(const Key('quick-action-browse-channels-card')),
+    // The row became a member row.
+    expect(
+      find.byKey(const Key('unjoined-channel-open-to-join')),
+      findsNothing,
     );
+    expect(find.byKey(const Key('join-channel-open-to-join')), findsNothing);
+  });
+
+  testWidgets('a failed join reports inline and re-enables Join', (
+    tester,
+  ) async {
+    final open = _discoverable(id: 'open-to-join', name: 'announcements');
+    final observer = _RecordingNavigatorObserver();
+    await tester.pumpWidget(
+      buildTestable(
+        disableAnimations: true,
+        navigatorObservers: [observer],
+        overrides: [
+          channelsProvider.overrideWith(
+            () => _FakeNotifier([...testChannels, open]),
+          ),
+          channelActionsProvider.overrideWith(
+            (ref) => _FailingChannelActions(ref),
+          ),
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+    final pushedBefore = observer.pushed.length;
+
+    await tester.tap(find.byKey(const Key('join-channel-open-to-join')));
     await tester.pumpAndSettle();
 
     expect(
-      find.byKey(const Key('browse-channel-directory-0')),
-      findsAtLeast(1),
-    );
-    expect(find.byKey(const Key('browse-channel-directory-499')), findsNothing);
-
-    final sheet = find.byType(BottomSheet).last;
-    final scrollable = find
-        .descendant(of: sheet, matching: find.byType(Scrollable))
-        .last;
-    expect(
-      tester.state<ScrollableState>(scrollable).position.maxScrollExtent,
-      greaterThan(0),
-    );
-    await tester.scrollUntilVisible(
-      find.byKey(const Key('browse-channel-directory-499')),
-      500,
-      scrollable: scrollable,
-      maxScrolls: 100,
-    );
-    await tester.pumpAndSettle();
-
-    expect(
-      find.byKey(const Key('browse-channel-directory-499')),
+      find.byKey(const Key('join-channel-error-open-to-join')),
       findsOneWidget,
     );
-    expect(find.byKey(const Key('browse-channel-directory-0')), findsNothing);
+    expect(find.textContaining('relay refused'), findsOneWidget);
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.byKey(const Key('join-channel-open-to-join')),
+          )
+          .onPressed,
+      isNotNull,
+    );
+    expect(observer.pushed.length, pushedBefore);
+  });
 
-    await tester.tap(
-      find.byKey(const Key('browse-channel-join-directory-499')),
+  testWidgets(
+    'open channels to join are never seeded as read or shown unread',
+    (tester) async {
+      final lastMessageAt = DateTime.fromMillisecondsSinceEpoch(
+        20 * 1000,
+        isUtc: true,
+      );
+      final channels = [
+        Channel(
+          id: '1',
+          name: 'general',
+          channelType: 'stream',
+          visibility: 'open',
+          description: 'General discussion',
+          createdBy: 'abc',
+          createdAt: DateTime(2025),
+          memberCount: 10,
+          lastMessageAt: lastMessageAt,
+          isMember: true,
+        ),
+        Channel(
+          id: 'open-to-join',
+          name: 'announcements',
+          channelType: 'stream',
+          visibility: 'open',
+          description: '',
+          createdBy: 'abc',
+          createdAt: DateTime(2025),
+          memberCount: 8,
+          lastMessageAt: lastMessageAt,
+          isMember: false,
+        ),
+      ];
+      final readState = _FakeReadStateNotifier(
+        const ReadStateState(
+          isReady: true,
+          pubkey: 'pk',
+          contexts: {'1': 10},
+          version: 0,
+        ),
+      );
+
+      await tester.pumpWidget(
+        buildTestable(
+          overrides: [
+            channelsProvider.overrideWith(
+              () => _FakeNotifier(
+                channels,
+                observedEventsByChannel: {
+                  '1': [_observed(id: 'msg-1', createdAt: 20)],
+                  'open-to-join': [_observed(id: 'msg-open', createdAt: 20)],
+                },
+              ),
+            ),
+            readStateProvider.overrideWith(() => readState),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(readState.seededContexts.containsKey('open-to-join'), isFalse);
+      expect(
+        tester.widget<Text>(find.text('general')).style?.fontWeight,
+        FontWeight.w700,
+      );
+      expect(
+        tester.widget<Text>(find.text('announcements')).style?.fontWeight,
+        FontWeight.w400,
+      );
+    },
+  );
+
+  testWidgets('lists at most 100 open channels and counts the rest', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(400, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final channels = List.generate(
+      500,
+      (index) => _discoverable(
+        id: 'directory-$index',
+        name: 'channel-${index.toString().padLeft(3, '0')}',
+      ),
+    );
+    await tester.pumpWidget(
+      buildTestable(
+        disableAnimations: true,
+        overrides: [
+          channelsProvider.overrideWith(() => _FakeNotifier(channels)),
+        ],
+      ),
     );
     await tester.pumpAndSettle();
 
-    expect(actions.joinedChannelIds, ['directory-499']);
-    expect(find.byType(BottomSheet), findsNothing);
+    expect(find.text('No conversations yet'), findsNothing);
+    expect(
+      find.byKey(const Key('unjoined-channel-directory-0')),
+      findsOneWidget,
+    );
+
+    final scrollable = find
+        .descendant(
+          of: find.byType(CustomScrollView),
+          matching: find.byType(Scrollable),
+        )
+        .first;
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('channels-directory-more')),
+      400,
+      scrollable: scrollable,
+      maxScrolls: 200,
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const Key('unjoined-channel-directory-99')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('unjoined-channel-directory-100')),
+      findsNothing,
+    );
+    expect(find.text('+400 more open channels'), findsOneWidget);
   });
 
   testWidgets('create channel sheet lists type and visibility radio options', (
@@ -1722,9 +1701,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Create or start conversation'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Create channel'));
+    await tester.tap(find.byKey(const ValueKey('section-add-Channels')));
     await tester.pumpAndSettle();
     final createSheetRect = tester.getRect(find.byType(BottomSheet).last);
     expect(createSheetRect.top, greaterThanOrEqualTo(24));
@@ -1825,9 +1802,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Create or start conversation'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('New direct message'));
+    await tester.tap(find.byKey(const ValueKey('section-add-DMs')));
     await tester.pumpAndSettle();
 
     final dmSheetRect = tester.getRect(find.byType(BottomSheet).last);
@@ -1984,9 +1959,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Create or start conversation'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('New direct message'));
+    await tester.tap(find.byKey(const ValueKey('section-add-DMs')));
     await tester.pumpAndSettle();
 
     for (final user in directoryUsers) {
@@ -2027,9 +2000,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Create or start conversation'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('New direct message'));
+    await tester.tap(find.byKey(const ValueKey('section-add-DMs')));
     await tester.pumpAndSettle();
 
     expect(find.text('Could not load people from this relay.'), findsNothing);
@@ -2056,9 +2027,8 @@ void main() {
     );
   });
 
-  testWidgets('hides unjoined and archived channels from the main list', (
-    tester,
-  ) async {
+  testWidgets('lists unjoined open streams after joined rows, never archived '
+      'ones', (tester) async {
     final channels = [
       ...testChannels,
       Channel(
@@ -2095,13 +2065,18 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // Unjoined and archived channels should not appear in the main list.
     expect(find.text('general'), findsOneWidget);
-    expect(find.text('open-stream'), findsNothing);
+    expect(find.byKey(const Key('unjoined-channel-4')), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('open-stream')).dy,
+      greaterThan(tester.getTopLeft(find.text('general')).dy),
+    );
     expect(find.text('archived-stream'), findsNothing);
   });
 
-  testWidgets('empty state does not preview unjoined channels', (tester) async {
+  testWidgets('a discoverable channel replaces the empty state', (
+    tester,
+  ) async {
     final discoveredChannel = Channel(
       id: 'discovered-channel',
       name: 'community-help',
@@ -2123,14 +2098,15 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('No conversations yet'), findsOneWidget);
+    expect(find.text('No conversations yet'), findsNothing);
+    expect(find.text('No stream channels yet'), findsNothing);
     expect(
-      find.text('Join an open channel to start a conversation.'),
-      findsNothing,
+      find.byKey(const Key('unjoined-channel-discovered-channel')),
+      findsOneWidget,
     );
     expect(
-      find.byKey(const Key('browse-channel-discovered-channel')),
-      findsNothing,
+      find.byKey(const Key('join-channel-discovered-channel')),
+      findsOneWidget,
     );
   });
 
@@ -2392,6 +2368,9 @@ class _FakeNotifier extends ChannelsNotifier {
   @override
   Future<List<Channel>> build() async => _channels;
 
+  /// Replaces the list, as a refresh after a join would.
+  void setChannels(List<Channel> channels) => state = AsyncData(channels);
+
   @override
   Future<void> ensureDirectoryLoaded() async {
     ref
@@ -2492,6 +2471,45 @@ String _activeDirectoryScope(Ref ref) => channelDirectoryScope(
   ref.read(myPubkeyProvider),
 );
 
+class _CountingDirectoryNotifier extends _FakeNotifier {
+  _CountingDirectoryNotifier(super.channels);
+
+  int ensureDirectoryCalls = 0;
+
+  @override
+  Future<void> ensureDirectoryLoaded() async {
+    ensureDirectoryCalls++;
+    await super.ensureDirectoryLoaded();
+  }
+}
+
+class _RecordingNavigatorObserver extends NavigatorObserver {
+  final List<Route<dynamic>> pushed = [];
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    pushed.add(route);
+  }
+}
+
+Channel _discoverable({
+  required String id,
+  required String name,
+  String channelType = 'stream',
+  String visibility = 'open',
+  DateTime? archivedAt,
+}) => Channel(
+  id: id,
+  name: name,
+  channelType: channelType,
+  visibility: visibility,
+  description: '',
+  createdBy: 'abc',
+  createdAt: DateTime(2025),
+  memberCount: 0,
+  archivedAt: archivedAt,
+);
+
 class _RecordingChannelActions extends ChannelActions {
   _RecordingChannelActions(Ref ref)
     : super(
@@ -2509,6 +2527,28 @@ class _RecordingChannelActions extends ChannelActions {
   @override
   Future<void> joinChannel(String channelId) async {
     joinedChannelIds.add(channelId);
+  }
+}
+
+/// Records the join and then swaps the list, as the real join's refresh does.
+class _JoiningChannelActions extends _RecordingChannelActions {
+  _JoiningChannelActions(super.ref, {required this.onJoin});
+
+  final VoidCallback onJoin;
+
+  @override
+  Future<void> joinChannel(String channelId) async {
+    await super.joinChannel(channelId);
+    onJoin();
+  }
+}
+
+class _FailingChannelActions extends _RecordingChannelActions {
+  _FailingChannelActions(super.ref);
+
+  @override
+  Future<void> joinChannel(String channelId) async {
+    throw Exception('relay refused');
   }
 }
 

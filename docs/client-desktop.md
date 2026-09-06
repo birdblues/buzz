@@ -26,7 +26,9 @@ ends in a profile card like the desktop's (`SidebarProfileCard` in
 display name; the card opens Settings, and the channel list header drops
 its Settings avatar there. The community is named only in the header at
 the top of the sidebar, which opens the switcher; that name comes from the
-relay when one is set (`docs/community-name.md`). Nothing here talks to the
+relay when one is set (`docs/community-name.md`). The sidebar's sections,
+their `+` buttons and the open channels listed for joining are described in
+`docs/mobile-sidebar.md`. Nothing here talks to the
 host desktop except pairing (NIP-AB over the relay); everything else is read
 from the relay.
 

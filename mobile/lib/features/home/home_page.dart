@@ -81,11 +81,6 @@ class HomePage extends HookConsumerWidget {
     final tabContentTransitionProgress = reducedMotion
         ? 1.0
         : _tabContentTransitionCurve.transform(tabContentTransitionValue);
-    final systemBottomInset = MediaQuery.paddingOf(context).bottom;
-    final navigationBarWidth = _floatingTabBarWidth(
-      MediaQuery.sizeOf(context).width,
-      _destinations.length,
-    );
 
     final pages = [
       ChannelsPage(
@@ -174,16 +169,6 @@ class HomePage extends HookConsumerWidget {
                       ),
                     ),
                   ),
-                  Positioned.fill(
-                    child: ChannelQuickActionsLauncher(
-                      visible: tabIndex.value == 0,
-                      navigationBarHeight: HomePage._tabBarHeight,
-                      navigationBarBottomGap: HomePage._tabBarBottomGap,
-                      navigationBarWidth: navigationBarWidth,
-                      systemBottomInset: systemBottomInset,
-                      rightInset: Grid.sm,
-                    ),
-                  ),
                 ],
               ),
             ),
@@ -251,13 +236,6 @@ double _floatingTabDestinationWidth(double screenWidth, int destinationCount) {
   return preferredDestinationWidth
       .clamp(0.0, availableInnerWidth / destinationCount)
       .toDouble();
-}
-
-double _floatingTabBarWidth(double screenWidth, int destinationCount) {
-  if (destinationCount <= 0) return 0;
-  return (_floatingTabDestinationWidth(screenWidth, destinationCount) *
-          destinationCount) +
-      (HomePage._tabBarInnerInset * 2);
 }
 
 MediaQueryData _mediaQueryWithFloatingTabBarClearance(

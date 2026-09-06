@@ -350,7 +350,6 @@ void main() {
     );
     expect(find.byKey(const ValueKey('wide-main-empty')), findsOneWidget);
     expect(find.byKey(const ValueKey('wide-sidebar-toggle')), findsOneWidget);
-    expect(find.byType(ChannelQuickActionsLauncher), findsOneWidget);
   });
 
   testWidgets(

@@ -1,13 +1,12 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:math' show max, min, pi;
+import 'dart:math' show max, min;
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
-import 'package:flutter/physics.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
@@ -57,19 +56,16 @@ import '../../shared/read_state/read_state_time.dart';
 import 'unread_badge/observed_unread_event.dart';
 import 'wide_shell/wide_shell_provider.dart';
 
+part 'channels_page/add_actions.dart';
 part 'channels_page/body.dart';
-part 'channels_page/browse_channels_sheet.dart';
 part 'channels_page/sections.dart';
 part 'channels_page/channel_tile.dart';
+part 'channels_page/unjoined_channel_tile.dart';
 part 'channels_page/sheets.dart';
 part 'channels_page/badges.dart';
 part 'channels_page/skeleton.dart';
 part 'channels_page/community.dart';
 part 'channels_page/profile_card.dart';
-part 'channels_page/quick_actions.dart';
-part 'channels_page/quick_actions_launcher.dart';
-
-enum _QuickAction { createChannel, newDm, browseChannels }
 
 const double _kChannelSectionInset = Grid.gutter;
 const double _kChannelLeadingWidth = 22.0;
@@ -278,6 +274,26 @@ class ChannelsPage extends HookConsumerWidget {
       cachedChannels.value = data;
     }
     final channels = cachedChannels.value;
+    // Open channels the user has not joined are listed in the sidebar for
+    // joining in place, so the directory loads with the list rather than on
+    // demand. Keyed on the connection as well as the scope: a retry while
+    // disconnected records an error, and `ensureDirectoryLoaded` retries
+    // only from idle or error.
+    final directoryScope = channelDirectoryScope(
+      ref.watch(relayConfigProvider).baseUrl,
+      ref.watch(myPubkeyProvider),
+    );
+    final relayConnected = sessionState.status == SessionStatus.connected;
+    final hasChannels = channels != null;
+    useEffect(() {
+      if (!relayConnected || !hasChannels) return null;
+      unawaited(
+        Future<void>.microtask(
+          ref.read(channelsProvider.notifier).ensureDirectoryLoaded,
+        ),
+      );
+      return null;
+    }, [directoryScope, relayConnected, hasChannels]);
     Future<void> openChannel(Channel channel) async {
       if (!context.mounted) return;
       await openChannelDetail(context, channel: channel);
@@ -388,7 +404,10 @@ class ChannelsPage extends HookConsumerWidget {
         topSectionHeight: topSectionHeight,
         usesPinnedGradient: usesPinnedGradient,
         scrollController: channelsScrollController,
-        onRefresh: () => ref.read(channelsProvider.notifier).refresh(),
+        // A pull also re-reads the directory, so channels created since
+        // launch become joinable from the list.
+        onRefresh: () =>
+            ref.read(channelsProvider.notifier).refresh(fetchDirectory: true),
         onSelectChannel: openChannel,
       ),
     );

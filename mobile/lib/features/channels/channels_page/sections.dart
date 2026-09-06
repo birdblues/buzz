@@ -376,6 +376,19 @@ class _ChannelSection extends StatelessWidget {
   final bool expanded;
   final VoidCallback onToggle;
   final List<Channel> channels;
+
+  /// Open channels the user has not joined, listed dimmed after [channels]
+  /// with a Join button each; they collapse with the section.
+  final List<Channel> joinableChannels;
+
+  /// The directory's loading state, shown in place of [joinableChannels]
+  /// while there are none.
+  final ChannelDirectoryLoadStatus? directoryStatus;
+  final VoidCallback? onRetryDirectory;
+
+  /// Opens the section's "add" sheet from the header's `+`.
+  final VoidCallback? onAdd;
+  final String? addTooltip;
   final bool showTopDivider;
   final Set<String> unreadChannelIds;
   final Set<String> mutedChannelIds;
@@ -391,6 +404,11 @@ class _ChannelSection extends StatelessWidget {
     required this.expanded,
     required this.onToggle,
     required this.channels,
+    this.joinableChannels = const [],
+    this.directoryStatus,
+    this.onRetryDirectory,
+    this.onAdd,
+    this.addTooltip,
     required this.showTopDivider,
     required this.unreadChannelIds,
     required this.mutedChannelIds,
@@ -414,13 +432,15 @@ class _ChannelSection extends StatelessWidget {
           onToggle: onToggle,
           sortMode: sortMode,
           onSortModeChange: onSortModeChange,
+          onAdd: onAdd,
+          addTooltip: addTooltip,
         ),
         _AnimatedSectionBody(
           expanded: expanded,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (channels.isEmpty)
+              if (channels.isEmpty && joinableChannels.isEmpty)
                 Padding(
                   padding: const EdgeInsets.only(
                     left: _kChannelLabelInset,
@@ -435,7 +455,7 @@ class _ChannelSection extends StatelessWidget {
                     ),
                   ),
                 )
-              else
+              else ...[
                 for (final channel in channels)
                   _ChannelTile(
                     channel: channel,
@@ -446,6 +466,22 @@ class _ChannelSection extends StatelessWidget {
                     onMarkRead: null,
                     sectionId: null,
                   ),
+                for (final channel in joinableChannels.take(_kMaxUnjoinedRows))
+                  _UnjoinedChannelTile(
+                    channel: channel,
+                    onTap: () => onSelectChannel(channel),
+                    onJoined: onSelectChannel,
+                  ),
+                if (joinableChannels.length > _kMaxUnjoinedRows)
+                  _UnjoinedOverflowRow(
+                    hidden: joinableChannels.length - _kMaxUnjoinedRows,
+                  ),
+              ],
+              if (joinableChannels.isEmpty && directoryStatus != null)
+                _DirectoryStatusRow(
+                  status: directoryStatus!,
+                  onRetry: onRetryDirectory,
+                ),
               const SizedBox(height: _kExpandedSectionTrailingPadding),
             ],
           ),
@@ -511,6 +547,11 @@ class _SectionHeader extends StatelessWidget {
   final ChannelSortMode? sortMode;
   final ValueChanged<ChannelSortMode>? onSortModeChange;
 
+  /// The header's `+`, like the desktop sidebar's section quick action:
+  /// present only for sections that can add something.
+  final VoidCallback? onAdd;
+  final String? addTooltip;
+
   const _SectionHeader({
     required this.label,
     required this.icon,
@@ -518,6 +559,8 @@ class _SectionHeader extends StatelessWidget {
     required this.onToggle,
     this.sortMode,
     this.onSortModeChange,
+    this.onAdd,
+    this.addTooltip,
   });
 
   @override
@@ -544,14 +587,36 @@ class _SectionHeader extends StatelessWidget {
               ),
             ),
             const SizedBox(width: _kChannelLabelGap),
-            Text(
-              label,
-              style: contentListTitleTextStyle.copyWith(
-                color: sectionColor,
-                fontWeight: FontWeight.w600,
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: contentListTitleTextStyle.copyWith(
+                  color: sectionColor,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
-            const Spacer(),
+            if (onAdd case final onAdd?)
+              // Tight so the header still fits the wide shell's sidebar
+              // beside the options menu; the row keeps the menu's height.
+              IconButton(
+                key: ValueKey('section-add-$label'),
+                tooltip: addTooltip,
+                style: IconButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  minimumSize: const Size(Grid.md, Grid.md),
+                  fixedSize: const Size(Grid.md, Grid.md),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                icon: Icon(
+                  LucideIcons.plus,
+                  size: _kChannelIconSize,
+                  color: sectionColor,
+                ),
+                onPressed: onAdd,
+              ),
             if (sortMode case final mode?) ...[
               Builder(
                 builder: (buttonContext) => IconButton(

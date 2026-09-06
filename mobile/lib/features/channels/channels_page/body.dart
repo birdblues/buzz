@@ -119,13 +119,38 @@ class _SliverChannelsList extends HookConsumerWidget {
     final streamChannels = visibleChannels
         .where((channel) => channel.isStream)
         .toList();
+    final forumChannels = visibleChannels
+        .where((channel) => channel.isForum)
+        .toList();
     final dmChannels = sortDmChannelsByDisplayLabel(
       visibleChannels.where((channel) => channel.isDm),
       currentPubkey: currentPubkey,
     );
+    // Open channels the user has not joined, from the relay's directory,
+    // listed for joining in place. They are never part of [visibleChannels]:
+    // no read state is seeded for them and they count as neither unread nor
+    // starred. A–Z regardless of the section's sort mode, since they carry
+    // no activity to sort by.
+    List<Channel> joinable(bool Function(Channel channel) ofKind) =>
+        channels.where((channel) => channel.canJoin && ofKind(channel)).toList()
+          ..sort(
+            (left, right) =>
+                left.name.toLowerCase().compareTo(right.name.toLowerCase()),
+          );
+    final joinableStreams = joinable((channel) => channel.isStream);
+    final joinableForums = joinable((channel) => channel.isForum);
+    final directoryState = ref.watch(channelDirectoryLoadStatusProvider);
+    final directoryScope = channelDirectoryScope(
+      ref.watch(relayConfigProvider).baseUrl,
+      ref.watch(myPubkeyProvider),
+    );
+    final directoryStatus = directoryState.scope == directoryScope
+        ? directoryState.status
+        : ChannelDirectoryLoadStatus.idle;
 
     final starredExpanded = useState(true);
     final channelsExpanded = useState(true);
+    final forumsExpanded = useState(true);
     final dmsExpanded = useState(true);
     final sortState = ref.watch(channelSortProvider);
     final initialSeedComplete = useState(false);
@@ -201,6 +226,10 @@ class _SliverChannelsList extends HookConsumerWidget {
           .toList(),
       sortState.sortModeFor('channels'),
     );
+    final sortedForumChannels = sortChannelsForList(
+      forumChannels,
+      sortState.sortModeFor('forums'),
+    );
     // DMs default to the display-label alphabetical order (labels can differ
     // from channel names); Recent mode reorders by last message time.
     final sortedDmChannels =
@@ -234,7 +263,9 @@ class _SliverChannelsList extends HookConsumerWidget {
       ),
       sliver: SliverList.list(
         children: [
-          if (visibleChannels.isEmpty)
+          if (visibleChannels.isEmpty &&
+              joinableStreams.isEmpty &&
+              joinableForums.isEmpty)
             const _EmptyState()
           else ...[
             // Starred channels (exclusive — pinned above all sections).
@@ -358,6 +389,15 @@ class _SliverChannelsList extends HookConsumerWidget {
               expanded: channelsExpanded.value,
               onToggle: () => channelsExpanded.value = !channelsExpanded.value,
               channels: ungroupedStreamChannels,
+              joinableChannels: joinableStreams,
+              directoryStatus: directoryStatus,
+              onRetryDirectory: () => unawaited(
+                ref.read(channelsProvider.notifier).retryDirectory(),
+              ),
+              onAdd: () => unawaited(
+                _createChannelFromHeader(context, channelType: 'stream'),
+              ),
+              addTooltip: 'Create channel',
               unreadChannelIds: unreadChannelIds,
               mutedChannelIds: mutedChannelIds,
               currentPubkey: currentPubkey,
@@ -367,12 +407,34 @@ class _SliverChannelsList extends HookConsumerWidget {
               onSelectChannel: onSelectChannel,
             ),
             _ChannelSection(
+              title: 'Forums',
+              icon: LucideIcons.messageSquareText,
+              showTopDivider: true,
+              expanded: forumsExpanded.value,
+              onToggle: () => forumsExpanded.value = !forumsExpanded.value,
+              channels: sortedForumChannels,
+              joinableChannels: joinableForums,
+              onAdd: () => unawaited(
+                _createChannelFromHeader(context, channelType: 'forum'),
+              ),
+              addTooltip: 'New forum',
+              unreadChannelIds: unreadChannelIds,
+              mutedChannelIds: mutedChannelIds,
+              currentPubkey: currentPubkey,
+              emptyLabel: 'No forums yet',
+              sortMode: sortState.sortModeFor('forums'),
+              onSortModeChange: (mode) => setSortMode('forums', mode),
+              onSelectChannel: onSelectChannel,
+            ),
+            _ChannelSection(
               title: 'DMs',
               icon: LucideIcons.messagesSquare,
               showTopDivider: true,
               expanded: dmsExpanded.value,
               onToggle: () => dmsExpanded.value = !dmsExpanded.value,
               channels: sortedDmChannels,
+              onAdd: () => unawaited(_newDirectMessageFromHeader(context, ref)),
+              addTooltip: 'New message',
               unreadChannelIds: unreadChannelIds,
               mutedChannelIds: mutedChannelIds,
               currentPubkey: currentPubkey,

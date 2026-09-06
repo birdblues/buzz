@@ -1,5 +1,4 @@
 import 'package:buzz/features/home/home_page.dart';
-import 'package:buzz/features/channels/channels_page.dart';
 import 'package:buzz/features/profile/profile_avatar.dart';
 import 'package:buzz/shared/theme/theme.dart';
 import 'package:flutter/material.dart';
@@ -34,7 +33,7 @@ void main() {
     );
   }
 
-  testWidgets('shows icon-only navigation and an aligned quick action', (
+  testWidgets('shows icon-only navigation without a floating action', (
     tester,
   ) async {
     await tester.pumpWidget(await buildHome());
@@ -46,30 +45,8 @@ void main() {
     expect(find.bySemanticsLabel('Home'), findsOneWidget);
     expect(find.bySemanticsLabel('Activity'), findsOneWidget);
     expect(find.bySemanticsLabel('Search'), findsOneWidget);
-
-    final quickAction = find.byTooltip('Create or start conversation');
-    expect(quickAction, findsOneWidget);
-    final launcherSize = tester.getSize(
-      find.byType(ChannelQuickActionsLauncher),
-    );
-    expect(launcherSize.width, 800);
-    expect(launcherSize.height, greaterThan(0));
-    final motionRect = tester.getRect(
-      find.byKey(const Key('channel-quick-actions-motion')),
-    );
-    expect(motionRect.width, const Size.square(56).width);
-    expect(motionRect.left, greaterThanOrEqualTo(0));
-    expect(tester.getSize(quickAction), const Size.square(56));
-    final quickActionRect = tester.getRect(quickAction);
-    expect(quickActionRect.left, greaterThanOrEqualTo(0));
-    expect(quickActionRect.top, greaterThanOrEqualTo(0));
-    expect(quickActionRect.right, lessThanOrEqualTo(800));
-    expect(quickActionRect.bottom, lessThanOrEqualTo(600));
-    final homeDestinationRect = tester.getRect(find.bySemanticsLabel('Home'));
-    expect(
-      quickActionRect.center.dy,
-      closeTo(homeDestinationRect.center.dy, 0.01),
-    );
+    // Creating channels and messages moved to the list's section headers.
+    expect(find.byTooltip('Create or start conversation'), findsNothing);
   });
 
   testWidgets('keeps the Buzz backdrop behind the scalable Home screen', (
@@ -233,32 +210,6 @@ void main() {
     expect(hapticCalls, hasLength(2));
   });
 
-  testWidgets('gives a light impact when the Home quick action is pressed', (
-    tester,
-  ) async {
-    final hapticCalls = <MethodCall>[];
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(SystemChannels.platform, (call) async {
-          if (call.method == 'HapticFeedback.vibrate') {
-            hapticCalls.add(call);
-          }
-          return null;
-        });
-    addTearDown(
-      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(SystemChannels.platform, null),
-    );
-
-    await tester.pumpWidget(await buildHome());
-    await tester.pump();
-
-    await tester.tap(find.byTooltip('Create or start conversation'));
-    await tester.pump();
-
-    expect(hapticCalls, hasLength(1));
-    expect(hapticCalls.single.arguments, 'HapticFeedbackType.lightImpact');
-  });
-
   testWidgets('badges the Inbox tab when it has unread rows', (tester) async {
     await tester.pumpWidget(await buildHome(unreadInboxCount: 1));
     await tester.pump();
@@ -391,47 +342,6 @@ void main() {
     expect(appBarTransform.transform.getTranslation().x, closeTo(0, 0.001));
     expect(bodyOpacity.opacity, closeTo(1, 0.001));
     expect(appBarOpacity.opacity, closeTo(1, 0.001));
-  });
-
-  testWidgets('scales and fades the quick action as tabs change', (
-    tester,
-  ) async {
-    await tester.pumpWidget(await buildHome());
-    await tester.pump();
-
-    double scale() => tester
-        .widget<Transform>(find.byKey(const Key('channel-quick-actions-scale')))
-        .transform
-        .storage
-        .first;
-    double opacity() => tester
-        .widget<Opacity>(find.byKey(const Key('channel-quick-actions-opacity')))
-        .opacity;
-
-    expect(scale(), closeTo(1, 0.001));
-    expect(opacity(), closeTo(1, 0.001));
-
-    await tester.tap(find.byTooltip('Activity'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 110));
-
-    expect(scale(), inExclusiveRange(0.8, 1));
-    expect(opacity(), inExclusiveRange(0, 1));
-
-    await tester.pumpAndSettle();
-    expect(scale(), closeTo(0.8, 0.001));
-    expect(opacity(), closeTo(0, 0.001));
-
-    await tester.tap(find.byTooltip('Home'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 110));
-
-    expect(scale(), inExclusiveRange(0.8, 1));
-    expect(opacity(), inExclusiveRange(0, 1));
-
-    await tester.pumpAndSettle();
-    expect(scale(), closeTo(1, 0.001));
-    expect(opacity(), closeTo(1, 0.001));
   });
 }
 
