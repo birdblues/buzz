@@ -95,7 +95,15 @@ entitlements). Without it every keychain call fails with `-34018` and the
 app forgets its identity on relaunch — the first thing to check after a
 build. A Mac running a development-signed build must be registered as a
 device in the team account (Xcode does this for the building Mac; add other
-Macs' Provisioning UDIDs by hand). Fallback for an unsigned build: set
+Macs' Provisioning UDIDs by hand).
+
+The first build on a new Mac fails with "No profiles for '…client' were
+found", and `xcodebuild -allowProvisioningUpdates` from a terminal answers
+"No Accounts" because the command line does not see the Apple ID session.
+Open `mobile/macos/Runner.xcworkspace` in Xcode once, select the Runner
+target's *Signing & Capabilities* tab and let automatic signing create the
+macOS profile; after that `flutter run -d macos` and `just
+mobile-build-macos` work from the terminal. Fallback for an unsigned build: set
 `BUZZ_CODE_SIGN_IDENTITY = -`, drop the `keychain-access-groups` entitlement,
 and construct `FlutterSecureStorage` with
 `MacOsOptions(usesDataProtectionKeychain: false)` (login keychain, one
