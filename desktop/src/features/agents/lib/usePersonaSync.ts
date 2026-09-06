@@ -1,13 +1,5 @@
 import * as React from "react";
-import { useQueryClient } from "@tanstack/react-query";
 
-import {
-  managedAgentsQueryKey,
-  personasQueryKey,
-  relayAgentsQueryKey,
-} from "@/features/agents/hooks";
-import { teamsQueryKey } from "@/features/agents/teamHooks";
-import { evictUsersBatchEntries } from "@/features/profile/hooks";
 import { relayClient } from "@/shared/api/relayClient";
 import { reconcileInboundPersonaEvent } from "@/shared/api/tauriPersonas";
 import type { RelayEvent } from "@/shared/api/types";
@@ -288,7 +280,6 @@ export function startPersonaSync(
   pubkey: string,
   relayUrl: string,
   onCancelled: () => boolean,
-  onLiveEventReconciled?: (event: RelayEvent) => void,
 ): () => Promise<void> {
   // Reconcile in dispatch order. Managed-agent reconciliation can await a remote
   // provider deployment after releasing the local store lock; firing commands
@@ -296,15 +287,10 @@ export function startPersonaSync(
   // one. One chain per owner/relay subscription makes the newest event the last
   // deployment without serializing unrelated identities or communities.
   let reconcileChain = Promise.resolve();
-  const reconcile = (event: RelayEvent, live = false) => {
+  const reconcile = (event: RelayEvent) => {
     if (event.pubkey !== pubkey) return;
     reconcileChain = reconcileChain
-      .then(async () => {
-        await reconcileInboundPersonaEvent(JSON.stringify(event), relayUrl);
-        // Only steady-state live events notify: the backfill reconciles the
-        // whole history and would fire once per historical revision.
-        if (live && !onCancelled()) onLiveEventReconciled?.(event);
-      })
+      .then(() => reconcileInboundPersonaEvent(JSON.stringify(event), relayUrl))
       .catch((error) => {
         console.warn("[usePersonaSync] reconcile failed:", error);
       });
@@ -350,7 +336,7 @@ export function startPersonaSync(
   // valid shared state.
   const dispatchLive = (event: RelayEvent) => {
     if (degraded && isCatalogDependencyEvent(event)) return;
-    reconcile(event, true);
+    reconcile(event);
   };
 
   const liveBuffer: RelayEvent[] = [];
@@ -485,60 +471,13 @@ export function usePersonaSync(
   pubkey: string | undefined,
   relayUrl: string | undefined,
 ): void {
-  const queryClient = useQueryClient();
   React.useEffect(() => {
     if (!pubkey || !relayUrl) return;
     let cancelled = false;
-    // Another device edited a persona, team, or agent (or deleted one via
-    // kind:5): the backend store just changed under the cached queries, so mark
-    // the affected ones stale. Without this, a rename or membership-policy edit
-    // made on another device sits behind the 5-minute discovery poll.
-    const invalidateForLiveEvent = (event: RelayEvent) => {
-      const keys =
-        event.kind === KIND_MANAGED_AGENT
-          ? [relayAgentsQueryKey, managedAgentsQueryKey]
-          : event.kind === KIND_PERSONA
-            ? [personasQueryKey]
-            : event.kind === KIND_TEAM
-              ? [teamsQueryKey, personasQueryKey]
-              : event.kind === KIND_DELETION
-                ? [
-                    relayAgentsQueryKey,
-                    managedAgentsQueryKey,
-                    personasQueryKey,
-                    teamsQueryKey,
-                  ]
-                : [];
-      for (const queryKey of keys) {
-        void queryClient.invalidateQueries({ queryKey });
-      }
-      // An agent config edit usually renames the agent, and its harness
-      // republishes kind:0 moments later — refresh that agent's cached
-      // name/avatar too (same idiom as the profile-save mutation).
-      if (event.kind === KIND_MANAGED_AGENT) {
-        const agentPubkey = eventDTag(event)?.toLowerCase();
-        if (agentPubkey) {
-          evictUsersBatchEntries(queryClient, [agentPubkey]);
-          void queryClient.invalidateQueries({
-            queryKey: ["user-profile", agentPubkey],
-          });
-          void queryClient.invalidateQueries({
-            predicate: (query) =>
-              query.queryKey[0] === "users-batch" &&
-              query.queryKey.includes(agentPubkey),
-          });
-        }
-      }
-    };
-    const dispose = startPersonaSync(
-      pubkey,
-      relayUrl,
-      () => cancelled,
-      invalidateForLiveEvent,
-    );
+    const dispose = startPersonaSync(pubkey, relayUrl, () => cancelled);
     return () => {
       cancelled = true;
       void dispose();
     };
-  }, [pubkey, queryClient, relayUrl]);
+  }, [pubkey, relayUrl]);
 }

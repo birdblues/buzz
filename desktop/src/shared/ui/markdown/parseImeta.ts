@@ -55,12 +55,6 @@ export function parseImetaTags(
         case "filename":
           entry.filename = val;
           break;
-        case "preview-light":
-          entry.previewLight = val;
-          break;
-        case "preview-dark":
-          entry.previewDark = val;
-          break;
       }
     }
     if (entry.url) map.set(entry.url, entry as ParsedImetaEntry);

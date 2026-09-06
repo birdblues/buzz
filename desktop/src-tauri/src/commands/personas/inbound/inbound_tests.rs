@@ -21,7 +21,6 @@ fn local_in_app() -> AgentDefinition {
         name_pool: vec!["Local".to_string()],
         is_builtin: false,
         is_active: true,
-        remote_origin: false,
         shared: false,
         source_team: Some("team-1".to_string()),
         source_team_persona_slug: None,
@@ -51,7 +50,6 @@ fn inbound_for(d_tag: &str, display_name: &str) -> AgentDefinition {
         name_pool: vec!["Remote".to_string()],
         is_builtin: false,
         is_active: true,
-        remote_origin: false,
         shared: false,
         source_team: None,
         source_team_persona_slug: Some(d_tag.to_string()),
@@ -83,9 +81,6 @@ fn in_app_persona_matches_existing_uuid_and_patches() {
     assert_eq!(p.source_team, Some("team-1".to_string()));
     assert_eq!(p.source_team_persona_slug, None);
     assert_eq!(p.created_at, "2025-01-01T00:00:00Z");
-    // Device-local origin fact never patched by a remote edit: a locally
-    // created row stays local-origin no matter how many events land on it.
-    assert!(!p.remote_origin, "merge must not mark local rows remote");
 }
 
 #[test]
@@ -155,15 +150,9 @@ fn no_local_match_inserts_inbound_reusing_d_tag_as_id() {
     assert_eq!(personas.len(), 2, "unmatched inbound is inserted");
     let inserted = personas.iter().find(|p| p.id == other).unwrap();
     assert_eq!(inserted.display_name, "New");
-    // First-seen-via-sync definitions are marked remote-origin (device-local
-    // fact driving the card badge + mention-launcher exclusion).
-    assert!(inserted.remote_origin, "insert must mark remote origin");
-    // Re-receiving the inserted record must still be idempotent, and the
-    // merge branch must keep the origin fact.
+    // Re-receiving the inserted record must still be idempotent.
     apply_inbound_persona(&mut personas, inbound_for(other, "New"));
     assert_eq!(personas.len(), 2, "re-receive of inserted record no-ops");
-    let inserted = personas.iter().find(|p| p.id == other).unwrap();
-    assert!(inserted.remote_origin, "re-receive keeps remote origin");
 }
 
 // ── Managed-agent (30177) inbound ────────────────────────────────────────
@@ -224,7 +213,6 @@ fn local_agent() -> ManagedAgentRecord {
         name_pool: Vec::new(),
         is_builtin: false,
         is_active: true,
-        remote_origin: false,
         shared: false,
         source_team: None,
         source_team_persona_slug: None,

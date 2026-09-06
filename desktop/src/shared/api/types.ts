@@ -276,13 +276,6 @@ export type RelayAgent = {
   status: "online" | "away" | "offline" | "unknown";
   respondTo: RespondToMode | null;
   respondToAllowlist: string[];
-  /**
-   * Definition this agent instantiates, from its owner-signed kind:30177
-   * projection. Null on the legacy directory path. Builtin definition ids are
-   * identical across owners, so NEVER trust this without also checking that
-   * `ownerPubkey` is the current user.
-   */
-  personaId: string | null;
 };
 
 export type ManagedAgentRuntimeLifecycle =
@@ -292,13 +285,6 @@ export type ManagedAgentRuntimeLifecycle =
   | "ready"
   | "failed"
   | "stopped";
-
-/**
- * Why a reaped harness exited, as classified by the backend
- * (`managed_agents/exit_verdict.rs`). Present only on the status emitted
- * when a tracked runtime is reaped.
- */
-export type ManagedAgentExitCause = "crash" | "intentional" | "unknown";
 
 export type ManagedAgentRuntimeStatus = {
   pubkey: string;
@@ -311,7 +297,6 @@ export type ManagedAgentRuntimeStatus = {
   pid: number | null;
   error: string | null;
   logPath: string | null;
-  exitCause?: ManagedAgentExitCause;
 };
 
 export type ManagedAgentBackend =
@@ -320,20 +305,7 @@ export type ManagedAgentBackend =
 
 import type { RestartDiffEntry } from "./restartDiff";
 export type { JsonValue, RestartChange, RestartDiffEntry } from "./restartDiff";
-/**
- * What a start request actually did. Present only on the value returned by a
- * start command; `null` on listing/refresh reads.
- *
- * `runningElsewhere` is a SUCCESS: the agent is already live on another
- * device, so no local harness was spawned and a second one would have made it
- * answer every message twice. Callers that merely need the agent reachable
- * should treat it exactly like a start; only callers that assume a local
- * child now exists (rollback, "started" bookkeeping) must branch on it.
- */
-export type StartOutcome = "startedLocal" | "alreadyLocal" | "runningElsewhere";
-
 export type ManagedAgent = {
-  startOutcome?: StartOutcome | null;
   pubkey: string;
   name: string;
   personaId: string | null;

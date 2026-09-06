@@ -8,20 +8,8 @@ import {
   personasQueryKey,
   teamsQueryKey,
 } from "@/features/agents/hooks";
-import {
-  createHarnessExitHandler,
-  type HarnessExitPayload,
-} from "@/features/agents/lib/harnessExitNotice";
-import {
-  clearActiveTurnsForAgentOnStop,
-  managedAgentRuntimesQueryKey,
-} from "@/features/agents/managedAgentRuntimeHooks";
+import { managedAgentRuntimesQueryKey } from "@/features/agents/managedAgentRuntimeHooks";
 import { teamAutoRetractedNotice } from "@/features/agents/ui/teamLibraryCopy";
-import {
-  loadActiveCommunityId,
-  loadCommunities,
-} from "@/features/communities/communityStorage";
-import type { ManagedAgent } from "@/shared/api/types";
 
 export const LOCAL_AGENT_DATA_QUERY_KEYS = [
   personasQueryKey,
@@ -42,42 +30,12 @@ export function useAgentsDataRefresh(): void {
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
 
-    const invalidateRuntime = () => {
+    const unlistenRuntime = listen("managed-agent-runtime-status", () => {
       void queryClient.invalidateQueries({
         queryKey: managedAgentRuntimesQueryKey,
       });
       void queryClient.invalidateQueries({ queryKey: managedAgentsQueryKey });
-    };
-    // Harness exits ride the same event as start/stop/observer frames; the
-    // handler ignores everything without `exitCause` and aggregates crashes
-    // into one toast, fenced to the community on screen when the event
-    // arrives (not when this listener was registered).
-    const harnessExit = createHarnessExitHandler({
-      activeRelayUrl: () => {
-        const activeId = loadActiveCommunityId();
-        if (!activeId) return null;
-        return (
-          loadCommunities().find((community) => community.id === activeId)
-            ?.relayUrl ?? null
-        );
-      },
-      agentName: (pubkey) =>
-        queryClient
-          .getQueryData<ManagedAgent[]>(managedAgentsQueryKey)
-          ?.find((agent) => agent.pubkey === pubkey)?.name ?? null,
-      clearActiveTurns: clearActiveTurnsForAgentOnStop,
-      invalidate: invalidateRuntime,
-      toast: (copy) => toast.error(copy),
     });
-
-    const unlistenRuntime = listen<HarnessExitPayload>(
-      "managed-agent-runtime-status",
-      (event) => {
-        if (harnessExit.handle(event.payload) === "ignore") {
-          invalidateRuntime();
-        }
-      },
-    );
 
     const unlisten = listen("agents-data-changed", () => {
       if (timer !== undefined) clearTimeout(timer);
@@ -105,7 +63,6 @@ export function useAgentsDataRefresh(): void {
 
     return () => {
       if (timer !== undefined) clearTimeout(timer);
-      harnessExit.dispose();
       void unlisten.then((fn) => fn());
       void unlistenRuntime.then((fn) => fn());
       void unlistenRetracted.then((fn) => fn());

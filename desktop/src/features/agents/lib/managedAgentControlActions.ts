@@ -2,29 +2,13 @@ import { sendChannelMessage } from "@/shared/api/tauri";
 import type { Channel, ManagedAgent, RelayAgent } from "@/shared/api/types";
 import type { AgentAvailabilityReader } from "./useAgentAvailability";
 import { normalizePubkey } from "@/shared/lib/pubkey";
-import type { StartIntent } from "@/shared/api/tauriManagedAgents";
-
-/**
- * True when a start returned without spawning because the agent is already
- * live on another device. Not an error — the agent is reachable, it just
- * isn't hosted here.
- */
-export function isRunningElsewhere(result: unknown): boolean {
-  return (
-    typeof result === "object" &&
-    result !== null &&
-    (result as ManagedAgent).startOutcome === "runningElsewhere"
-  );
-}
 
 type DeleteManagedAgentInput = {
   pubkey: string;
   forceRemoteDelete?: boolean;
 };
 
-export type StartManagedAgent = (
-  input: string | { pubkey: string; intent?: StartIntent },
-) => Promise<ManagedAgent | unknown>;
+type StartManagedAgent = (pubkey: string) => Promise<unknown>;
 type StopManagedAgent = (pubkey: string) => Promise<unknown>;
 type DeleteManagedAgent = (input: DeleteManagedAgentInput) => Promise<unknown>;
 
@@ -98,13 +82,7 @@ export async function startManagedAgentWithRules({
   // Relay-mesh agents are no longer blocked here: the backend start preflight
   // (ensure_relay_mesh_for_record) re-resolves a live serve target and dials
   // it, failing with an actionable error when no peer serves the model.
-  //
-  // Explicit surfaces fence a duplicate start ahead of this call with
-  // `agentPresenceStartBlockReason`, which offers no override. A
-  // `runningElsewhere` outcome still reaches callers here — presence that is
-  // unknown or a disconnected relay leaves that fence open — and it is
-  // reported, not retried: the backend probe is the authoritative guard.
-  return startManagedAgent(agent.pubkey);
+  await startManagedAgent(agent.pubkey);
 }
 
 export async function respawnManagedAgentWithRules({
@@ -123,18 +101,9 @@ export async function respawnManagedAgentWithRules({
   if (agent.backend.type === "local" && isManagedAgentActive(agent)) {
     await stopManagedAgent(agent.pubkey);
     onStopped?.();
-    // We just killed a live LOCAL child. Relay presence can lag behind that
-    // by up to the Redis TTL, so an `online` reading here is most likely our
-    // own afterglow — bypass the cross-machine guard for this respawn only.
-    return startManagedAgent({
-      pubkey: agent.pubkey,
-      intent: "afterLocalStop",
-    });
   }
 
-  // Nothing local was stopped, so any `online` reading belongs to another
-  // device — the ordinary explicit-start rules apply.
-  return startManagedAgentWithRules({ agent, startManagedAgent });
+  await startManagedAgent(agent.pubkey);
 }
 
 export async function stopManagedAgentWithRules({

@@ -38,7 +38,6 @@ import {
 import { useDmResurfaceFromMessages } from "@/features/channels/useDmResurfaceFromMessages";
 import { useUnreadChannels } from "@/features/channels/useUnreadChannels";
 import { useMembershipNotifications } from "@/features/channels/useMembershipNotifications";
-import { useArchiveSnapshotLiveRefresh } from "@/features/identity-archive/hooks";
 import { useFeedItemState } from "@/features/home/useFeedItemState";
 import { useThreadFollows } from "@/features/messages/lib/useThreadFollows";
 import {
@@ -228,7 +227,6 @@ export function AppShell() {
   useUserStatusSubscription();
   useCommunityEmojiLiveUpdates();
   useMembershipNotifications(identityQuery.data?.pubkey);
-  useArchiveSnapshotLiveRefresh(Boolean(identityQuery.data?.pubkey));
   const presenceSession = usePresenceSession(deferredPubkey);
   const selfStatusQuery = useUserStatusQuery(
     deferredPubkey ? [deferredPubkey] : [],
@@ -920,6 +918,7 @@ export function AppShell() {
                           selectedChannelId={selectedChannelId}
                           selectedView={selectedView}
                           unreadChannelIds={unreadChannelIds}
+                          {...{ highPriorityUnreadChannelIds }}
                           previewActivityChannelIds={unreadThreadChannelIds}
                           unreadChannelCounts={unreadChannelCounts}
                           mutedChannelIds={mutedChannelIds}

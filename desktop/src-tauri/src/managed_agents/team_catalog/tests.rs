@@ -16,7 +16,6 @@ fn member(id: &str, display_name: &str) -> AgentDefinition {
         name_pool: vec!["Alpha".to_string()],
         is_builtin: false,
         is_active: true,
-        remote_origin: false,
         shared: false,
         source_team: None,
         source_team_persona_slug: None,

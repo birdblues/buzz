@@ -66,7 +66,6 @@ fn minimal_record() -> ManagedAgentRecord {
         name_pool: vec!["Alice".to_string(), "Bob".to_string()],
         is_builtin: false,
         is_active: true,
-        remote_origin: false,
         shared: false,
         source_team: Some("team-id-123".to_string()), // MUST NOT appear
         source_team_persona_slug: Some("lep".to_string()), // MUST NOT appear

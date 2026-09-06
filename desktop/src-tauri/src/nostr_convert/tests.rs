@@ -43,34 +43,13 @@ fn managed_agent_event(
     respond_to: &str,
     respond_to_allowlist: &[String],
 ) -> Event {
-    managed_agent_event_with_persona(
-        owner_keys,
-        agent_pubkey,
-        name,
-        respond_to,
-        respond_to_allowlist,
-        None,
-    )
-}
-
-fn managed_agent_event_with_persona(
-    owner_keys: &Keys,
-    agent_pubkey: &str,
-    name: &str,
-    respond_to: &str,
-    respond_to_allowlist: &[String],
-    persona_id: Option<&str>,
-) -> Event {
-    let mut content_map = serde_json::json!({
+    let content = serde_json::json!({
         "name": name,
         "parallelism": 1,
         "respond_to": respond_to,
         "respond_to_allowlist": respond_to_allowlist,
-    });
-    if let Some(persona_id) = persona_id {
-        content_map["persona_id"] = serde_json::json!(persona_id);
-    }
-    let content = content_map.to_string();
+    })
+    .to_string();
     EventBuilder::new(Kind::Custom(30177), content)
         .tags([Tag::parse(["d", agent_pubkey]).expect("parse d tag")])
         .sign_with_keys(owner_keys)
@@ -408,25 +387,6 @@ fn agents_preserves_public_respond_to_mode_for_directory_parse() {
 }
 
 #[test]
-fn legacy_directory_entry_cannot_assert_a_definition_link() {
-    // A definition link is only meaningful next to a verified owner, and the
-    // legacy path clears ownership. Left in place, an unowned agent could
-    // claim one of the viewer's definition ids — builtin ids are identical
-    // across owners — and stand in for a team member.
-    let e = ev(
-        10100,
-        r#"{"name":"Scout","respond_to":"anyone","persona_id":"builtin:fizz"}"#,
-        vec![],
-    );
-
-    let agents = relay_agents_from_directory_events(std::slice::from_ref(&e), &[], &[]);
-
-    assert_eq!(agents.len(), 1);
-    assert_eq!(agents[0].owner_pubkey, None);
-    assert_eq!(agents[0].persona_id, None);
-}
-
-#[test]
 fn agents_preserves_allowlist_metadata_for_directory_parse() {
     let e = ev(
         10100,
@@ -508,89 +468,6 @@ fn managed_agent_directory_rejects_agents_without_verified_owner_profiles() {
     );
 
     assert!(agents.is_empty());
-}
-
-#[test]
-fn managed_agent_directory_carries_the_definition_link() {
-    // The definition link is what lets a team mention — whose members are
-    // stored as definition ids — resolve to an agent that runs on another of
-    // the owner's devices instead of minting a duplicate identity here.
-    let agent_keys = Keys::generate();
-    let owner_keys = Keys::generate();
-    let agent_pubkey = agent_keys.public_key().to_hex();
-    let auth_tag_json =
-        buzz_sdk_pkg::nip_oa::compute_auth_tag(&owner_keys, &agent_keys.public_key(), "")
-            .expect("compute auth tag");
-    let auth_tag_values: Vec<String> =
-        serde_json::from_str(&auth_tag_json).expect("parse auth tag json");
-    let profile = EventBuilder::new(Kind::Metadata, r#"{"display_name":"Codex"}"#)
-        .tags([Tag::parse(auth_tag_values).expect("parse auth tag")])
-        .sign_with_keys(&agent_keys)
-        .expect("sign profile");
-    let managed = managed_agent_event_with_persona(
-        &owner_keys,
-        &agent_pubkey,
-        "Codex",
-        "anyone",
-        &[],
-        Some("persona-1"),
-    );
-
-    let agents = relay_agents_from_managed_agent_events(
-        std::slice::from_ref(&managed),
-        std::slice::from_ref(&profile),
-    );
-
-    assert_eq!(agents.len(), 1);
-    assert_eq!(agents[0].persona_id.as_deref(), Some("persona-1"));
-    assert_eq!(
-        agents[0].owner_pubkey.as_deref(),
-        Some(owner_keys.public_key().to_hex().as_str()),
-        "the link is only trustworthy alongside the owner it was signed by"
-    );
-}
-
-#[test]
-fn managed_agent_directory_without_a_definition_link_is_none() {
-    let agent_keys = Keys::generate();
-    let owner_keys = Keys::generate();
-    let agent_pubkey = agent_keys.public_key().to_hex();
-    let auth_tag_json =
-        buzz_sdk_pkg::nip_oa::compute_auth_tag(&owner_keys, &agent_keys.public_key(), "")
-            .expect("compute auth tag");
-    let auth_tag_values: Vec<String> =
-        serde_json::from_str(&auth_tag_json).expect("parse auth tag json");
-    let profile = EventBuilder::new(Kind::Metadata, r#"{"display_name":"Codex"}"#)
-        .tags([Tag::parse(auth_tag_values).expect("parse auth tag")])
-        .sign_with_keys(&agent_keys)
-        .expect("sign profile");
-    let managed = managed_agent_event(&owner_keys, &agent_pubkey, "Codex", "anyone", &[]);
-
-    let agents = relay_agents_from_managed_agent_events(
-        std::slice::from_ref(&managed),
-        std::slice::from_ref(&profile),
-    );
-
-    assert_eq!(agents.len(), 1);
-    assert_eq!(agents[0].persona_id, None);
-}
-
-#[test]
-fn relay_agent_info_deserializes_without_a_definition_link() {
-    // The legacy kind:10100 directory path builds this struct from JSON that
-    // predates the field; without `serde(default)` every legacy agent would
-    // silently vanish from the directory.
-    let legacy = serde_json::json!({
-        "pubkey": "a".repeat(64),
-        "name": "Legacy",
-        "agent_type": "agent",
-        "channels": [],
-        "capabilities": [],
-        "status": "online",
-    });
-    let parsed: crate::managed_agents::RelayAgentInfo =
-        serde_json::from_value(legacy).expect("legacy directory payload still parses");
-    assert_eq!(parsed.persona_id, None);
 }
 
 #[test]

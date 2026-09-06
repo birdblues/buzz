@@ -6,7 +6,6 @@ import {
   friendlyTurnErrorCopy,
   CLI_ACP_INTERNAL_ERROR_COPY,
   MODEL_NOT_FOUND_COPY,
-  RELAY_CONNECT_FAILED_COPY,
   RELAY_MESH_DENIED_COPY,
 } from "./friendlyAgentLastError.ts";
 
@@ -315,25 +314,5 @@ test("-32603 does not affect -32001/-32002 classification (regression)", () => {
   assert.deepEqual(friendlyAgentLastError("any", -32002), {
     severity: "denied",
     copy: MODEL_NOT_FOUND_COPY,
-  });
-});
-
-test("relay connect failure (anyhow line recovered by the exit classifier) → relay copy", () => {
-  // Prefix-matched because buzz-acp exits through `main` here with no
-  // JSON-RPC code; a synthetic code would misdescribe the seam.
-  const result = friendlyAgentLastError(
-    "Error: relay connect error: connection reset by peer",
-    null,
-  );
-  assert.deepEqual(result, {
-    severity: "generic",
-    copy: RELAY_CONNECT_FAILED_COPY,
-  });
-});
-
-test("signal death passes through verbatim", () => {
-  assert.deepEqual(friendlyAgentLastError("harness killed by signal 9", null), {
-    severity: "generic",
-    copy: "harness killed by signal 9",
   });
 });

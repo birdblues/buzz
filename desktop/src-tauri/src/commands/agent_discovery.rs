@@ -503,9 +503,10 @@ async fn restart_single_agent_after_install(
     use crate::{
         app_state::AppState,
         managed_agents::{
-            agent_readiness, find_managed_agent_mut, known_acp_runtime, load_global_agent_config,
-            load_managed_agents, load_personas, record_agent_command, resolve_effective_agent_env,
-            save_managed_agents, stop_managed_agent_process, AgentReadiness, BackendKind,
+            agent_readiness, current_instance_id, find_managed_agent_mut, known_acp_runtime,
+            load_global_agent_config, load_managed_agents, load_personas, record_agent_command,
+            resolve_effective_agent_env, save_managed_agents, stop_managed_agent_process,
+            sync_managed_agent_processes, AgentReadiness, BackendKind,
         },
     };
     use tauri::Manager;
@@ -529,12 +530,14 @@ async fn restart_single_agent_after_install(
             .map_err(|e| format!("failed to acquire runtimes lock: {e}"))?;
 
         // Sync process state so PID liveness reflects current reality.
-        crate::managed_agents::reaper::reap_managed_agent_runtimes(
-            &app_for_stop,
+        let (sync_changed, _) = sync_managed_agent_processes(
             &mut records,
             &mut runtimes,
-            crate::managed_agents::reaper::Notify::Emit,
-        )?;
+            &current_instance_id(&app_for_stop),
+        );
+        if sync_changed {
+            save_managed_agents(&app_for_stop, &records)?;
+        }
 
         // Re-verify eligibility under lock.
         let record = records

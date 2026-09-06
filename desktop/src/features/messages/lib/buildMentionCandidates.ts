@@ -20,9 +20,6 @@ import {
   mentionCandidateLabel,
 } from "./mentionCandidates";
 
-/** Shared empty default so an omitted `ownedPersonaIds` allocates nothing. */
-const EMPTY_OWNED_PERSONA_IDS: ReadonlySet<string> = new Set<string>();
-
 /** Directories and rosters the mention picker merges into one candidate list. */
 export type BuildMentionCandidatesInput = {
   activeAgentPubkeys: ReadonlySet<string>;
@@ -41,13 +38,6 @@ export type BuildMentionCandidatesInput = {
   members: readonly ChannelMember[] | undefined;
   mentionChannelId: string | null;
   mentionableAgentPubkeys: ReadonlySet<string>;
-  /**
-   * Definitions that already have an instance the viewer owns, local or on
-   * another device. Optional so existing callers keep working; the empty
-   * default reproduces the pre-signal behaviour. See the launcher filter below
-   * for why it gates candidacy.
-   */
-  ownedPersonaIds?: ReadonlySet<string>;
   personaNameByPubkey: ReadonlyMap<string, string>;
   profiles: UserProfileLookup | undefined;
   relayAgentDirectoryReady: boolean;
@@ -79,7 +69,6 @@ export function buildMentionCandidates({
   members,
   mentionChannelId,
   mentionableAgentPubkeys,
-  ownedPersonaIds = EMPTY_OWNED_PERSONA_IDS,
   personaNameByPubkey,
   profiles,
   relayAgentDirectoryReady,
@@ -175,19 +164,8 @@ export function buildMentionCandidates({
           : null,
     });
   }
-  const viewerPubkey = currentPubkey ? normalizePubkey(currentPubkey) : null;
   for (const agent of relayAgents ?? []) {
     const pubkey = normalizePubkey(agent.pubkey);
-    // The directory's definition link is only trustworthy for OUR agents: it
-    // retains other owners' agents that share a channel, and builtin
-    // definition ids are identical across owners — so an unowned agent would
-    // otherwise claim one of our team's definitions.
-    const ownedPersonaId =
-      viewerPubkey !== null &&
-      agent.ownerPubkey !== null &&
-      normalizePubkey(agent.ownerPubkey) === viewerPubkey
-        ? agent.personaId
-        : null;
     addCandidate({
       kind: "identity",
       pubkey,
@@ -201,7 +179,6 @@ export function buildMentionCandidates({
           agent.channelIds.includes(mentionChannelId)),
       personaId:
         managedAgentPersonaIdsByPubkey.get(pubkey) ??
-        ownedPersonaId ??
         (activePersonaById.has(pubkey) ? pubkey : undefined),
       ownerPubkey: agent.ownerPubkey,
       isAgent: true,
@@ -250,19 +227,6 @@ export function buildMentionCandidates({
   }
   const personaCandidates: MentionCandidate[] = activePersonas
     .filter((persona) => !managedAgentPersonaIds.has(persona.id))
-    // Selecting a launcher candidate mints a NEW local agent identity, so a
-    // definition whose agent already answers from somewhere must not offer one
-    // here — a second identity would answer every mention twice. There is no
-    // confirmation step on this path: the pick IS the mint.
-    //
-    // Two independent signals, mirroring `findTeamMemberTarget`:
-    // `remoteOrigin` marks definitions that arrived by device sync, and
-    // `ownedPersonaIds` additionally covers a locally authored (or builtin)
-    // definition whose only instance lives on another device, which carries no
-    // such marker. Either alone leaves the other case open.
-    .filter(
-      (persona) => !persona.remoteOrigin && !ownedPersonaIds.has(persona.id),
-    )
     .map((persona) => ({
       kind: "persona" as const,
       personaId: persona.id,

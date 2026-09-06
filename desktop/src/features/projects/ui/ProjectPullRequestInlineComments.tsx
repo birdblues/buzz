@@ -103,12 +103,7 @@ export function ProjectPullRequestInlineCommentThread({
                   )
               : undefined
           }
-          // The composer's 4th argument is `mentionTags`; this prop's 4th is
-          // the review `decision` — forward only the shared prefix so a tag
-          // array can never masquerade as a decision.
-          onSubmit={(content, mentionPubkeys, mediaTags) =>
-            onSubmit(content, mentionPubkeys, mediaTags)
-          }
+          onSubmit={onSubmit}
           placeholder="Leave a comment on this line…"
           profiles={profiles}
           secondarySubmitLabel="Request changes"

@@ -94,7 +94,6 @@ function baseProps(overrides = {}) {
     onRestartAgent: () => {},
     onStartAgent: () => {},
     onStartPersona: () => {},
-    personaIdsOwnedElsewhere: new Set(),
     personas: [],
     personasError: null,
     personaFeedbackErrorMessage: null,

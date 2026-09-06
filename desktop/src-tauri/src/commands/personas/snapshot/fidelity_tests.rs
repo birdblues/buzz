@@ -58,7 +58,6 @@ fn make_definition(slug: &str) -> ManagedAgentRecord {
         name_pool: vec![],
         is_builtin: false,
         is_active: false,
-        remote_origin: false,
         shared: false,
         source_team: None,
         source_team_persona_slug: None,

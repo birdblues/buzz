@@ -1,8 +1,7 @@
 use super::{
     built_in_persona_records, ensure_persona_ids_are_active, ensure_persona_is_active,
-    ensure_persona_not_remote_origin, merge_personas, migrate_retired_personas,
-    validate_persona_activation_change, validate_persona_deletion, BUILT_IN_PERSONAS,
-    RETIRED_PERSONAS,
+    merge_personas, migrate_retired_personas, validate_persona_activation_change,
+    validate_persona_deletion, BUILT_IN_PERSONAS, RETIRED_PERSONAS,
 };
 use crate::managed_agents::discovery::{default_agent_command, effective_agent_command};
 use crate::managed_agents::AgentDefinition;
@@ -20,7 +19,6 @@ fn custom_persona(id: &str, display_name: &str) -> AgentDefinition {
         name_pool: Vec::new(),
         is_builtin: false,
         is_active: true,
-        remote_origin: false,
         shared: false,
         source_team: None,
         source_team_persona_slug: None,
@@ -181,26 +179,6 @@ fn ensure_persona_is_active_rejects_inactive_personas() {
 }
 
 #[test]
-fn ensure_persona_not_remote_origin_rejects_synced_definitions() {
-    let mut persona = custom_persona("custom:remote", "문어");
-    persona.remote_origin = true;
-
-    let err = ensure_persona_not_remote_origin(&[persona], "custom:remote").unwrap_err();
-
-    assert_eq!(
-        err,
-        "문어 was created on another device and already runs there. Duplicate it to run a copy on this device."
-    );
-}
-
-#[test]
-fn ensure_persona_not_remote_origin_allows_local_definitions() {
-    let persona = custom_persona("custom:local", "Alpha");
-
-    assert!(ensure_persona_not_remote_origin(&[persona], "custom:local").is_ok());
-}
-
-#[test]
 fn ensure_persona_ids_are_active_checks_each_requested_id() {
     let personas = vec![
         custom_persona("custom:alpha", "Alpha"),
@@ -340,7 +318,6 @@ fn migrate_preserves_customized_personas() {
         system_prompt: "My custom research workflow with special instructions".to_string(),
         is_builtin: false,
         is_active: true,
-        remote_origin: false,
         shared: false,
         ..custom_persona("builtin:researcher", "My Researcher")
     }];
@@ -375,7 +352,6 @@ fn migrate_is_idempotent() {
         system_prompt: "My custom prompt".to_string(),
         is_builtin: false,
         is_active: false,
-        remote_origin: false,
         shared: false,
         ..custom_persona("builtin:researcher", "Researcher (retired)")
     }];
@@ -392,7 +368,6 @@ fn migrate_is_idempotent() {
         system_prompt: "Custom review prompt".to_string(),
         is_builtin: true,
         is_active: true,
-        remote_origin: false,
         shared: false,
         ..custom_persona("builtin:reviewer", "Reviewer")
     }];

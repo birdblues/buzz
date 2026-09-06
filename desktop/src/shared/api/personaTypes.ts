@@ -23,13 +23,6 @@ export type AgentPersona = {
   namePool: string[];
   isBuiltIn: boolean;
   isActive: boolean;
-  /**
-   * Device-local fact: this definition first reached this device via inbound
-   * sync (created on another device, or a fresh-store backfill). Drives the
-   * "From another device" card marker and excludes the persona from mention
-   * launcher candidates; never synced, survives remote edits.
-   */
-  remoteOrigin: boolean;
   /** Whether this persona is discoverable in the active community catalog. */
   shared: boolean;
   /** Team ID if this persona was imported from a team directory. Team personas are non-editable. */

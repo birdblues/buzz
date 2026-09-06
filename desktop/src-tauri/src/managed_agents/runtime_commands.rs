@@ -5,19 +5,18 @@ use tauri::{AppHandle, Emitter, Manager};
 use super::{
     agent_readiness, append_log_marker, current_instance_id, find_managed_agent_mut,
     load_global_agent_config, load_managed_agents, load_personas, managed_agent_runtime_log_path,
-    process_is_running,
-    reaper::{finish_dead_pair, reap_managed_agent_runtimes, Notify},
-    record_agent_command, resolve_effective_agent_env, save_managed_agents, spawn_agent_child,
-    terminate_process, terminate_untracked_pair_runtime, write_agent_runtime_receipt,
-    AgentReadiness, BackendKind, ManagedAgentPairRuntime, ManagedAgentRuntimeKey,
-    ManagedAgentRuntimeLifecycle, ManagedAgentRuntimeReceipt, ManagedAgentRuntimeStatus,
+    process_is_running, record_agent_command, resolve_effective_agent_env, save_managed_agents,
+    spawn_agent_child, terminate_process, terminate_untracked_pair_runtime,
+    write_agent_runtime_receipt, AgentReadiness, BackendKind, ManagedAgentPairRuntime,
+    ManagedAgentRuntimeKey, ManagedAgentRuntimeLifecycle, ManagedAgentRuntimeReceipt,
+    ManagedAgentRuntimeStatus,
 };
 use crate::app_state::AppState;
 
 const STATUS_EVENT: &str = "managed-agent-runtime-status";
 
-fn status_for<R: tauri::Runtime>(
-    app: &AppHandle<R>,
+fn status_for(
+    app: &AppHandle,
     record: &super::ManagedAgentRecord,
     key: &ManagedAgentRuntimeKey,
     runtime: Option<&ManagedAgentPairRuntime>,
@@ -45,8 +44,8 @@ struct StatusInputs<'a> {
     global: &'a super::GlobalAgentConfig,
 }
 
-fn status_for_with<R: tauri::Runtime>(
-    app: &AppHandle<R>,
+fn status_for_with(
+    app: &AppHandle,
     record: &super::ManagedAgentRecord,
     key: &ManagedAgentRuntimeKey,
     runtime: Option<&ManagedAgentPairRuntime>,
@@ -71,38 +70,10 @@ fn status_for_with<R: tauri::Runtime>(
         log_path: managed_agent_runtime_log_path(app, key)
             .ok()
             .map(|path| path.display().to_string()),
-        exit_cause: None,
     }
 }
 
-/// Status for a pair the reaper just removed: `Stopped` (there is no runtime
-/// any more — `Failed` is reserved for a live harness in a failed state, and
-/// the observer contract enforces that), with the verdict's message as
-/// `error` and its cause on `exit_cause`.
-pub(crate) fn exited_status_for<R: tauri::Runtime>(
-    app: &AppHandle<R>,
-    record: &super::ManagedAgentRecord,
-    exited: &super::ExitedRuntime,
-    personas: &[super::AgentDefinition],
-    global: &super::GlobalAgentConfig,
-) -> ManagedAgentRuntimeStatus {
-    let mut status = status_for_with(
-        app,
-        record,
-        &exited.key,
-        None,
-        None,
-        StatusInputs { personas, global },
-    );
-    status.error = exited.verdict.message.clone();
-    status.exit_cause = Some(exited.verdict.cause);
-    status
-}
-
-pub(crate) fn emit_status<R: tauri::Runtime>(
-    app: &AppHandle<R>,
-    status: &ManagedAgentRuntimeStatus,
-) {
+fn emit_status(app: &AppHandle, status: &ManagedAgentRuntimeStatus) {
     let _ = app.emit(STATUS_EVENT, status);
 }
 
@@ -168,60 +139,89 @@ pub fn put_managed_agent_runtime_lifecycle(
 
 // Keep disk, process, and mutex work off the main thread so opening members cannot stall the UI.
 #[tauri::command]
-pub async fn list_managed_agent_runtimes<R: tauri::Runtime>(
-    app: AppHandle<R>,
+pub async fn list_managed_agent_runtimes(
+    app: AppHandle,
 ) -> Result<Vec<ManagedAgentRuntimeStatus>, String> {
-    tokio::task::spawn_blocking(move || list_managed_agent_runtimes_blocking(&app))
-        .await
-        .map_err(|e| format!("spawn_blocking failed: {e}"))?
-}
-
-/// Body of [`list_managed_agent_runtimes`], separated so tests can run the
-/// exact production sequence (locks → reap → list) on a mock app.
-pub(crate) fn list_managed_agent_runtimes_blocking<R: tauri::Runtime>(
-    app: &AppHandle<R>,
-) -> Result<Vec<ManagedAgentRuntimeStatus>, String> {
-    // This command is polled whenever the members sidebar opens and refetched
-    // on every status event — load the per-row status inputs once, outside
-    // the locks, instead of hitting disk per row while holding them.
-    let personas = load_personas(app).unwrap_or_default();
-    let global = load_global_agent_config(app).unwrap_or_default();
-    let state = app.state::<AppState>();
-    let _transition = state
-        .managed_agent_runtime_transition
-        .lock()
-        .map_err(|e| e.to_string())?;
-    let _store = state
-        .managed_agents_store_lock
-        .lock()
-        .map_err(|e| e.to_string())?;
-    let mut records = load_managed_agents(app)?;
-    let mut runtimes = state
-        .managed_agent_processes
-        .lock()
-        .map_err(|e| e.to_string())?;
-    // Reaping is the reaper's job (evidence, receipt, cache, emit);
-    // this command only lists what is still live afterwards.
-    reap_managed_agent_runtimes(app, &mut records, &mut runtimes, Notify::Emit)?;
-    let mut statuses = Vec::new();
-    statuses.extend(runtimes.iter().filter_map(|(key, runtime)| {
-        let record = records
-            .iter()
-            .find(|record| record.pubkey.eq_ignore_ascii_case(&key.pubkey))?;
-        Some(status_for_with(
-            app,
-            record,
-            key,
-            Some(runtime),
-            None,
-            StatusInputs {
-                personas: &personas,
-                global: &global,
-            },
-        ))
-    }));
-    drop(runtimes);
-    Ok(statuses)
+    tokio::task::spawn_blocking(move || {
+        // This command is polled whenever the members sidebar opens and refetched
+        // on every status event — load the per-row status inputs once, outside
+        // the locks, instead of hitting disk per row while holding them.
+        let personas = load_personas(&app).unwrap_or_default();
+        let global = load_global_agent_config(&app).unwrap_or_default();
+        let state = app.state::<AppState>();
+        let _transition = state
+            .managed_agent_runtime_transition
+            .lock()
+            .map_err(|e| e.to_string())?;
+        let _store = state
+            .managed_agents_store_lock
+            .lock()
+            .map_err(|e| e.to_string())?;
+        let mut records = load_managed_agents(&app)?;
+        let mut runtimes = state
+            .managed_agent_processes
+            .lock()
+            .map_err(|e| e.to_string())?;
+        let exited_keys: Vec<_> = runtimes
+            .iter_mut()
+            .filter_map(|(key, runtime)| match runtime.child.try_wait() {
+                Ok(Some(_)) | Err(_) => Some(key.clone()),
+                Ok(None) => None,
+            })
+            .collect();
+        let records_changed = !exited_keys.is_empty();
+        let mut statuses = Vec::new();
+        for key in exited_keys {
+            runtimes.remove(&key);
+            super::remove_agent_runtime_receipt(&app, &key);
+            state.clear_agent_session_cache(&key);
+            if let Some(record) = records
+                .iter_mut()
+                .find(|record| record.pubkey.eq_ignore_ascii_case(&key.pubkey))
+            {
+                record.updated_at = crate::util::now_iso();
+                record.last_stopped_at = Some(record.updated_at.clone());
+                let status = status_for_with(
+                    &app,
+                    record,
+                    &key,
+                    None,
+                    None,
+                    StatusInputs {
+                        personas: &personas,
+                        global: &global,
+                    },
+                );
+                emit_status(&app, &status);
+                statuses.push(status);
+            }
+        }
+        statuses.extend(runtimes.iter().filter_map(|(key, runtime)| {
+            let record = records
+                .iter()
+                .find(|record| record.pubkey.eq_ignore_ascii_case(&key.pubkey))?;
+            Some(status_for_with(
+                &app,
+                record,
+                key,
+                Some(runtime),
+                None,
+                StatusInputs {
+                    personas: &personas,
+                    global: &global,
+                },
+            ))
+        }));
+        drop(runtimes);
+        // Records are only mutated above when a runtime exited — skip the store
+        // rewrite on the common nothing-changed poll.
+        if records_changed {
+            save_managed_agents(&app, &records)?;
+        }
+        Ok(statuses)
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking failed: {e}"))?
 }
 
 pub(crate) fn start_managed_agent_runtime_pair_lazy(
@@ -273,24 +273,14 @@ fn start_pair(
         .managed_agent_processes
         .lock()
         .map_err(|e| e.to_string())?;
-    if let Some(mut tracked) = runtimes.remove(&key) {
-        match tracked.child.try_wait() {
-            Ok(None) => {
-                runtimes.insert(key.clone(), tracked);
-                let status = status_for(&app, record, &key, runtimes.get(&key), None);
-                return Ok(status);
-            }
-            Ok(Some(exit_status)) => {
-                // The pair died before anyone reaped it. Record why before the
-                // restart erases the evidence — this used to discard the exit
-                // status and respawn silently.
-                finish_dead_pair(&app, record, &key, &tracked, exit_status, Notify::Emit);
-            }
-            // Inspection failed: the receipt stays so the untracked-runtime
-            // terminate below can still find a live child.
-            Err(_) => {}
-        }
+    if runtimes
+        .get_mut(&key)
+        .is_some_and(|runtime| runtime.child.try_wait().ok().flatten().is_none())
+    {
+        let status = status_for(&app, record, &key, runtimes.get(&key), None);
+        return Ok(status);
     }
+    runtimes.remove(&key);
     terminate_untracked_pair_runtime(&app, &key)?;
 
     let owner = state
@@ -316,9 +306,7 @@ fn start_pair(
     record.updated_at = now.clone();
     record.last_started_at = Some(now);
     record.last_stopped_at = None;
-    record.last_exit_code = None;
     record.last_error = None;
-    record.last_error_code = None;
     runtimes.insert(key.clone(), ManagedAgentPairRuntime::starting(process));
     let status = status_for(&app, record, &key, runtimes.get(&key), None);
     drop(runtimes);
@@ -350,30 +338,23 @@ pub fn stop_managed_agent_runtime(
         .lock()
         .map_err(|e| e.to_string())?;
     if let Some(mut runtime) = runtimes.remove(&key) {
-        if let Ok(Some(exit_status)) = runtime.child.try_wait() {
-            // Already dead: this is a crash being noticed by a Stop click,
-            // not a stop. No stop marker — that would classify it as
-            // intentional on the next read.
-            finish_dead_pair(&app, record, &key, &runtime, exit_status, Notify::Emit);
+        let stop_result = if process_is_running(runtime.child.id()) {
+            terminate_process(runtime.child.id())
         } else {
-            let stop_result = if process_is_running(runtime.child.id()) {
-                terminate_process(runtime.child.id())
-            } else {
-                Ok(())
+            Ok(())
+        }
+        .and_then(|()| runtime.child.wait().map_err(|e| e.to_string()));
+        match stop_result {
+            Ok(status) => {
+                record.last_exit_code = status.code();
+                let _ = append_log_marker(&runtime.log_path, "=== stopped pair runtime ===");
             }
-            .and_then(|()| runtime.child.wait().map_err(|e| e.to_string()));
-            match stop_result {
-                Ok(status) => {
-                    record.last_exit_code = status.code();
-                    let _ = append_log_marker(&runtime.log_path, "=== stopped pair runtime ===");
-                }
-                Err(error) => {
-                    // Keep failed teardown visible/manageable instead of
-                    // orphaning it: the child stays tracked and the receipt
-                    // stays on disk until a stop actually succeeds.
-                    runtimes.insert(key, runtime);
-                    return Err(error);
-                }
+            Err(error) => {
+                // Keep failed teardown visible/manageable instead of
+                // orphaning it: the child stays tracked and the receipt
+                // stays on disk until a stop actually succeeds.
+                runtimes.insert(key, runtime);
+                return Err(error);
             }
         }
     } else {
@@ -468,7 +449,6 @@ fn unkeyable_failed_status(
         pid: None,
         error: Some(error),
         log_path: None,
-        exit_cause: None,
     }
 }
 

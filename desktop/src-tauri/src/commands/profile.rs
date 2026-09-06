@@ -355,24 +355,8 @@ pub async fn get_presence(
     )
     .await?;
 
-    Ok(latest_presence_by_pubkey(&events))
-}
-
-/// Reduce raw kind:20001 events to the latest status per subject pubkey.
-///
-/// Split out of [`get_presence`] so the managed-agent start guard can share
-/// exactly this parsing without inheriting that command's `unwrap_or_default`
-/// error swallowing — the guard has to tell "relay said offline" apart from
-/// "the query failed", and this function only ever sees events that arrived.
-///
-/// Unrecognized status strings are dropped rather than defaulted: the WS path
-/// accepts arbitrary content for forward-compatibility, and an unknown value
-/// must read as "no information", never as a definite state.
-pub(crate) fn latest_presence_by_pubkey(
-    events: &[nostr::Event],
-) -> HashMap<String, PresenceStatus> {
     let mut latest: HashMap<String, (u64, PresenceStatus)> = HashMap::new();
-    for ev in events {
+    for ev in &events {
         // Relay-synthesized presence events use a p-tag to identify the subject.
         // Self-signed presence events (live WS) use the event author directly.
         let pk = ev
@@ -402,10 +386,10 @@ pub(crate) fn latest_presence_by_pubkey(
         }
     }
 
-    latest
+    Ok(latest
         .into_iter()
         .map(|(pk, (_, status))| (pk, status))
-        .collect()
+        .collect())
 }
 
 fn current_pubkey_hex(state: &AppState) -> Result<String, String> {

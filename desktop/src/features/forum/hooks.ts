@@ -89,13 +89,10 @@ export function useCreateForumPostMutation(channel: Channel | null) {
       content,
       mentionPubkeys,
       mediaTags,
-      mentionTags,
     }: {
       content: string;
       mentionPubkeys?: string[];
       mediaTags?: string[][];
-      /** Send-time `["mention", pubkey, name]` tags — rename resilience. */
-      mentionTags?: string[][];
     }) => {
       if (!channel) {
         throw new Error("No channel selected.");
@@ -108,8 +105,6 @@ export function useCreateForumPostMutation(channel: Channel | null) {
         mediaTags,
         mentionPubkeys,
         KIND_FORUM_POST,
-        undefined,
-        mentionTags,
       );
     },
     onSuccess: () => {
@@ -179,14 +174,11 @@ export function useCreateForumReplyMutation(channel: Channel | null) {
       parentEventId,
       mentionPubkeys,
       mediaTags,
-      mentionTags,
     }: {
       content: string;
       parentEventId: string;
       mentionPubkeys?: string[];
       mediaTags?: string[][];
-      /** Send-time `["mention", pubkey, name]` tags — rename resilience. */
-      mentionTags?: string[][];
     }) => {
       if (!channel) {
         throw new Error("No channel selected.");
@@ -199,8 +191,6 @@ export function useCreateForumReplyMutation(channel: Channel | null) {
         mediaTags,
         mentionPubkeys,
         KIND_FORUM_COMMENT,
-        undefined,
-        mentionTags,
       );
     },
     onSuccess: (_data, variables) => {

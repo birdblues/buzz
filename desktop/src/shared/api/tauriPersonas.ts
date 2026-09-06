@@ -19,8 +19,6 @@ export type RawPersona = {
   name_pool?: string[];
   is_builtin: boolean;
   is_active?: boolean;
-  /** Device-local: first reached this device via inbound sync (30175 insert). */
-  remote_origin?: boolean;
   shared?: boolean;
   source_team?: string | null;
   /**
@@ -52,7 +50,6 @@ export function fromRawPersona(persona: RawPersona): AgentPersona {
     namePool: persona.name_pool ?? [],
     isBuiltIn: persona.is_builtin,
     isActive: persona.is_active ?? true,
-    remoteOrigin: persona.remote_origin ?? false,
     shared: persona.shared ?? false,
     sourceTeam: persona.source_team ?? null,
     catalogSource: persona.catalog_source

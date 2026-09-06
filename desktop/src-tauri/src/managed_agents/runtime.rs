@@ -68,13 +68,9 @@ use instance_reaper::{buffer_contains_identifier, is_desktop_binary};
 // Exact-path harness sweep lives in runtime/sweep.rs (re-exported above).
 
 mod lifecycle;
-pub(crate) use lifecycle::apply_exit_verdict;
 #[cfg(test)]
 use lifecycle::kill_stale_tracked_processes_with;
-pub(in crate::managed_agents) use lifecycle::sync_managed_agent_processes;
-#[cfg(test)]
-pub(crate) use lifecycle::sync_managed_agent_processes_with;
-pub use lifecycle::{kill_stale_tracked_processes, ExitedRuntime};
+pub use lifecycle::{kill_stale_tracked_processes, sync_managed_agent_processes};
 mod spawn_key; // production spawn-key derivation + its regressions
 pub(crate) use spawn_key::bound_runtime_key;
 
@@ -297,8 +293,6 @@ pub fn build_managed_agent_summary(
         .to_string();
 
     Ok(ManagedAgentSummary {
-        // Listing/refresh reads attempted no start.
-        start_outcome: None,
         pubkey: record.pubkey.clone(),
         name: record.name.clone(),
         persona_id: record.persona_id.clone(),
@@ -887,7 +881,7 @@ pub fn start_managed_agent_process(
     owner_hex: Option<&str>,
     workspace_relay: &crate::relay::ScopedWorkspaceRelay,
     replay_floor_unix: Option<u64>,
-) -> Result<crate::managed_agents::StartOutcome, String> {
+) -> Result<(), String> {
     let key = bound_runtime_key(record, workspace_relay)?;
     if let Some(runtime) = runtimes.get_mut(&key) {
         if runtime
@@ -896,7 +890,7 @@ pub fn start_managed_agent_process(
             .map_err(|error| format!("failed to inspect running process: {error}"))?
             .is_none()
         {
-            return Ok(crate::managed_agents::StartOutcome::AlreadyLocal);
+            return Ok(());
         }
 
         runtimes.remove(&key);
@@ -935,7 +929,7 @@ pub fn start_managed_agent_process(
     record.last_error_code = None;
 
     runtimes.insert(key, ManagedAgentPairRuntime::starting(process));
-    Ok(crate::managed_agents::StartOutcome::StartedLocal)
+    Ok(())
 }
 
 #[cfg(test)]

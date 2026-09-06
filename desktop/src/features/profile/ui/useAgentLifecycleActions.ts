@@ -3,11 +3,9 @@ import { toast } from "sonner";
 
 import {
   isManagedAgentActive,
-  isRunningElsewhere,
   respawnManagedAgentWithRules,
   startManagedAgentWithRules,
   stopManagedAgentWithRules,
-  type StartManagedAgent,
 } from "@/features/agents/lib/managedAgentControlActions";
 import { agentPresenceStartBlockReason } from "@/features/agents/lib/useAgentAvailability";
 import { clearActiveTurnsForAgentOnStop } from "@/features/agents/managedAgentRuntimeHooks";
@@ -30,7 +28,7 @@ export function useAgentLifecycleActions({
   channels: readonly Channel[] | undefined;
   managedAgent: ManagedAgent | undefined;
   relayAgents: readonly RelayAgent[] | undefined;
-  startManagedAgent: StartManagedAgent;
+  startManagedAgent: (pubkey: string) => Promise<unknown>;
   stopManagedAgent: (pubkey: string) => Promise<unknown>;
 }) {
   const handleAgentPrimaryAction = React.useCallback(async () => {
@@ -53,16 +51,10 @@ export function useAgentLifecycleActions({
 
       const blockReason = agentPresenceStartBlockReason(false, availability);
       if (blockReason) throw new Error(blockReason);
-      const result = await startManagedAgentWithRules({
+      await startManagedAgentWithRules({
         agent: managedAgent,
         startManagedAgent,
       });
-      // `runningElsewhere` surviving the helper means the user declined the
-      // duplicate-start confirm — nothing started here, so no success toast.
-      if (isRunningElsewhere(result)) {
-        toast.info(`${managedAgent.name} is running on another device.`);
-        return;
-      }
       toast.success(
         managedAgent.backend.type === "provider"
           ? `Deploying ${managedAgent.name}.`
@@ -91,16 +83,12 @@ export function useAgentLifecycleActions({
         availability,
       );
       if (blockReason) throw new Error(blockReason);
-      const result = await respawnManagedAgentWithRules({
+      await respawnManagedAgentWithRules({
         agent: managedAgent,
         startManagedAgent,
         stopManagedAgent,
         onStopped: () => clearActiveTurnsForAgentOnStop(managedAgent.pubkey),
       });
-      if (isRunningElsewhere(result)) {
-        toast.info(`${managedAgent.name} is running on another device.`);
-        return;
-      }
       toast.success(`Restarted ${managedAgent.name}.`);
     } catch (error) {
       toast.error(

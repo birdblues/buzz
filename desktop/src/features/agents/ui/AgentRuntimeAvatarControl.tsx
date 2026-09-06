@@ -31,13 +31,7 @@ type AgentRuntimeAvatarControlProps = {
   requiresRestart?: boolean;
   startTestId: string;
   onOpenError?: () => void;
-  /**
-   * Omit to render the avatar with no start/restart affordance at all (same
-   * chrome, no action badge) — used for definitions that must not mint a new
-   * local identity from this card (sync-received personas). Running-dot and
-   * error badges still render when their states apply.
-   */
-  onStart?: () => void;
+  onStart: () => void;
 };
 
 const TAILWIND_SPACING = {
@@ -190,63 +184,58 @@ export function AgentRuntimeAvatarControl({
       : actionBadge;
   const actionCutoutWidth =
     showStatusDot || hasError ? undefined : actionBadge.cutoutWidth;
-  // No start handler and nothing state-driven to show: plain avatar in the
-  // same frame (the frame skips masking when `badge` is null).
-  const showBadge = showStatusDot || hasError || Boolean(onStart);
 
   return (
     <MaskedAvatarBadgeFrame
       badge={
-        showBadge ? (
-          <span className="grid h-full w-full place-items-center">
-            {showStatusDot ? (
-              <span
-                aria-label={`${label}: ${availabilityLabel}`}
-                className="h-full w-full rounded-full"
-                data-testid={activeTestId}
-                role="img"
-                title={startBlockReason ?? `${label}: ${availabilityLabel}`}
-              />
-            ) : (
-              <button
-                aria-label={hasError ? errorActionLabel : actionLabel}
-                className={cn(
-                  "pointer-events-auto flex h-full w-full items-center justify-center rounded-full px-2.5 text-xs font-semibold leading-none transition-colors duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-default disabled:opacity-90",
-                  hasError
-                    ? "bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                    : isRestartAction
-                      ? "bg-transparent text-amber-800 hover:bg-amber-500/10 dark:text-amber-400"
-                      : "bg-primary text-primary-foreground hover:bg-primary/90",
-                )}
-                data-testid={hasError ? errorTestId : startTestId}
-                disabled={isPending}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  if (hasError) {
-                    onOpenError?.();
-                    return;
-                  }
-                  onStart?.();
-                }}
-                title={hasError ? errorLabel || errorActionLabel : actionLabel}
-                type="button"
-              >
-                {isPending ? (
-                  <Spinner
-                    aria-label={actionLabel}
-                    className="h-4 w-4 border-2"
-                  />
-                ) : hasError ? (
-                  <CircleAlert className="h-4 w-4" />
-                ) : (
-                  actionText
-                )}
-              </button>
-            )}
-          </span>
-        ) : null
+        <span className="grid h-full w-full place-items-center">
+          {showStatusDot ? (
+            <span
+              aria-label={`${label}: ${availabilityLabel}`}
+              className="h-full w-full rounded-full"
+              data-testid={activeTestId}
+              role="img"
+              title={startBlockReason ?? `${label}: ${availabilityLabel}`}
+            />
+          ) : (
+            <button
+              aria-label={hasError ? errorActionLabel : actionLabel}
+              className={cn(
+                "pointer-events-auto flex h-full w-full items-center justify-center rounded-full px-2.5 text-xs font-semibold leading-none transition-colors duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-default disabled:opacity-90",
+                hasError
+                  ? "bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  : isRestartAction
+                    ? "bg-transparent text-amber-800 hover:bg-amber-500/10 dark:text-amber-400"
+                    : "bg-primary text-primary-foreground hover:bg-primary/90",
+              )}
+              data-testid={hasError ? errorTestId : startTestId}
+              disabled={isPending}
+              onClick={(event) => {
+                event.stopPropagation();
+                if (hasError) {
+                  onOpenError?.();
+                  return;
+                }
+                onStart();
+              }}
+              title={hasError ? errorLabel || errorActionLabel : actionLabel}
+              type="button"
+            >
+              {isPending ? (
+                <Spinner
+                  aria-label={actionLabel}
+                  className="h-4 w-4 border-2"
+                />
+              ) : hasError ? (
+                <CircleAlert className="h-4 w-4" />
+              ) : (
+                actionText
+              )}
+            </button>
+          )}
+        </span>
       }
-      badgeBox={showBadge ? badge.shell : undefined}
+      badgeBox={badge.shell}
       badgeClassName={cn(
         "transition-colors ease-in-out",
         shouldReduceMotion ? "duration-0" : "duration-300",
@@ -263,8 +252,8 @@ export function AgentRuntimeAvatarControl({
       className="h-24 w-24"
       cornerRadius={AGENT_AVATAR_SIZE * 0.3}
       curve={showStatusDot ? STATUS_DOT_MASK_CURVE : ACTION_MASK_CURVE}
-      cutout={showBadge ? badge.cutout : undefined}
-      cutoutWidth={showBadge ? actionCutoutWidth : undefined}
+      cutout={badge.cutout}
+      cutoutWidth={actionCutoutWidth}
       maskTransition={transition}
       size={AGENT_AVATAR_SIZE}
     >

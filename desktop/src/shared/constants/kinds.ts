@@ -11,10 +11,6 @@ export const KIND_NIP29_DELETE_EVENT = 9005;
 export const KIND_REPORT = 1984;
 export const KIND_PRODUCT_FEEDBACK = 42000;
 export const KIND_IA_ARCHIVE_REQUEST = 9035;
-// NIP-IA relay-signed archive snapshot. Replaceable; the current set of
-// archived identities as p-tags. Drives the "Archived" flair and discovery
-// folding (autocomplete, member pickers).
-export const KIND_IA_ARCHIVE_SNAPSHOT = 13535;
 export const KIND_MODERATION_BAN = 9040;
 export const KIND_MODERATION_UNBAN = 9041;
 export const KIND_MODERATION_TIMEOUT = 9042;

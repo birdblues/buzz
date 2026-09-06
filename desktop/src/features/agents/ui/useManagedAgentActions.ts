@@ -37,19 +37,12 @@ import {
   buildInstanceInputForDefinition,
   resolveStartRuntimeForDefinition,
 } from "../lib/instanceInputForDefinition";
-import {
-  personaStartBlockReason,
-  useOwnedPersonaIds,
-} from "../lib/ownedPersonaIds";
 
 export function useManagedAgentActions() {
   const queryClient = useQueryClient();
   const { globalConfig } = useGlobalAgentConfig();
   const relayAgentsQuery = useRelayAgentsQuery();
   const managedAgentsQuery = useManagedAgentsQuery();
-  const { ownedElsewhere: personaIdsOwnedElsewhere } = useOwnedPersonaIds(
-    managedAgentsQuery.data,
-  );
   const [shouldLoadChannels, setShouldLoadChannels] = React.useState(false);
   const channelsQuery = useChannelsQuery({ enabled: shouldLoadChannels });
   const startMutation = useStartManagedAgentMutation();
@@ -233,23 +226,6 @@ export function useManagedAgentActions() {
 
   async function handleStartPersona(persona: AgentPersona) {
     if (startingPersonaIdsRef.current.has(persona.id)) {
-      return;
-    }
-    // Starting a persona with no local instance MINTS a new identity. Refuse
-    // when this definition's agent already answers from somewhere: a second
-    // identity replies to every mention twice, and nothing downstream stops
-    // it — `create_managed_agent` only refuses `remote_origin` definitions,
-    // which a locally authored or pre-marker definition never carries.
-    //
-    // The button is hidden for the same condition, but the check belongs here
-    // too: hiding an affordance is not a gate, and this handler is reachable
-    // from any caller that holds the actions hook.
-    const startBlockReason = personaStartBlockReason(
-      persona,
-      personaIdsOwnedElsewhere,
-    );
-    if (startBlockReason) {
-      setActionErrorMessage(startBlockReason);
       return;
     }
     setPersonaStartPending(persona.id, true);
@@ -463,7 +439,6 @@ export function useManagedAgentActions() {
       : null;
 
   return {
-    personaIdsOwnedElsewhere,
     relayAgentsQuery,
     managedAgentsQuery,
     managedAgentLogQuery,

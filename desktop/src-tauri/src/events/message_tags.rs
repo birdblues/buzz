@@ -5,27 +5,6 @@ use super::check_pubkey;
 const MAX_THREAD_ROOT_EXCERPT_CHARS: usize = 64;
 const SENT_FROM_THREAD_TAG: &str = "buzz:sent-from-thread";
 const AGENT_ADDRESS_MENTION_MARKER: &str = "agent-address";
-const MAX_MENTION_DISPLAY_NAME_CHARS: usize = 128;
-
-/// Validate the optional third element of a `["mention", pubkey, …]` tag.
-///
-/// Two shapes share that slot: the exact `agent-address` marker (composer
-/// address-tray provenance) and a free-form send-time display name (rename
-/// resilience for rendered chips — see `resolveMentionProps`). Consumers
-/// distinguish them by exact marker equality, so a display name is anything
-/// else that is non-empty, control-character-free, and bounded.
-fn check_mention_display_metadata(value: &str) -> Result<(), String> {
-    if value == AGENT_ADDRESS_MENTION_MARKER {
-        return Ok(());
-    }
-    if value.trim().is_empty()
-        || value.chars().count() > MAX_MENTION_DISPLAY_NAME_CHARS
-        || value.chars().any(char::is_control)
-    {
-        return Err("mention reference tag has invalid display metadata".into());
-    }
-    Ok(())
-}
 
 pub(super) fn mention_reference_tags(
     mentions: &[Vec<String>],
@@ -41,17 +20,17 @@ pub(super) fn mention_reference_tags(
         let Some(pubkey) = mention.get(1) else {
             return Err("mention reference tag missing pubkey".into());
         };
-        if mention.len() > 3 {
+        if mention.len() > 3
+            || (mention.len() == 3
+                && mention.get(2).map(String::as_str) != Some(AGENT_ADDRESS_MENTION_MARKER))
+        {
             return Err("mention reference tag has invalid display metadata".into());
-        }
-        if let Some(metadata) = mention.get(2) {
-            check_mention_display_metadata(metadata)?;
         }
         check_pubkey(pubkey)?;
         let normalized_pubkey = pubkey.to_ascii_lowercase();
         let mut parts = vec!["mention", normalized_pubkey.as_str()];
-        if let Some(metadata) = mention.get(2) {
-            parts.push(metadata.as_str());
+        if mention.len() == 3 {
+            parts.push(AGENT_ADDRESS_MENTION_MARKER);
         }
         tags.push(
             Tag::parse(parts).map_err(|error| format!("invalid mention reference tag: {error}"))?,
@@ -170,42 +149,13 @@ mod tests {
     }
 
     #[test]
-    fn mention_reference_preserves_send_time_display_name() {
+    fn mention_reference_rejects_unknown_display_metadata() {
         let mut tags = Vec::new();
-        mention_reference_tags(
-            &[vec!["mention".into(), PUBKEY.into(), "살짝데친문어".into()]],
-            &mut tags,
-        )
-        .unwrap();
-
-        assert_eq!(tags[0].as_slice(), &["mention", PUBKEY, "살짝데친문어"]);
-    }
-
-    #[test]
-    fn mention_reference_rejects_invalid_display_metadata() {
-        for bad in [
-            String::new(),
-            "   ".to_string(),
-            "line\nbreak".to_string(),
-            "x".repeat(129),
-        ] {
-            let result = mention_reference_tags(
-                &[vec!["mention".into(), PUBKEY.into(), bad]],
-                &mut Vec::new(),
-            );
-            assert!(result.is_err());
-        }
-
-        // A fourth element is never valid, marker or not.
         let result = mention_reference_tags(
-            &[vec![
-                "mention".into(),
-                PUBKEY.into(),
-                AGENT_ADDRESS_MENTION_MARKER.into(),
-                "extra".into(),
-            ]],
-            &mut Vec::new(),
+            &[vec!["mention".into(), PUBKEY.into(), "unknown".into()]],
+            &mut tags,
         );
+
         assert!(result.is_err());
     }
 

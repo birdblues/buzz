@@ -350,7 +350,6 @@ mod tests {
                 status: "offline".to_string(),
                 respond_to: None,
                 respond_to_allowlist: Vec::new(),
-                persona_id: None,
             },
             RelayAgentInfo {
                 pubkey: "c".repeat(64),
@@ -363,7 +362,6 @@ mod tests {
                 status: "online".to_string(),
                 respond_to: None,
                 respond_to_allowlist: Vec::new(),
-                persona_id: None,
             },
         ];
 
@@ -390,7 +388,6 @@ mod tests {
             status: "online".to_string(),
             respond_to: None,
             respond_to_allowlist: Vec::new(),
-            persona_id: None,
         }];
 
         retain_agents_allowed_by_build(&mut agents, false);

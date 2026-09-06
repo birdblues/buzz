@@ -1,6 +1,10 @@
+import { snapshotUnresolvedEditMentionPubkeys } from "@/features/messages/lib/draftMentionRefs";
+import {
+  AgentMentionAuthorizationError,
+  type MentionRevalidationOptions,
+} from "@/features/messages/lib/agentMentionRevalidation";
 import type { QueuedMediaAttachment } from "@/features/messages/lib/backgroundMediaUploadStore";
 import { enqueueBackgroundMediaUpload } from "@/features/messages/lib/backgroundMediaUploadStore";
-import { hasMention } from "@/features/messages/lib/hasMention";
 import type { DraftMentionRef } from "@/features/messages/lib/useDrafts";
 import type { MessageComposerEditTarget } from "@/features/messages/ui/MessageComposer.types";
 import {
@@ -9,12 +13,8 @@ import {
   mergeOutgoingTags,
 } from "@/features/messages/lib/imetaMediaMarkdown";
 import { diffAddedMentionPubkeys } from "@/features/messages/lib/threading";
-import {
-  buildMentionNameTags,
-  mergeOutgoingTagsWithReferenceMentions,
-} from "@/features/messages/ui/useMentionSendFlow.helpers";
+import { mergeOutgoingTagsWithReferenceMentions } from "@/features/messages/ui/useMentionSendFlow.helpers";
 import { buildCustomEmojiTags } from "@/shared/lib/customEmojiTags";
-import { normalizePubkey } from "@/shared/lib/pubkey";
 import type { CustomEmoji } from "@/shared/lib/remarkCustomEmoji";
 
 type EditDraft = {
@@ -32,19 +32,30 @@ type SubmitMessageEditOptions = Omit<
 > & {
   clearComposer: () => void;
   customEmoji: ReadonlyArray<CustomEmoji>;
-  extractMentionPubkeys: (content: string) => string[];
-  getMentionRefs: (content: string) => DraftMentionRef[];
+  extractMentionPubkeys: (
+    content: string,
+    competingDisplayNames?: readonly string[],
+  ) => string[];
+  getMentionRefs: (
+    content: string,
+    fallbackRefs: readonly DraftMentionRef[],
+    competingDisplayNames?: readonly string[],
+  ) => DraftMentionRef[];
   editTargetId: string;
   enqueueUpload?: typeof enqueueBackgroundMediaUpload;
   editTarget: Pick<
     MessageComposerEditTarget,
-    "mentionRefs" | "unresolvedMentionPubkeys"
+    "mentionRefs" | "unresolvedMentionPubkeys" | "unresolvedMentionRefs"
   >;
   originalContent: string;
   ownerPubkey: string | null;
   restoreComposer: (draft: EditDraft) => void;
   restoreMentionRefs: (refs: DraftMentionRef[]) => void;
-  revalidateMentionPubkeys: (pubkeys: readonly string[]) => Promise<string[]>;
+  revalidateMentionPubkeys: (
+    pubkeys: readonly string[],
+    channelId?: string | null,
+    options?: MentionRevalidationOptions,
+  ) => Promise<string[]>;
   shouldRestoreComposer: () => boolean;
   setDeferredUploadPending: (isPending: boolean) => void;
   save: (
@@ -78,19 +89,25 @@ export async function submitMessageEdit({
   setUploadError,
   spoileredAttachmentUrls,
 }: SubmitMessageEditOptions): Promise<void> {
-  const currentMentionRefs = editTarget.mentionRefs ?? [];
+  const historicalNames = (editTarget.unresolvedMentionRefs ?? []).map(
+    (ref) => ref.displayName,
+  );
   const draft: EditDraft = {
     content,
-    mentionRefs: [
-      ...getMentionRefs(content),
-      ...currentMentionRefs.filter((ref) =>
-        hasMention(content, ref.displayName),
-      ),
-    ],
+    mentionRefs: getMentionRefs(
+      content,
+      editTarget.mentionRefs ?? [],
+      historicalNames,
+    ),
     pendingImeta: [...pendingImeta],
     queuedAttachments: [...queuedAttachments],
     spoileredAttachmentUrls: new Set(spoileredAttachmentUrls),
-    unresolvedMentionPubkeys: [...(editTarget.unresolvedMentionPubkeys ?? [])],
+    unresolvedMentionPubkeys: snapshotUnresolvedEditMentionPubkeys(
+      content,
+      originalContent,
+      editTarget,
+      getMentionRefs,
+    ),
   };
   const restoreDraft = () => {
     if (shouldRestoreComposer()) {
@@ -98,11 +115,23 @@ export async function submitMessageEdit({
       restoreMentionRefs(draft.mentionRefs);
     }
   };
-  const addedMentionPubkeys = diffAddedMentionPubkeys(
-    extractMentionPubkeys(originalContent),
-    extractMentionPubkeys(content),
-    ownerPubkey ?? "",
-  );
+  // Current picker bindings must not reinterpret the original body: selecting a
+  // different Scout would otherwise make that new key look already notified.
+  // With unresolved history, conservatively revalidate all current recipients.
+  const originalMentionPubkeys = editTarget.unresolvedMentionPubkeys?.length
+    ? []
+    : (editTarget.mentionRefs ?? []).map((ref) => ref.pubkey);
+  let addedMentionPubkeys: string[];
+  try {
+    addedMentionPubkeys = diffAddedMentionPubkeys(
+      originalMentionPubkeys,
+      extractMentionPubkeys(content, historicalNames),
+      ownerPubkey ?? "",
+    );
+  } catch (error) {
+    setUploadError(error instanceof Error ? error.message : String(error));
+    return;
+  }
   const hasQueuedAttachments = draft.queuedAttachments.length > 0;
   if (hasQueuedAttachments) setDeferredUploadPending(true);
   clearComposer();
@@ -119,31 +148,31 @@ export async function submitMessageEdit({
         ),
       ]),
     );
-    // Edits rebuild the tag set from scratch, so re-emit the send-time name
-    // tags too — otherwise one edit strips the rename resilience the original
-    // send recorded (see `buildMentionNameTags`). Refs without a usable name
-    // and unresolved pubkeys fall back to bare reference tags below.
-    const mentionNameTags = buildMentionNameTags(draft.mentionRefs);
-    const namedPubkeys = new Set(mentionNameTags.map((tag) => tag[1]));
-    const outgoingTags = mergeOutgoingTagsWithReferenceMentions(
-      [
-        ...(mergeOutgoingTags(
-          mediaTags,
-          buildCustomEmojiTags(finalContent, customEmoji),
-        ) ?? []),
-        ...mentionNameTags,
-      ],
-      [
-        ...draft.mentionRefs
-          .map(({ pubkey }) => pubkey)
-          .filter((pubkey) => !namedPubkeys.has(normalizePubkey(pubkey))),
-        ...draft.unresolvedMentionPubkeys,
-      ],
+    if (signal?.aborted) return;
+    const revalidatedMentionPubkeys = await revalidateMentionPubkeys(
+      addedMentionPubkeys,
+      undefined,
+      {
+        intendedAgentPubkeys: draft.mentionRefs
+          .filter((ref) => ref.isAgent)
+          .map((ref) => ref.pubkey),
+      },
     );
     if (signal?.aborted) return;
-    const revalidatedMentionPubkeys =
-      await revalidateMentionPubkeys(addedMentionPubkeys);
-    if (signal?.aborted) return;
+    const outgoingTags = mergeOutgoingTagsWithReferenceMentions(
+      mergeOutgoingTags(
+        mediaTags,
+        buildCustomEmojiTags(finalContent, customEmoji),
+      ),
+      [
+        ...draft.mentionRefs.map(({ pubkey }) => pubkey),
+        ...draft.unresolvedMentionPubkeys,
+        // Newly typed recipients are not necessarily selected draft refs. The
+        // authoritative snapshot must include them too, but only after relay
+        // eligibility revalidation, so forwarding cannot resurrect old p-tags.
+        ...revalidatedMentionPubkeys,
+      ],
+    );
     await save(
       finalContent,
       outgoingTags,
@@ -158,8 +187,10 @@ export async function submitMessageEdit({
       onComplete: async (uploaded, signal) => {
         try {
           await finishEdit(uploaded, signal);
-        } catch {
+        } catch (error) {
           restoreDraft();
+          if (error instanceof AgentMentionAuthorizationError)
+            setUploadError(error.message);
         } finally {
           setDeferredUploadPending(false);
         }
@@ -179,7 +210,9 @@ export async function submitMessageEdit({
 
   try {
     await finishEdit([]);
-  } catch {
+  } catch (error) {
     restoreDraft();
+    if (error instanceof AgentMentionAuthorizationError)
+      setUploadError(error.message);
   }
 }

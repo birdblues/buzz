@@ -7,8 +7,6 @@ use std::{
 
 use tauri::{AppHandle, Manager};
 
-use buzz_core_pkg::PresenceStatus;
-
 use crate::app_state::keyring_service;
 use crate::managed_agents::{
     ManagedAgentRecord, ManagedAgentRuntimeKey, ManagedAgentRuntimeReceipt,
@@ -50,7 +48,7 @@ pub(crate) fn managed_agents_store_path<R: tauri::Runtime>(
     Ok(managed_agents_base_dir(app)?.join("managed-agents.json"))
 }
 
-fn managed_agents_logs_dir<R: tauri::Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
+fn managed_agents_logs_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = managed_agents_base_dir(app)?.join("logs");
     fs::create_dir_all(&dir).map_err(|error| format!("failed to create logs dir: {error}"))?;
     Ok(dir)
@@ -90,8 +88,8 @@ pub fn managed_agent_log_path(app: &AppHandle, pubkey: &str) -> Result<PathBuf, 
 
 /// Pair-scoped log path for a managed runtime. The relay URL never appears in
 /// the filename; the suffix is a hash of the canonical URL.
-pub fn managed_agent_runtime_log_path<R: tauri::Runtime>(
-    app: &AppHandle<R>,
+pub fn managed_agent_runtime_log_path(
+    app: &AppHandle,
     key: &ManagedAgentRuntimeKey,
 ) -> Result<PathBuf, String> {
     Ok(managed_agents_logs_dir(app)?.join(format!("{}.log", key.runtime_id())))
@@ -236,61 +234,6 @@ pub(crate) fn spawn_key_refusal(record: &ManagedAgentRecord) -> Option<String> {
             record.pubkey
         )
     })
-}
-
-/// Why a start was requested. Decides whether a live instance on ANOTHER
-/// machine should suppress a local spawn.
-///
-/// The distinction that matters is not "did the caller call stop" but "did
-/// this machine actually terminate a live local child". Only the latter can
-/// legitimately ignore an `online` reading, because that reading may be the
-/// afterglow of the harness we just killed (the relay clears presence on
-/// socket close, but a hard kill can leave it up to the Redis TTL).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum StartIntent {
-    /// Mention, attach, project send, huddle add — nobody pointed at THIS
-    /// machine. If the agent already answers from somewhere else, starting a
-    /// second harness here only produces duplicate replies.
-    Implicit,
-    /// The user pressed Start and acknowledged the duplicate warning.
-    Explicit,
-    /// This machine just terminated a live local child and is respawning it.
-    AfterLocalStop,
-}
-
-/// Outcome of the presence preflight.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum StartDecision {
-    /// Spawn a local harness.
-    Spawn,
-    /// Skip the local spawn: this agent is already live on another device.
-    SkipRunningElsewhere,
-}
-
-/// Decide whether to spawn locally given what the relay says about this
-/// agent's presence.
-///
-/// Fail-open by construction: `None` means "unknown" — a relay error, a
-/// timeout, a Redis outage, or an agent that simply never published — and
-/// MUST allow the spawn. Failing closed here would make a Redis hiccup
-/// unable-to-start-any-agent, which is strictly worse than a duplicate reply.
-///
-/// `Away` counts as alive: the harness itself only ever publishes
-/// `online`/`offline`, so an `away` reading means some other authenticated
-/// session holds that identity, which is equally a reason not to add a second.
-pub(crate) fn presence_start_decision(
-    presence: Option<PresenceStatus>,
-    intent: StartIntent,
-) -> StartDecision {
-    match intent {
-        StartIntent::Explicit | StartIntent::AfterLocalStop => StartDecision::Spawn,
-        StartIntent::Implicit => match presence {
-            Some(PresenceStatus::Online) | Some(PresenceStatus::Away) => {
-                StartDecision::SkipRunningElsewhere
-            }
-            Some(PresenceStatus::Offline) | None => StartDecision::Spawn,
-        },
-    }
 }
 
 /// Read the raw unified store — keyed instances AND key-less definitions —
@@ -870,8 +813,8 @@ fn agent_pids_dir<R: tauri::Runtime>(app: &AppHandle<R>) -> Result<PathBuf, Stri
 /// Persist a pair-scoped runtime receipt atomically. Callers must register the
 /// process in memory in the same runtime transition; on write failure they must
 /// terminate the child before releasing that transition.
-pub fn write_agent_runtime_receipt<R: tauri::Runtime>(
-    app: &AppHandle<R>,
+pub fn write_agent_runtime_receipt(
+    app: &AppHandle,
     receipt: &ManagedAgentRuntimeReceipt,
 ) -> Result<(), String> {
     let path = agent_pids_dir(app)?.join(format!("{}.json", receipt.key.runtime_id()));
@@ -893,8 +836,8 @@ pub fn remove_agent_runtime_receipt_path(path: &Path) {
     let _ = fs::remove_file(path);
 }
 
-pub fn read_all_agent_runtime_receipts<R: tauri::Runtime>(
-    app: &AppHandle<R>,
+pub fn read_all_agent_runtime_receipts(
+    app: &AppHandle,
 ) -> Vec<(PathBuf, ManagedAgentRuntimeReceipt)> {
     let Ok(dir) = agent_pids_dir(app) else {
         return Vec::new();
@@ -998,7 +941,6 @@ fn bytecount_newlines(buf: &[u8]) -> usize {
 }
 
 /// A meaningful error recovered from an exited agent's log tail.
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentLogError {
     /// The full log line, wrapped as `Agent reported error…` for display.
     pub message: String,
@@ -1008,52 +950,43 @@ pub struct AgentLogError {
     pub code: Option<i64>,
 }
 
-/// Legacy tail scan, kept for its recognizer tests; production classifies
-/// through `exit_verdict::classify_harness_exit_from_log`.
-#[cfg(test)]
 pub fn meaningful_agent_error_from_log(path: &Path) -> Option<AgentLogError> {
     let tail = read_log_tail(path, 200).ok()?;
-    tail.lines().rev().find_map(recognize_agent_error_line)
-}
-
-/// Recognize one harness log line as a structured agent error. Shared by the
-/// legacy tail scan above and the generation-anchored exit classifier
-/// (`exit_verdict.rs`), so both promote exactly the same set of lines.
-pub(crate) fn recognize_agent_error_line(line: &str) -> Option<AgentLogError> {
-    let line = line.trim();
-    // New format: "Agent reported error (code -32002): ..."
-    if let Some(rest) = line.strip_prefix("Agent reported error (code ") {
-        if let Some(paren_end) = rest.find("): ") {
-            let code = rest[..paren_end].parse::<i64>().ok();
+    tail.lines().rev().map(str::trim).find_map(|line| {
+        // New format: "Agent reported error (code -32002): ..."
+        if let Some(rest) = line.strip_prefix("Agent reported error (code ") {
+            if let Some(paren_end) = rest.find("): ") {
+                let code = rest[..paren_end].parse::<i64>().ok();
+                return Some(AgentLogError {
+                    message: line.to_string(),
+                    code,
+                });
+            }
+        }
+        // Legacy format (older buzz-acp builds): "Agent reported error: ..."
+        if line.starts_with("Agent reported error:") {
             return Some(AgentLogError {
                 message: line.to_string(),
-                code,
+                code: None,
             });
         }
-    }
-    // Legacy format (older buzz-acp builds): "Agent reported error: ..."
-    if line.starts_with("Agent reported error:") {
-        return Some(AgentLogError {
-            message: line.to_string(),
-            code: None,
-        });
-    }
-    // Bare prefixes emitted by older agent binaries whose Display still leaks
-    // unwrapped errors. Promote these so they surface instead of the generic
-    // "harness exited with status N" fallback.
-    if line.starts_with("llm auth:") {
-        return Some(AgentLogError {
-            message: format!("Agent reported error: {line}"),
-            code: Some(-32001),
-        });
-    }
-    if line.starts_with("llm model not found:") {
-        return Some(AgentLogError {
-            message: format!("Agent reported error: {line}"),
-            code: Some(-32002),
-        });
-    }
-    None
+        // Bare prefixes emitted by older agent binaries whose Display still leaks
+        // unwrapped errors. Promote these so they surface instead of the generic
+        // "harness exited with status N" fallback.
+        if line.starts_with("llm auth:") {
+            return Some(AgentLogError {
+                message: format!("Agent reported error: {line}"),
+                code: Some(-32001),
+            });
+        }
+        if line.starts_with("llm model not found:") {
+            return Some(AgentLogError {
+                message: format!("Agent reported error: {line}"),
+                code: Some(-32002),
+            });
+        }
+        None
+    })
 }
 
 #[cfg(test)]

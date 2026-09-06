@@ -63,7 +63,6 @@ fn make_agent(
         name_pool: vec![],
         is_builtin: false,
         is_active: true,
-        remote_origin: false,
         shared: false,
         source_team: None,
         source_team_persona_slug: None,

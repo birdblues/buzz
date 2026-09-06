@@ -46,19 +46,6 @@ fn stop_managed_agent_pair<R: tauri::Runtime>(
     let Some(mut runtime) = runtimes.remove(key) else {
         return Ok(());
     };
-    if let Ok(Some(exit_status)) = runtime.child.try_wait() {
-        // Already dead: a crash the stop happened to notice first. Record it
-        // as such — a stop marker here would rewrite the crash as intentional.
-        super::super::reaper::finish_dead_pair(
-            app,
-            record,
-            key,
-            &runtime,
-            exit_status,
-            super::super::reaper::Notify::Emit,
-        );
-        return Ok(());
-    }
     let result = (|| -> Result<(), String> {
         #[cfg(unix)]
         terminate_process(runtime.child.id())?;

@@ -22,7 +22,7 @@ import { rewriteRelayUrl } from "@/shared/lib/mediaUrl";
 import { useRelayOrigin } from "@/shared/lib/useRelayOrigin";
 import { AttachmentGroup } from "@/shared/ui/attachment";
 import { ConfigNudgeCard } from "@/shared/ui/config-nudge-attachment";
-import { MarkdownMention } from "./markdown/MarkdownMention";
+import { createMarkdownMention } from "./markdown/MarkdownMention";
 import { LinkPreviewList } from "@/shared/ui/link-preview-list";
 import { useSmoothCorners } from "@/shared/ui/smoothCorners";
 import {
@@ -53,7 +53,7 @@ import {
 } from "./markdown/CodeBlock";
 import { EntityLinkAnchor, useOpenEntityLink } from "./markdown/entityLinks";
 import { ExternalLinkAnchor } from "./markdown/ExternalLinkAnchor";
-import { paragraphHasAppCard, useImetaCard } from "./markdown/imetaCards";
+import { FileCard } from "./markdown/FileCard";
 import {
   AuthoredDeepLinkAnchor,
   ChannelDeepLinkAnchor,
@@ -118,7 +118,7 @@ import {
   useMarkdownRuntime,
 } from "./markdown/runtimeContext";
 import { AgentSnapshotCard } from "./markdown/AgentSnapshotCard";
-import { resolveSnapshotCard } from "./markdownFileCard";
+import { resolveFileCard, resolveSnapshotCard } from "./markdownFileCard";
 import type { MarkdownProps, MarkdownRuntime } from "./markdown/types";
 import { SpoilerInline } from "./markdown/SpoilerInline";
 import {
@@ -1233,19 +1233,14 @@ export function createMarkdownComponents(
       resolveChannelReferences,
       snapshotSharedBy,
     } = useMarkdownRuntime();
-    const label = getReactNodeText(children);
-    const imetaCard = useImetaCard(
-      href ? imetaByUrl?.get(href) : undefined,
-      href,
-      label,
-      snapshotSharedBy,
-    );
     if (!interactive) {
       return <span className="font-medium text-current">{children}</span>;
     }
     if (hasBlockMedia(React.Children.toArray(children))) {
       return <>{children}</>;
     }
+
+    const label = getReactNodeText(children);
 
     const audioAttachment = renderAudioMessageAttachment(
       href ? imetaByUrl?.get(href) : undefined,
@@ -1285,8 +1280,17 @@ export function createMarkdownComponents(
       );
     }
 
-    // Sandboxed HTML apps (preview + Run) and generic download cards.
-    if (imetaCard) return imetaCard;
+    // Render non-media imeta links as download cards; media uses `img`.
+    const card = resolveFileCard(
+      href ? imetaByUrl?.get(href) : undefined,
+      href,
+      label,
+    );
+    if (card) {
+      return (
+        <FileCard href={card.href} filename={card.filename} size={card.size} />
+      );
+    }
 
     // Keep Buzz channel/message navigation in-app.
     if (href) {
@@ -1533,11 +1537,7 @@ export function createMarkdownComponents(
         return <ImageMosaic>{imageChildren}</ImageMosaic>;
       }
 
-      if (
-        hasBlockMedia(childArray) ||
-        hasAudioAttachment ||
-        paragraphHasAppCard(childArray, imetaByUrl)
-      ) {
+      if (hasBlockMedia(childArray) || hasAudioAttachment) {
         return <div>{children}</div>;
       }
 
@@ -1575,9 +1575,7 @@ export function createMarkdownComponents(
     ul: ({ children }) => (
       <ul className={cn("list-disc", listClassName)}>{children}</ul>
     ),
-    mention: ({ children }: { children?: React.ReactNode }) => (
-      <MarkdownMention interactive={interactive}>{children}</MarkdownMention>
-    ),
+    mention: createMarkdownMention(interactive),
     emoji: ({ src, alt }: { src?: string; alt?: string }) => {
       const resolvedSrc = src ? rewriteRelayUrl(src) : src;
       if (!resolvedSrc) {

@@ -6,8 +6,6 @@ import { getCachedSearchHitEvent } from "@/app/navigation/searchHitEventCache";
 import { useAppNavigation } from "@/app/navigation/useAppNavigation";
 import { useChannelsQuery } from "@/features/channels/hooks";
 import { useOpenChannelDirectoryQuery } from "@/features/channels/openChannelDirectory";
-import { useAppSandboxAuxiliary } from "@/features/apps/ui/useAppSandboxAuxiliary";
-import { useCloseAppSandboxWhenLeaving } from "@/features/apps/ui/useCloseAppSandboxWhenLeaving";
 import { ChannelScreen } from "@/features/channels/ui/ChannelScreen";
 import { HuddleStartingView } from "@/features/huddle/components/HuddleStartingView";
 import { huddleWindowChannelId } from "@/features/huddle/lib/huddleWindow";
@@ -128,9 +126,6 @@ export function ChannelRouteScreen({
   const channelsQuery = useChannelsQuery();
   const projectsQuery = useProjectsQuery();
   const identityQuery = useIdentityQuery();
-  const appSandboxAuxiliary = useAppSandboxAuxiliary();
-  // An app opened in one channel must not follow the reader to the next.
-  useCloseAppSandboxWhenLeaving(channelId);
   const profileQuery = useProfileQuery();
   const channels = channelsQuery.data ?? [];
   const memberChannel =
@@ -315,7 +310,6 @@ export function ChannelRouteScreen({
 
   return (
     <ChannelScreen
-      {...(appSandboxAuxiliary ?? {})}
       activeChannel={activeChannel}
       autoSendDraftKey={autoSendDraftKey}
       currentIdentity={identityQuery.data}

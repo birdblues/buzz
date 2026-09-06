@@ -216,7 +216,6 @@ mod tests {
             name_pool: vec!["poolname".to_string()],
             is_builtin: true,
             is_active: false,
-            remote_origin: false,
             shared: false,
             source_team: None,
             source_team_persona_slug: None,

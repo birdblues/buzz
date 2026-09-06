@@ -448,7 +448,6 @@ fn member_copy(
         name_pool: member.name_pool.clone(),
         is_builtin: false,
         is_active: true,
-        remote_origin: false,
         shared: false,
         source_team: None,
         source_team_persona_slug: None,

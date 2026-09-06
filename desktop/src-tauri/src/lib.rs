@@ -1,5 +1,4 @@
 #![recursion_limit = "256"] // Deep Tauri command futures exceed the default layout query depth.
-mod app_content;
 mod app_menu;
 mod app_state;
 mod archive;
@@ -32,7 +31,6 @@ mod models;
 mod native_relay_client;
 mod native_websocket;
 mod native_websocket_batch;
-mod navigation_policy;
 mod nostr_bind;
 pub mod nostr_convert;
 mod observed_unread;
@@ -42,7 +40,6 @@ mod ptt_shortcut;
 mod relay;
 mod relay_admission;
 mod reset;
-mod sandbox_frame_hardening;
 mod secret_store;
 mod shutdown;
 mod team_catalog;
@@ -220,16 +217,11 @@ pub fn run() {
         .register_asynchronous_uri_scheme_protocol("buzz-media", |ctx, request, responder| {
             let app = ctx.app_handle().clone();
             tauri::async_runtime::spawn(async move {
-                let response = if request.uri().path().starts_with("/app/") {
-                    app_content::handle_app_content(&app, &request).await
-                } else {
-                    media_proxy::handle_buzz_media(&app, &request).await
-                };
+                let response = media_proxy::handle_buzz_media(&app, &request).await;
                 responder.respond(response);
             });
         })
         .manage(build_app_state())
-        .manage(app_content::AppContentCache::default())
         .manage(ClipboardState::new())
         .manage(PendingCommunityDeepLinks::default())
         .manage(PendingNavigationDeepLinks::default())
@@ -244,39 +236,6 @@ pub fn run() {
         .manage(channel_head_cache::ChannelHeadCacheStore::default())
         .setup(move |app| {
             let app_handle = app.handle().clone();
-
-            // The main window is declared in tauri.conf.json with
-            // `create: false` so it can be built here with a navigation lock
-            // (`navigation_policy`) — config-created windows offer no hook.
-            {
-                let config = app.config();
-                let window_config = config
-                    .app
-                    .windows
-                    .iter()
-                    .find(|w| w.label == "main")
-                    .cloned()
-                    .ok_or("main window config missing")?;
-                let dev_url = config
-                    .build
-                    .dev_url
-                    .clone()
-                    .filter(|_| cfg!(debug_assertions));
-                tauri::WebviewWindowBuilder::from_config(&app_handle, &window_config)?
-                    // Runs in every frame: strips WebRTC/sendBeacon from
-                    // subframes (the sandboxed app iframe) — WebKit ignores the
-                    // CSP `webrtc` directive. See sandbox_frame_hardening.rs.
-                    .initialization_script_for_all_frames(sandbox_frame_hardening::SCRIPT)
-                    .on_navigation(move |url| {
-                        let allowed = navigation_policy::navigation_allowed(url, dev_url.as_ref());
-                        if !allowed {
-                            eprintln!("buzz-desktop: blocked navigation to {}", url.scheme());
-                        }
-                        allowed
-                    })
-                    .build()?;
-            }
-
             #[cfg(target_os = "macos")]
             {
                 tray_menu::init(&app_handle)?;
@@ -640,8 +599,6 @@ pub fn run() {
             get_relay_ws_url,
             get_relay_http_url,
             get_media_proxy_port,
-            app_content::app_content_available,
-            app_content::reset_app_content_discovery,
             fetch_link_preview_metadata,
             discover_acp_auth_methods,
             discover_acp_providers,
@@ -920,10 +877,6 @@ pub fn run() {
 
     #[cfg(unix)]
     shutdown::install_signal_handler(app.handle().clone(), Arc::clone(&shutdown_done));
-
-    // Periodic harness liveness reaper — the only reaper that runs while the
-    // window is hidden or every agent already reads as stopped.
-    managed_agents::reaper::spawn_liveness_tick(app.handle());
 
     let run_shutdown_done = Arc::clone(&shutdown_done);
     let restart_requested = Arc::new(AtomicBool::new(false));

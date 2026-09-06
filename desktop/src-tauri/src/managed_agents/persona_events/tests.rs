@@ -52,7 +52,6 @@ pub(super) fn sample_record() -> ManagedAgentRecord {
         name_pool: Vec::new(),
         is_builtin: false,
         is_active: true,
-        remote_origin: false,
         shared: false,
         source_team: None,
         source_team_persona_slug: None,
@@ -157,7 +156,6 @@ pub(super) fn sample_persona() -> AgentDefinition {
         name_pool: vec!["Alpha".to_string(), "Beta".to_string()],
         is_builtin: false,
         is_active: true,
-        remote_origin: false,
         shared: false,
         source_team: None,
         source_team_persona_slug: Some("test-slug".to_string()),
@@ -388,7 +386,6 @@ fn content_matches_nip_ap_vector() {
         name_pool: vec!["Alpha".to_string(), "Beta".to_string()],
         is_builtin: false,
         is_active: true,
-        remote_origin: false,
         shared: false,
         source_team: None,
         source_team_persona_slug: None,
@@ -422,7 +419,6 @@ fn round_trip_minimal_persona() {
         name_pool: vec![],
         is_builtin: true,
         is_active: false,
-        remote_origin: false,
         shared: false,
         source_team: Some("team-1".to_string()),
         source_team_persona_slug: None,
@@ -502,27 +498,6 @@ fn behavioral_defaults_survive_record_round_trip() {
     assert_eq!(reprojected.parallelism, Some(4));
 }
 
-/// `remote_origin` is a DEVICE-LOCAL fact: it must never leak into the 30175
-/// wire content (which would sync it to every device and shift the NIP-AP
-/// content hash), and it must survive the lossy definition ⇄ unified-record
-/// projection that `save_personas` runs on every write.
-#[test]
-fn remote_origin_is_local_only_and_survives_record_round_trip() {
-    let mut persona = sample_persona();
-    persona.remote_origin = true;
-
-    let json = serde_json::to_string(&persona_event_content(&persona)).unwrap();
-    assert!(
-        !json.contains("remote_origin"),
-        "leaked remote_origin into 30175 content"
-    );
-
-    let record = persona.clone().into_agent_record();
-    assert!(record.remote_origin, "lost in into_agent_record");
-    let view = record.to_definition_view().expect("definition view");
-    assert!(view.remote_origin, "lost in to_definition_view");
-}
-
 /// B5 hash row 1: a quad-absent definition's content bytes — and
 /// therefore `persona_content_hash` — are identical before and after
 /// quad activation. Pre-activation the projection hardcoded `None`;
@@ -543,7 +518,6 @@ fn quad_absent_definition_hash_stable_across_activation() {
         name_pool: vec!["nib".to_string()],
         is_builtin: false,
         is_active: true,
-        remote_origin: false,
         shared: false,
         source_team: None,
         source_team_persona_slug: None,
@@ -590,7 +564,6 @@ fn persona_from_event_content_for_test(content: PersonaEventContent) -> AgentDef
         name_pool: content.name_pool,
         is_builtin: false,
         is_active: true,
-        remote_origin: false,
         shared: false,
         source_team: None,
         source_team_persona_slug: None,

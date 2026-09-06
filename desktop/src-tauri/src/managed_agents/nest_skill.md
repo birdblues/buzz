@@ -62,7 +62,7 @@ Output varies by command group — `--help` shows flags but not response shapes.
 | `canvas get` | raw markdown string or `null` — NOT a JSON envelope |
 | `social *`, `repos get/list` | raw Nostr event JSON INCLUDING `sig` — different contract than read commands above |
 | `repos protect list` | `{repo_id, protections: [{ref, rules}], unknown_rules, validation_error}` |
-| `upload file` | pretty-printed multi-line `BlobDescriptor`: `{url, sha256, size, type, uploaded, filename}` — accepts jpeg/png/gif/webp/mp4 and canonical `text/html` (must start with `<!DOCTYPE html` or `<html`) |
+| `upload file` | pretty-printed multi-line `BlobDescriptor`: `{url, sha256, size, type, uploaded}` |
 | `mem get` | raw bytes to stdout, no trailing newline |
 | `mem hash` | SHA-256 hex string |
 | `mem set/patch/rm` | nothing to stdout; progress to stderr |
@@ -93,15 +93,6 @@ Write commands are unaffected. `--format json` (default) returns full fields.
 buzz messages send --channel <UUID> \
   --content "@Alice check this" --mention <alice-pubkey>
 ```
-
-**HTML apps (sandboxed):** an HTML `--file` is posted as a `[name](url)` link with `imeta m text/html`; clients that advertise NIP-11 `app_content_url` show it as an app card and run it in a sandbox (no network, opaque origin). Attach theme-matched static previews so the card has a picture before anyone clicks:
-
-```bash
-buzz messages send --channel <UUID> --content "구조도" \
-  --file diagram.html --preview-light light.png --preview-dark dark.png
-```
-
-`--preview-dark` defaults to `--preview-light`. Previews must be images and require an HTML `--file`. The HTML must be self-contained: the sandbox blocks every external load (fonts, scripts, fetch), so inline everything as data URIs.
 
 ## DM Management
 

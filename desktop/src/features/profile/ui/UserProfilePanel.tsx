@@ -331,10 +331,6 @@ export function UserProfilePanel({
     !pubkey &&
     isOwner === true &&
     resolvedPersona !== undefined &&
-    // A sync-received definition must not offer Start here either — the card
-    // hides its launcher, and this panel is one click away from the card. The
-    // backend refuses the create regardless (ensure_persona_not_remote_origin).
-    !resolvedPersona.remoteOrigin &&
     managedAgent === undefined;
   const isAgentActionPending =
     createAgentMutation.isPending ||
