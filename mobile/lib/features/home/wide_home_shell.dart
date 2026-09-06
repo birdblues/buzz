@@ -1,20 +1,13 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
-import '../../shared/community/community.dart';
-import '../../shared/community/community_icon_provider.dart';
-import '../../shared/community/community_provider.dart';
 import '../../shared/layout/layout_mode.dart';
 import '../../shared/layout/pane_navigator.dart';
 import '../../shared/layout/pane_scope.dart';
 import '../../shared/theme/theme.dart';
-import '../../shared/utils/string_utils.dart';
-import '../../shared/widgets/avatar_image.dart';
 import '../../shared/widgets/frosted_app_bar.dart';
 import '../../shared/widgets/frosted_scaffold.dart';
 import '../../shared/widgets/mobile_tab_footer_backdrop.dart';
@@ -26,7 +19,6 @@ import '../channels/thread_detail_page.dart';
 import '../channels/wide_shell/wide_shell_provider.dart';
 import '../channels/wide_shell/wide_sidebar_collapsed_provider.dart';
 import '../forum/forum_thread_page.dart';
-import '../profile/profile_avatar.dart';
 import '../profile/profile_provider.dart';
 import '../search/search_page.dart';
 
@@ -35,7 +27,6 @@ part 'wide_home_shell/empty_state.dart';
 part 'wide_home_shell/main_pane.dart';
 part 'wide_home_shell/sidebar_column.dart';
 part 'wide_home_shell/sidebar_nav_rows.dart';
-part 'wide_home_shell/sidebar_profile_card.dart';
 part 'wide_home_shell/sidebar_toggle_button.dart';
 
 const _kSidebarMotionDuration = Duration(milliseconds: 200);

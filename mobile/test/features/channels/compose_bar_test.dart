@@ -682,6 +682,7 @@ void main() {
       await tester.pumpWidget(
         _buildComposeBar(
           uploadService: _testUploadService(nostr.Keys.generate().nsec),
+          viewPadding: const EdgeInsets.only(bottom: 34),
           onSend:
               (
                 content,
@@ -724,6 +725,7 @@ void main() {
       expect(
         compactPosition.transform.getTranslation().y,
         Grid.twelve + Grid.quarter,
+        reason: 'the pill rides down into the home-indicator inset',
       );
 
       await _expandComposer(tester);
@@ -753,6 +755,43 @@ void main() {
       expect(find.byIcon(LucideIcons.smilePlus), findsOneWidget);
       expect(find.byIcon(LucideIcons.aLargeSmall), findsOneWidget);
     });
+
+    testWidgets(
+      'keeps the compact pill a gutter above the bottom edge without a home '
+      'indicator',
+      (tester) async {
+        // The compact pill rides 14dp down into the bottom view inset. On a
+        // phone that inset is the home indicator; in a desktop window it is
+        // zero, and the pill used to overhang the window edge by 6dp.
+        for (final inset in const [0.0, 34.0]) {
+          await tester.pumpWidget(
+            _buildComposeBar(
+              uploadService: _testUploadService(nostr.Keys.generate().nsec),
+              viewPadding: EdgeInsets.only(bottom: inset),
+              onSend:
+                  (
+                    content,
+                    mentionPubkeys, {
+                    mediaTags = const <List<String>>[],
+                  }) async {},
+            ),
+          );
+          await tester.pumpAndSettle();
+
+          final pillBottom = tester
+              .getRect(find.byKey(const ValueKey('composer-surface')))
+              .bottom;
+          final barBottom = tester
+              .getRect(find.byKey(const ValueKey('compose-bar')))
+              .bottom;
+          expect(
+            barBottom - pillBottom,
+            greaterThanOrEqualTo(Grid.twelve),
+            reason: 'bottom view inset $inset',
+          );
+        }
+      },
+    );
 
     testWidgets('notifies focus intent before attaching the focused field', (
       tester,
@@ -1898,6 +1937,7 @@ void main() {
           await tester.pumpWidget(
             _buildComposeBar(
               uploadService: _testUploadService(nostr.Keys.generate().nsec),
+              viewPadding: const EdgeInsets.only(bottom: 34),
               voiceNoteRecorderFactory: () => recorder,
               onSend:
                   (

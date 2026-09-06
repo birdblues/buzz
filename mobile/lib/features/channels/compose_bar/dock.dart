@@ -1,5 +1,8 @@
 part of '../compose_bar.dart';
 
+/// How far the compact pill rides down into the bottom view inset.
+const _kCompactVerticalOffset = Grid.twelve + Grid.quarter;
+
 class _ComposerDockFrame extends HookWidget {
   final Animation<double> expansionAnimation;
   final bool forceFullWidth;
@@ -35,12 +38,18 @@ class _ComposerDockFrame extends HookWidget {
       }
       return null;
     }, [forceFullWidth, reducedMotion]);
-    const compactVerticalOffset = Grid.twelve + Grid.quarter;
+    // The compact pill rides down into the bottom view inset, but never so
+    // far that less than a gutter of it clears the edge: a desktop window
+    // has no inset to ride into and would otherwise cut off the pill's
+    // rounded bottom. The expanded position is untouched.
+    final viewPaddingBottom = MediaQuery.viewPaddingOf(context).bottom;
+    final compactVerticalOffset = math.min(
+      _kCompactVerticalOffset,
+      viewPaddingBottom + Grid.xxs - Grid.twelve,
+    );
     final visibleBottomGutter = math.max(
       Grid.twelve,
-      MediaQuery.viewPaddingOf(context).bottom +
-          Grid.xxs -
-          compactVerticalOffset,
+      viewPaddingBottom + Grid.xxs - compactVerticalOffset,
     );
     final recordingGutterDelta = visibleBottomGutter - Grid.twelve;
     final backdropHeight = mobileTabFooterBackdropHeight(context);

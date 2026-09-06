@@ -409,7 +409,7 @@ void main() {
       await tester.pumpWidget(await _buildApp());
       await tester.pumpAndSettle();
 
-      final card = find.byKey(const ValueKey('wide-sidebar-profile-card'));
+      final card = find.byKey(const ValueKey('sidebar-profile-card'));
       expect(card, findsOneWidget);
       // The only profile avatar on screen is the card's: the channel list
       // header no longer carries the Settings avatar in the wide shell.
@@ -421,38 +421,30 @@ void main() {
       expect(
         find.descendant(
           of: card,
-          matching: find.byKey(
-            const ValueKey('wide-sidebar-profile-card-name'),
-          ),
+          matching: find.byKey(const ValueKey('sidebar-profile-card-name')),
         ),
         findsOneWidget,
       );
       expect(
         tester
             .widget<Text>(
-              find.byKey(const ValueKey('wide-sidebar-profile-card-name')),
+              find.byKey(const ValueKey('sidebar-profile-card-name')),
             )
             .data,
         'Test',
       );
-      final communityRow = find.byKey(
-        const ValueKey('wide-sidebar-profile-card-community'),
-      );
-      expect(communityRow, findsOneWidget);
+      // The community is named in the header at the top of the sidebar;
+      // the card does not repeat it.
+      expect(find.text('🐝'), findsNothing);
       expect(
-        find.descendant(of: communityRow, matching: find.text('Test')),
+        find.descendant(of: card, matching: find.text('Test')),
         findsOneWidget,
-      );
-      // No relay icon in the test, so the bee stands in for it.
-      expect(
-        find.descendant(of: communityRow, matching: find.text('🐝')),
-        findsOneWidget,
+        reason: 'only the display name',
       );
     },
   );
 
-  testWidgets('the profile card opens Settings and its community row opens '
-      'the switcher', (tester) async {
+  testWidgets('the profile card opens Settings', (tester) async {
     _useIpadWindow(tester);
     await tester.pumpWidget(await _buildApp());
     await tester.pumpAndSettle();
@@ -463,7 +455,7 @@ void main() {
 
     // The Settings route reports transition progress on every frame; pump
     // bounded frames rather than waiting for the page beneath to go idle.
-    await tester.tap(find.byKey(const ValueKey('wide-sidebar-profile-card')));
+    await tester.tap(find.byKey(const ValueKey('sidebar-profile-card')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     expect(rootNavigator.canPop(), isTrue, reason: 'Settings was pushed');
@@ -471,17 +463,6 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     expect(rootNavigator.canPop(), isFalse);
-
-    await tester.tap(
-      find.byKey(const ValueKey('wide-sidebar-profile-card-community')),
-    );
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 600));
-    expect(
-      find.text('Switch Community'),
-      findsOneWidget,
-      reason: 'the community switcher sheet opened',
-    );
   });
 
   testWidgets('tapping a channel selects the main pane without pushing', (

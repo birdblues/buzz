@@ -82,11 +82,15 @@ class _SidebarColumn extends ConsumerWidget {
                         ),
                       ),
                       Padding(
-                        padding: EdgeInsets.only(
-                          bottom: mediaQuery.padding.bottom,
+                        padding: EdgeInsets.fromLTRB(
+                          Grid.xxs,
+                          Grid.xxs,
+                          Grid.xxs,
+                          Grid.xxs + mediaQuery.padding.bottom,
                         ),
-                        child: _SidebarProfileCard(
+                        child: SidebarProfileCard(
                           settingsPageBuilder: settingsPageBuilder,
+                          onSettingsTransitionProgress: (_) {},
                         ),
                       ),
                     ],

@@ -21,11 +21,11 @@ earlier desktop work is preserved at tag `fork-desktop-2026-09-06`.
 iPad uses (`lib/shared/layout/layout_mode.dart` — wide when the content is
 at least 1000×600), the same relay client, link previews, sandboxed HTML
 apps, forum, pulse, search, invites and pairing. The wide shell's sidebar
-ends in a profile card like the desktop's (`wide_home_shell/
-sidebar_profile_card.dart`): your avatar with presence dot and name over
-the active community's icon (🐝 when it has none) and name; the card opens
-Settings and the community row opens the switcher, and the channel list
-header drops its Settings avatar there. The community name comes from the
+ends in a profile card like the desktop's (`SidebarProfileCard` in
+`channels_page/profile_card.dart`): your avatar with presence dot and your
+display name; the card opens Settings, and the channel list header drops
+its Settings avatar there. The community is named only in the header at
+the top of the sidebar, which opens the switcher; that name comes from the
 relay when one is set (`docs/community-name.md`). Nothing here talks to the
 host desktop except pairing (NIP-AB over the relay); everything else is read
 from the relay.
