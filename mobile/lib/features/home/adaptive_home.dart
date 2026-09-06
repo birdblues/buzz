@@ -6,7 +6,7 @@ import 'wide_home_shell.dart';
 
 /// Chooses the authenticated home for the current window size.
 ///
-/// Compact windows (phones) get the tabbed [HomePage]; wide windows (iPad
+/// Compact windows (phones) get the stacked [HomePage]; wide windows (iPad
 /// landscape, large tablets) get the three-column [WideHomeShell]. The chosen
 /// [LayoutMode] is published so navigation can decide between pushing a
 /// route and selecting a pane.

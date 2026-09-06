@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
@@ -97,10 +96,11 @@ double _searchHeaderFiltersHeight(BuildContext context) {
 }
 
 class SearchPage extends HookConsumerWidget {
-  const SearchPage({this.tabReselection, super.key});
+  const SearchPage({this.autofocus = false, super.key});
 
-  /// Notifies this page when its already-selected tab is tapped again.
-  final ValueListenable<int>? tabReselection;
+  /// Whether the field takes focus as the page opens. The phone pushes
+  /// Search to type into; the wide shell shows it idle in its pane.
+  final bool autofocus;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -114,7 +114,7 @@ class SearchPage extends HookConsumerWidget {
     final focusNode = useFocusNode();
     final isSearchEditing = useState(false);
     final showSearchTitle = useState(true);
-    final isTabActivationInFlight = useRef(false);
+    final isActivationInFlight = useRef(false);
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
     final searchSurfaceColor = navigationSearchSurface(context);
     final searchPrimaryColor = navigationPrimaryForeground(context);
@@ -165,27 +165,21 @@ class SearchPage extends HookConsumerWidget {
     }
 
     useEffect(() {
-      final tabReselection = this.tabReselection;
-      if (tabReselection == null) return null;
-
-      void reactivateSearch() {
-        // The same tab gesture can report focus loss after this callback. Keep
-        // that notification from starting a competing return animation while
-        // the normal field activation path restores focus.
-        isTabActivationInFlight.value = true;
-        activateSearch();
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          isTabActivationInFlight.value = false;
-        });
-      }
-
-      tabReselection.addListener(reactivateSearch);
-      return () => tabReselection.removeListener(reactivateSearch);
-    }, [tabReselection, focusNode]);
+      if (!autofocus) return null;
+      // The gesture that opened the page can report focus loss after this
+      // frame. Keep that notification from starting a competing return
+      // animation while the normal activation path takes focus.
+      isActivationInFlight.value = true;
+      activateSearch();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        isActivationInFlight.value = false;
+      });
+      return null;
+    }, const []);
 
     useEffect(() {
       void resetIdlePromptWhenFocusLeaves() {
-        if (!focusNode.hasFocus && !isTabActivationInFlight.value) {
+        if (!focusNode.hasFocus && !isActivationInFlight.value) {
           deactivateSearch();
         }
       }
@@ -209,8 +203,9 @@ class SearchPage extends HookConsumerWidget {
       // Keep the empty state centered in the page rather than the portion left
       // above the keyboard.
       resizeToAvoidBottomInset: false,
+      // Pushed from the phone's navigation rows the bar implies Back; as a
+      // wide-shell pane root nothing can pop, so none is shown.
       appBar: FrostedAppBar(
-        automaticallyImplyLeading: false,
         horizontalInset: Grid.twelve,
         showBottomDivider: true,
         bottomDividerOpacity: 0.07,

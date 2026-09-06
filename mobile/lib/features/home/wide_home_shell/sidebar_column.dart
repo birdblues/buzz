@@ -14,6 +14,8 @@ class _SidebarColumn extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final collapsed = ref.watch(wideSidebarCollapsedProvider);
+    final surface = ref.watch(wideShellProvider.select((s) => s.surface));
+    final shell = ref.read(wideShellProvider.notifier);
     final reducedMotion = MediaQuery.disableAnimationsOf(context);
     final mediaQuery = MediaQuery.of(context);
 
@@ -52,13 +54,14 @@ class _SidebarColumn extends ConsumerWidget {
                         child: ChannelsPage(
                           settingsPageBuilder: settingsPageBuilder,
                           onSettingsTransitionProgress: (_) {},
-                          pinnedHeader: _SidebarNavRows(
+                          pinnedHeader: HomeNavRows(
                             hasUnreadInbox: hasUnreadInbox,
+                            activitySelected: surface == WideSurface.inbox,
+                            searchSelected: surface == WideSurface.search,
+                            onActivity: shell.showInbox,
+                            onSearch: shell.showSearch,
                           ),
-                          pinnedHeaderHeight: _SidebarNavRows.height,
-                          // Settings lives in the profile card below,
-                          // like the desktop app.
-                          showProfileAvatar: false,
+                          pinnedHeaderHeight: HomeNavRows.height,
                         ),
                       ),
                       Divider(

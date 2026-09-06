@@ -20,12 +20,12 @@ import '../channels/wide_shell/wide_sidebar_collapsed_provider.dart';
 import '../forum/forum_thread_page.dart';
 import '../profile/profile_provider.dart';
 import '../search/search_page.dart';
+import 'home_nav_rows.dart';
 
 part 'wide_home_shell/aux_pane.dart';
 part 'wide_home_shell/empty_state.dart';
 part 'wide_home_shell/main_pane.dart';
 part 'wide_home_shell/sidebar_column.dart';
-part 'wide_home_shell/sidebar_nav_rows.dart';
 part 'wide_home_shell/sidebar_toggle_button.dart';
 
 const _kSidebarMotionDuration = Duration(milliseconds: 200);

@@ -19,6 +19,7 @@ import 'package:buzz/features/channels/mobile_huddle_controller.dart';
 import 'package:buzz/features/channels/wide_shell/wide_shell_provider.dart';
 import 'package:buzz/features/channels/wide_shell/wide_sidebar_collapsed_provider.dart';
 import 'package:buzz/features/home/adaptive_home.dart';
+import 'package:buzz/features/home/home_nav_rows.dart';
 import 'package:buzz/features/home/home_page.dart';
 import 'package:buzz/features/home/wide_home_shell.dart';
 import 'package:buzz/features/profile/profile_avatar.dart';
@@ -320,18 +321,48 @@ void main() {
     expect(snackBar.center.dx, lessThan(pane.right));
   });
 
-  testWidgets('a phone window renders the tabbed home', (tester) async {
+  testWidgets('a phone window renders the stacked home and pushes Activity '
+      'and Search', (tester) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
 
-    await tester.pumpWidget(await _buildApp());
+    await tester.pumpWidget(await _buildApp(hasUnreadInbox: true));
     await tester.pumpAndSettle();
 
     expect(find.byType(HomePage), findsOneWidget);
     expect(find.byType(WideHomeShell), findsNothing);
     final context = tester.element(find.byType(HomePage));
     expect(LayoutModeScope.of(context), LayoutMode.compact);
+    // The wide shell's sidebar at full width: rows under the header, the
+    // profile card as the footer, no tab bar.
+    expect(find.byType(HomeNavRows), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('home-nav-activity-unread-dot')),
+      findsOneWidget,
+    );
+    expect(find.byType(SidebarProfileCard), findsOneWidget);
+    expect(find.byTooltip('Home'), findsNothing);
+    expect(find.byType(ProfileAvatar), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('home-nav-activity')));
+    await tester.pumpAndSettle();
+    expect(find.byType(ActivityPage), findsOneWidget);
+    expect(find.byTooltip('Back'), findsOneWidget);
+    await tester.tap(find.byTooltip('Back'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ActivityPage), findsNothing);
+    expect(find.byType(HomePage), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('home-nav-search')));
+    await tester.pumpAndSettle();
+    expect(find.byType(SearchPage), findsOneWidget);
+    expect(find.byTooltip('Back'), findsOneWidget);
+    expect(
+      tester.widget<TextField>(find.byType(TextField)).focusNode?.hasFocus,
+      isTrue,
+      reason: 'pushed to type into',
+    );
   });
 
   testWidgets('an iPad window renders the three-column shell', (tester) async {
@@ -343,9 +374,9 @@ void main() {
     expect(find.byType(WideHomeShell), findsOneWidget);
     expect(find.byType(HomePage), findsNothing);
     expect(find.byType(ChannelsPage), findsOneWidget);
-    expect(find.byKey(const ValueKey('wide-nav-activity')), findsOneWidget);
+    expect(find.byKey(const ValueKey('home-nav-activity')), findsOneWidget);
     expect(
-      find.byKey(const ValueKey('wide-nav-activity-unread-dot')),
+      find.byKey(const ValueKey('home-nav-activity-unread-dot')),
       findsOneWidget,
     );
     expect(find.byKey(const ValueKey('wide-main-empty')), findsOneWidget);
@@ -502,12 +533,12 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(ChannelDetailPage), findsOneWidget);
 
-    await tester.tap(find.byKey(const ValueKey('wide-nav-activity')));
+    await tester.tap(find.byKey(const ValueKey('home-nav-activity')));
     await tester.pumpAndSettle();
     expect(find.byType(ActivityPage), findsOneWidget);
     expect(find.byType(ChannelDetailPage), findsNothing);
 
-    await tester.tap(find.byKey(const ValueKey('wide-nav-search')));
+    await tester.tap(find.byKey(const ValueKey('home-nav-search')));
     await tester.pumpAndSettle();
     expect(find.byType(SearchPage), findsOneWidget);
     expect(find.byType(ActivityPage), findsNothing);

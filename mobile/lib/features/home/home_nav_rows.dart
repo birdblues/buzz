@@ -1,42 +1,68 @@
-part of '../wide_home_shell.dart';
+import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
-/// Activity and Search rows pinned under the sidebar's community header.
-class _SidebarNavRows extends ConsumerWidget {
-  const _SidebarNavRows({required this.hasUnreadInbox});
+import '../../shared/theme/theme.dart';
 
+/// The Activity and Search rows pinned under the channel list's community
+/// header on every surface, like the desktop sidebar's primary menu. The wide
+/// shell selects a main-pane surface with them and shows which is selected;
+/// the phone pushes the page.
+class HomeNavRows extends StatelessWidget {
+  /// Creates the rows.
+  const HomeNavRows({
+    required this.hasUnreadInbox,
+    required this.onActivity,
+    required this.onSearch,
+    this.activitySelected = false,
+    this.searchSelected = false,
+    super.key,
+  });
+
+  /// Whether the Activity inbox has unread items (a dot on its row).
   final bool hasUnreadInbox;
 
+  /// Opens the Activity inbox.
+  final VoidCallback onActivity;
+
+  /// Opens Search.
+  final VoidCallback onSearch;
+
+  /// Whether the Activity inbox is the surface on show (wide shell only).
+  final bool activitySelected;
+
+  /// Whether Search is the surface on show (wide shell only).
+  final bool searchSelected;
+
+  /// Height of one row.
   static const double rowHeight = 36;
 
-  /// Total height reserved by the sidebar header for these rows.
+  /// Total height the list header reserves for these rows.
   static const double height = rowHeight * 2 + Grid.xxs;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final surface = ref.watch(wideShellProvider.select((s) => s.surface));
-    final notifier = ref.read(wideShellProvider.notifier);
+  Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(Grid.twelve, 0, Grid.twelve, Grid.xxs),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _SidebarNavRow(
-            key: const ValueKey('wide-nav-activity'),
+          _HomeNavRow(
+            key: const ValueKey('home-nav-activity'),
             icon: LucideIcons.inbox300,
             selectedIcon: LucideIcons.inbox500,
             label: 'Activity',
-            selected: surface == WideSurface.inbox,
+            selected: activitySelected,
             showUnreadDot: hasUnreadInbox,
-            onTap: notifier.showInbox,
+            onTap: onActivity,
           ),
-          _SidebarNavRow(
-            key: const ValueKey('wide-nav-search'),
+          _HomeNavRow(
+            key: const ValueKey('home-nav-search'),
             icon: LucideIcons.search300,
             selectedIcon: LucideIcons.search500,
             label: 'Search',
-            selected: surface == WideSurface.search,
+            selected: searchSelected,
             showUnreadDot: false,
-            onTap: notifier.showSearch,
+            onTap: onSearch,
           ),
         ],
       ),
@@ -44,8 +70,8 @@ class _SidebarNavRows extends ConsumerWidget {
   }
 }
 
-class _SidebarNavRow extends StatelessWidget {
-  const _SidebarNavRow({
+class _HomeNavRow extends StatelessWidget {
+  const _HomeNavRow({
     super.key,
     required this.icon,
     required this.selectedIcon,
@@ -71,7 +97,7 @@ class _SidebarNavRow extends StatelessWidget {
       label: showUnreadDot ? '$label, unread' : label,
       excludeSemantics: true,
       child: SizedBox(
-        height: _SidebarNavRows.rowHeight,
+        height: HomeNavRows.rowHeight,
         child: Material(
           color: selected
               ? context.colors.primary.withValues(alpha: 0.12)
@@ -105,7 +131,7 @@ class _SidebarNavRow extends StatelessWidget {
                   ),
                   if (showUnreadDot)
                     Container(
-                      key: const ValueKey('wide-nav-activity-unread-dot'),
+                      key: const ValueKey('home-nav-activity-unread-dot'),
                       width: 8,
                       height: 8,
                       decoration: BoxDecoration(

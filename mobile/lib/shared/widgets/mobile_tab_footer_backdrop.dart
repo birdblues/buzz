@@ -2,13 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../theme/theme.dart';
 
-/// Height of the floating mobile tab bar, excluding its bottom clearance.
-const mobileTabBarHeight = 56.0;
-
-/// Gap between the floating mobile tab bar and the bottom safe area.
-const mobileTabBarBottomGap = Grid.twelve;
-
-/// Fixed visual height of the shared footer fade behind the floating tab bar.
+/// Fixed visual height of the footer fade behind a floating control (the
+/// channel composer; the phone no longer has a floating tab bar).
 double mobileTabFooterBackdropHeight(BuildContext _) => 180;
 
 /// Builds the shared transparent-to-surface footer fade.
@@ -35,7 +30,7 @@ LinearGradient mobileTabFooterBackdropGradient(
   );
 }
 
-/// Shared fade behind the floating mobile tab bar.
+/// Shared fade behind a floating control at the bottom of a page.
 class MobileTabFooterBackdrop extends StatelessWidget {
   /// Vertical extent of the backdrop in logical pixels.
   final double height;

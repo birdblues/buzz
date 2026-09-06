@@ -3,7 +3,6 @@ import 'dart:io';
 import 'dart:math' show max, min;
 import 'dart:ui';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
@@ -90,7 +89,6 @@ const double _kChannelLabelInset =
 const double _kDmAvatarSize = _kChannelIconSize;
 
 const double _kTopSectionCommunityAvatarSize = 40.0;
-const double _kTopSectionProfileAvatarSize = 36.0;
 const double _kTopSectionBottomPadding = Grid.xxs;
 
 /// The top section's avatars are 40dp circles, which fill their box edge to
@@ -164,19 +162,14 @@ class ChannelsPage extends HookConsumerWidget {
   const ChannelsPage({
     required this.settingsPageBuilder,
     required this.onSettingsTransitionProgress,
-    this.tabReselection,
     this.pinnedHeader,
     this.pinnedHeaderHeight = 0,
-    this.showProfileAvatar = true,
     super.key,
   }) : assert(pinnedHeader == null || pinnedHeaderHeight > 0);
 
+  /// Builds the Settings page; the home's footer card opens it with
+  /// [settingsPageRoute], so the header carries no Settings control.
   final WidgetBuilder settingsPageBuilder;
-
-  /// Whether the header's trailing profile avatar (the Settings entry point
-  /// on a phone) is shown. The wide shell hides it and offers Settings from
-  /// its sidebar profile card instead, like the desktop app.
-  final bool showProfileAvatar;
 
   /// Content pinned below the community header, above the scrolling list.
   /// The wide shell uses it for its Activity/Search navigation rows.
@@ -188,9 +181,6 @@ class ChannelsPage extends HookConsumerWidget {
   /// Reports Settings route progress so its foreground and Home's background
   /// render from the same timeline.
   final ValueChanged<double> onSettingsTransitionProgress;
-
-  /// Notifies this page when its already-selected tab is tapped again.
-  final ValueListenable<int>? tabReselection;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -213,7 +203,6 @@ class ChannelsPage extends HookConsumerWidget {
       bottomHeight: topSectionBottomHeight,
     );
     final channelsScrollController = useScrollController();
-    final reducedMotion = MediaQuery.disableAnimationsOf(context);
     final headerFrostProgress = useState(0.0);
     useEffect(() {
       void updateHeaderTreatment() {
@@ -231,31 +220,6 @@ class ChannelsPage extends HookConsumerWidget {
       return () =>
           channelsScrollController.removeListener(updateHeaderTreatment);
     }, [channelsScrollController]);
-    useEffect(() {
-      final tabReselection = this.tabReselection;
-      if (tabReselection == null) return null;
-
-      void scrollToTop() {
-        if (!channelsScrollController.hasClients) return;
-        final position = channelsScrollController.position;
-        if (position.pixels <= position.minScrollExtent + 0.5) return;
-        if (reducedMotion) {
-          channelsScrollController.jumpTo(position.minScrollExtent);
-          return;
-        }
-        unawaited(
-          channelsScrollController.animateTo(
-            position.minScrollExtent,
-            duration: const Duration(milliseconds: 260),
-            curve: Curves.easeOutCubic,
-          ),
-        );
-      }
-
-      tabReselection.addListener(scrollToTop);
-      return () => tabReselection.removeListener(scrollToTop);
-    }, [tabReselection, channelsScrollController, reducedMotion]);
-
     // Cache the last successfully loaded channels so the UI never flashes
     // back to a loading state when the provider rebuilds (e.g. reconnect).
     // Clear the cache on community switch so we show a full loader instead of
@@ -367,28 +331,6 @@ class ChannelsPage extends HookConsumerWidget {
           style: headerTitleStyle,
           onTap: openCommunitySwitcher,
         ),
-        actions: [
-          if (showProfileAvatar)
-            SizedBox(
-              width: Grid.xl,
-              height: Grid.xl,
-              child: Center(
-                child: ProfileAvatar(
-                  size: _kTopSectionProfileAvatarSize,
-                  showPresence: false,
-                  onTap: () {
-                    unawaited(HapticFeedback.lightImpact());
-                    Navigator.of(context).push(
-                      settingsPageRoute(
-                        builder: settingsPageBuilder,
-                        onTransitionProgress: onSettingsTransitionProgress,
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ),
-        ],
         bottomHeight: topSectionBottomHeight,
         bottom: pinnedHeader == null
             ? const SizedBox.expand()

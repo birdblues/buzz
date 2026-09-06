@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
@@ -65,10 +64,7 @@ EdgeInsets _activityScrollPadding(
 /// navigation. Row taps deep-link to the represented message (oldest unread
 /// for grouped conversations) rather than just opening the channel.
 class ActivityPage extends HookConsumerWidget {
-  const ActivityPage({this.tabReselection, super.key});
-
-  /// Notifies this page when its already-selected tab is tapped again.
-  final ValueListenable<int>? tabReselection;
+  const ActivityPage({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -77,31 +73,6 @@ class ActivityPage extends HookConsumerWidget {
     final filter = useState(InboxFilter.all);
     final unreadOnly = useState(false);
     final scrollController = useScrollController();
-    final reducedMotion = MediaQuery.disableAnimationsOf(context);
-    useEffect(() {
-      final tabReselection = this.tabReselection;
-      if (tabReselection == null) return null;
-
-      void scrollToTop() {
-        if (!scrollController.hasClients) return;
-        final position = scrollController.position;
-        if (position.pixels <= position.minScrollExtent + 0.5) return;
-        if (reducedMotion) {
-          scrollController.jumpTo(position.minScrollExtent);
-          return;
-        }
-        unawaited(
-          scrollController.animateTo(
-            position.minScrollExtent,
-            duration: const Duration(milliseconds: 260),
-            curve: Curves.easeOutCubic,
-          ),
-        );
-      }
-
-      tabReselection.addListener(scrollToTop);
-      return () => tabReselection.removeListener(scrollToTop);
-    }, [tabReselection, scrollController, reducedMotion]);
     final headerTitleStyle = context.textTheme.titleMedium?.copyWith(
       fontSize: 22,
       fontWeight: FontWeight.w600,
@@ -408,8 +379,9 @@ class ActivityPage extends HookConsumerWidget {
 
     return FrostedScaffold(
       backgroundColor: context.colors.surface,
+      // Pushed from the phone's navigation rows the bar implies Back; as a
+      // wide-shell pane root nothing can pop, so none is shown.
       appBar: FrostedAppBar(
-        automaticallyImplyLeading: false,
         horizontalInset: Grid.gutter,
         showBottomDivider: true,
         bottomDividerOpacity: 0.07,

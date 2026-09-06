@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:buzz/features/activity/activity_page.dart';
 import 'package:buzz/features/activity/activity_provider.dart';
 import 'package:buzz/features/activity/compose_drafts_provider.dart';
@@ -118,7 +117,7 @@ void main() {
     List<Channel>? channels,
     TextScaler? textScaler,
     EdgeInsets mediaPadding = EdgeInsets.zero,
-    ValueListenable<int>? tabReselection,
+    bool pushed = false,
     List<ComposeDraft> drafts = const [],
     List<Reminder> reminders = const [],
     Set<String> knownAgentPubkeys = const {},
@@ -154,7 +153,22 @@ void main() {
           ).copyWith(textScaler: textScaler, padding: mediaPadding),
           child: child!,
         ),
-        home: ActivityPage(tabReselection: tabReselection),
+        home: pushed
+            ? Builder(
+                builder: (context) {
+                  // Open the page the way the phone's navigation row does.
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (Navigator.of(context).canPop()) return;
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const ActivityPage(),
+                      ),
+                    );
+                  });
+                  return const Scaffold();
+                },
+              )
+            : const ActivityPage(),
       ),
     );
   }
@@ -186,22 +200,31 @@ void main() {
     expect(find.text('No activity yet'), findsOneWidget);
   });
 
-  testWidgets('does not imply a back button for the top-level Activity tab', (
-    tester,
-  ) async {
+  testWidgets('implies Back only when pushed', (tester) async {
+    // As a wide-shell pane root nothing can pop, so no Back is shown.
     await tester.pumpWidget(await buildTestable());
     await tester.pumpAndSettle();
 
     final appBar = tester.widget<FrostedAppBar>(
       find.byType(FrostedAppBar).last,
     );
-    expect(appBar.automaticallyImplyLeading, isFalse);
+    expect(appBar.automaticallyImplyLeading, isTrue);
     expect(appBar.gradient, isNull);
     expect(appBar.frosted, isTrue);
     expect(appBar.showBottomDivider, isTrue);
     expect(appBar.bottomHeight, Grid.xxs);
     expect(appBar.centerTitle, isFalse);
     expect(find.byTooltip('Back'), findsNothing);
+
+    // Pushed from the phone's navigation row, Back returns to the list.
+    await tester.pumpWidget(await buildTestable(pushed: true));
+    await tester.pumpAndSettle();
+    expect(find.byType(ActivityPage), findsOneWidget);
+    expect(find.byTooltip('Back'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Back'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ActivityPage), findsNothing);
   });
 
   testWidgets('sizes the Activity app bar for its custom title style', (
@@ -251,41 +274,6 @@ void main() {
       ),
     );
     expect(padding.padding, const EdgeInsets.fromLTRB(0, Grid.xxs, 0, 96));
-  });
-
-  testWidgets('scrolls Activity to the top when its tab is selected again', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(320, 180);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
-    final tabReselection = ValueNotifier(0);
-    addTearDown(tabReselection.dispose);
-    await tester.pumpWidget(
-      await buildTestable(tabReselection: tabReselection),
-    );
-    await tester.pumpAndSettle();
-
-    final scrollable = tester.state<ScrollableState>(
-      find
-          .descendant(
-            of: find.byType(CustomScrollView),
-            matching: find.byType(Scrollable),
-          )
-          .first,
-    );
-    expect(scrollable.position.maxScrollExtent, greaterThan(0));
-    scrollable.position.jumpTo(scrollable.position.maxScrollExtent);
-    tabReselection.value++;
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 130));
-
-    expect(
-      scrollable.position.pixels,
-      lessThan(scrollable.position.maxScrollExtent),
-    );
-    await tester.pumpAndSettle();
-    expect(scrollable.position.pixels, scrollable.position.minScrollExtent);
   });
 
   testWidgets('shows error view with retry button', (tester) async {

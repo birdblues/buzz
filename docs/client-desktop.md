@@ -135,7 +135,8 @@ sandbox WebView only ever loads `about:blank` from a string.
 
 1. Launch, pair with the host by pasting the pairing code (no camera needed).
 2. Quit and relaunch: still signed in (keychain works).
-3. Resize: the window stops at 1000×700 and never shows the phone tab bar.
+3. Resize: the window stops at 1000×700 and never falls back to the phone
+   layout (the stacked single column).
 4. Composer: Enter sends, Shift+Enter inserts a newline, Enter during Korean
    composition commits the syllable without sending, Escape leaves the
    field, a second Escape closes the thread pane.

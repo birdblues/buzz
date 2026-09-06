@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -25,7 +24,6 @@ import 'package:buzz/shared/relay/relay.dart';
 import 'package:buzz/shared/theme/theme.dart';
 import 'package:buzz/shared/widgets/avatar_image.dart';
 import 'package:buzz/shared/widgets/frosted_app_bar.dart';
-import 'package:buzz/shared/widgets/masked_avatar_badge.dart';
 import 'package:buzz/shared/widgets/skeleton.dart';
 
 void main() {
@@ -34,14 +32,12 @@ void main() {
     bool previewDirectory = false,
     double keyboardInset = 0,
     bool disableAnimations = false,
-    double bottomPadding = 0,
     Map<String, String?> communityIcons = const {},
     Map<String, String?> communityNames = const {},
     ValueChanged<String>? onCommunityIconLoad,
     TextScaler textScaler = TextScaler.noScaling,
     Gradient? topSectionGradient,
     ValueChanged<double>? onSettingsTransitionProgress,
-    ValueListenable<int>? tabReselection,
     List<NavigatorObserver> navigatorObservers = const [],
   }) {
     return ProviderScope(
@@ -70,15 +66,28 @@ void main() {
           data: MediaQuery.of(context).copyWith(
             disableAnimations: disableAnimations,
             textScaler: textScaler,
-            padding: EdgeInsets.only(bottom: bottomPadding),
+            padding: EdgeInsets.zero,
             viewInsets: EdgeInsets.only(bottom: keyboardInset),
           ),
           child: child!,
         ),
-        home: ChannelsPage(
-          settingsPageBuilder: _buildSettingsPage,
-          onSettingsTransitionProgress: onSettingsTransitionProgress ?? (_) {},
-          tabReselection: tabReselection,
+        // The phone home stacks the list over the profile card; the header
+        // no longer carries a Settings avatar.
+        home: Column(
+          children: [
+            Expanded(
+              child: ChannelsPage(
+                settingsPageBuilder: _buildSettingsPage,
+                onSettingsTransitionProgress:
+                    onSettingsTransitionProgress ?? (_) {},
+              ),
+            ),
+            SidebarProfileCard(
+              settingsPageBuilder: _buildSettingsPage,
+              onSettingsTransitionProgress:
+                  onSettingsTransitionProgress ?? (_) {},
+            ),
+          ],
         ),
       ),
     );
@@ -278,29 +287,6 @@ void main() {
     await interruptingDrag.up();
   });
 
-  testWidgets('keeps the last channel above the floating tab bar', (
-    tester,
-  ) async {
-    const footerClearance = 102.0;
-    await tester.pumpWidget(
-      buildTestable(
-        bottomPadding: footerClearance,
-        overrides: [
-          channelsProvider.overrideWith(() => _FakeNotifier(testChannels)),
-        ],
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    final padding = tester.widget<SliverPadding>(
-      find.descendant(
-        of: find.byType(CustomScrollView),
-        matching: find.byType(SliverPadding),
-      ),
-    );
-    expect((padding.padding as EdgeInsets).bottom, footerClearance);
-  });
-
   testWidgets('balances an expanded section around its following divider', (
     tester,
   ) async {
@@ -404,45 +390,6 @@ void main() {
     appBar = tester.widget<FrostedAppBar>(find.byType(FrostedAppBar).last);
     expect(appBar.frostedSurfaceOpacity, 0);
     expect(appBar.frostedBlurSigma, 23.12);
-  });
-
-  testWidgets('scrolls Home to the top when its tab is selected again', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(320, 160);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
-    final tabReselection = ValueNotifier(0);
-    addTearDown(tabReselection.dispose);
-    await tester.pumpWidget(
-      buildTestable(
-        tabReselection: tabReselection,
-        overrides: [
-          channelsProvider.overrideWith(() => _FakeNotifier(testChannels)),
-        ],
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    final scrollable = tester.state<ScrollableState>(
-      find
-          .descendant(
-            of: find.byType(CustomScrollView),
-            matching: find.byType(Scrollable),
-          )
-          .first,
-    );
-    scrollable.position.jumpTo(scrollable.position.maxScrollExtent);
-    tabReselection.value++;
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 130));
-
-    expect(
-      scrollable.position.pixels,
-      lessThan(scrollable.position.maxScrollExtent),
-    );
-    await tester.pumpAndSettle();
-    expect(scrollable.position.pixels, scrollable.position.minScrollExtent);
   });
 
   testWidgets('truncates long custom section names beside the menu', (
@@ -601,9 +548,8 @@ void main() {
     expect(skeletonSectionLabelX, sectionLabelX);
   });
 
-  testWidgets('centers the smaller profile avatar beside the community', (
-    tester,
-  ) async {
+  testWidgets('the header carries the community control and no profile '
+      'avatar', (tester) async {
     await tester.pumpWidget(
       buildTestable(
         overrides: [
@@ -614,25 +560,21 @@ void main() {
     await tester.pumpAndSettle();
 
     final appBar = find.byType(FrostedAppBar).last;
-    final communityAvatar = find.descendant(
-      of: appBar,
-      matching: find.byType(AvatarImage),
-    );
-    final profileAvatar = find.descendant(
-      of: appBar,
-      matching: find.byType(MaskedAvatarBadge),
-    );
-
-    expect(tester.getSize(communityAvatar), const Size.square(40));
-    expect(tester.getSize(profileAvatar), const Size.square(36));
     expect(
-      tester.widget<MaskedAvatarBadge>(profileAvatar).badge,
-      isNull,
-      reason: 'The current user does not need an online dot on Home.',
+      tester.getSize(
+        find.descendant(of: appBar, matching: find.byType(AvatarImage)),
+      ),
+      const Size.square(40),
     );
-    final communityRect = tester.getRect(communityAvatar);
-    final profileRect = tester.getRect(profileAvatar);
-    expect(profileRect.center.dy, communityRect.center.dy);
+    expect(
+      find.descendant(of: appBar, matching: find.byType(ProfileAvatar)),
+      findsNothing,
+    );
+    expect(
+      find.byType(ProfileAvatar),
+      findsOneWidget,
+      reason: 'only the footer card opens Settings',
+    );
   });
 
   testWidgets('reveals channel content from same-slot reconnect skeletons', (

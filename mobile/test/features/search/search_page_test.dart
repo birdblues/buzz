@@ -19,49 +19,31 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../helpers/widget_helpers.dart';
 
 void main() {
-  testWidgets('reselecting Search uses the field activation path', (
-    tester,
-  ) async {
-    final tabReselection = ValueNotifier(0);
-    addTearDown(tabReselection.dispose);
-    await tester.pumpWidget(
-      WidgetHelpers.testable(
-        overrides: [
-          searchProvider.overrideWith(
-            () => _FakeSearchNotifier(const SearchState.initial()),
-          ),
-          recentSearchesProvider.overrideWith(
-            () => _FakeRecentSearchesNotifier(const []),
-          ),
-          profileProvider.overrideWith(() => _FakeProfileNotifier()),
-        ],
-        child: SearchPage(tabReselection: tabReselection),
-      ),
+  testWidgets('focuses the field when opened with autofocus', (tester) async {
+    Widget page({required bool autofocus}) => WidgetHelpers.testable(
+      overrides: [
+        searchProvider.overrideWith(
+          () => _FakeSearchNotifier(const SearchState.initial()),
+        ),
+        recentSearchesProvider.overrideWith(
+          () => _FakeRecentSearchesNotifier(const []),
+        ),
+        profileProvider.overrideWith(() => _FakeProfileNotifier()),
+      ],
+      child: SearchPage(autofocus: autofocus),
     );
-    await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('search-cancel')), findsNothing);
-    tabReselection.value++;
+    // The phone pushes Search to type into: the field is active at once,
+    // and the focus-loss notification of the opening gesture must not
+    // close it again.
+    await tester.pumpWidget(page(autofocus: true));
     await tester.pump();
     await tester.pump();
 
     expect(find.byKey(const Key('search-cancel')), findsOneWidget);
-    expect(
-      tester.widget<TextField>(find.byType(TextField)).focusNode?.hasFocus,
-      isTrue,
-    );
-
     final focusNode = tester
         .widget<TextField>(find.byType(TextField))
         .focusNode!;
-    // Reproduce the real tab-tap ordering where the destination callback can
-    // run immediately before the same pointer gesture dismisses the field.
-    tabReselection.value++;
-    focusNode.unfocus();
-    await tester.pump();
-    await tester.pump();
-
-    expect(find.byKey(const Key('search-cancel')), findsOneWidget);
     expect(focusNode.hasFocus, isTrue);
     expect(
       tester
@@ -70,8 +52,13 @@ void main() {
           )
           .opacity,
       0,
-      reason: 'The tab gesture must not paint a close-and-reopen flicker.',
     );
+
+    // The wide shell shows Search idle in its pane.
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpWidget(page(autofocus: false));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('search-cancel')), findsNothing);
   });
 
   testWidgets('uses the shared frosted navigation surface', (tester) async {

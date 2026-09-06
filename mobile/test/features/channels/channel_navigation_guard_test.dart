@@ -13,9 +13,13 @@ void main() {
       // The shell mounts pages as pane roots rather than pushing them.
       'lib/features/home/wide_home_shell/main_pane.dart',
       'lib/features/home/wide_home_shell/aux_pane.dart',
+      // The phone home exists only in the compact layout, so it may push
+      // Activity and Search itself.
+      'lib/features/home/home_page.dart',
     };
     final pattern = RegExp(
-      r'=>\s*(ChannelDetailPage|ThreadDetailPage|ForumThreadPage)\(',
+      r'=>\s*(ChannelDetailPage|ThreadDetailPage|ForumThreadPage'
+      r'|ActivityPage|SearchPage)\(',
     );
     final offenders = <String>[];
     for (final entity in Directory('lib').listSync(recursive: true)) {

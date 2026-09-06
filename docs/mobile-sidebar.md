@@ -8,8 +8,8 @@ button); this fork replaces it so the three surfaces look and work alike.
 
 ```
  슈  Community name        header: tap opens the community switcher
- ▤  Activity   ●          navigation rows (wide shell today; phone next)
- 🔍 Search
+ ▤  Activity   ●          navigation rows: the wide shell selects a pane,
+ 🔍 Search                 the phone pushes the page (with Back)
  # Channels   +  ⋮  ⌄     + creates a channel
    # general
    # design            [Join]   an open channel you have not joined
@@ -17,6 +17,24 @@ button); this fork replaces it so the three surfaces look and work alike.
  💬 DMs       +  ⋮  ⌄     + starts a direct message
  C  Display name           footer card: tap opens Settings
 ```
+
+## Navigation rows and the phone
+
+`HomeNavRows` (`lib/features/home/home_nav_rows.dart`) sits pinned under the
+community header on every surface (`home-nav-activity`, `home-nav-search`,
+the unread dot `home-nav-activity-unread-dot`). The wide shell selects the
+Activity or Search surface of its main pane and highlights the selected row;
+the phone pushes `ActivityPage` or `SearchPage` as a full-screen route with
+a Back button, and Search opens with its field focused (`autofocus`). A
+pushed page starts fresh each time: there is no retained tab state and no
+"tap the tab again to scroll to the top".
+
+The phone's `HomePage` is therefore the wide shell's sidebar at full width:
+the channel list, the rows, and the profile card as the footer, with the
+bottom safe area under the card. Upstream's floating tab bar (Home /
+Activity / Search), its content transitions, its clearance inset and its
+footer fade are gone; only the composer still paints that fade behind
+itself.
 
 ## Section headers
 
@@ -62,5 +80,6 @@ sidebar; upstream mobile listed neither joined nor open forums there.
 
 `SidebarProfileCard` (`channels_page/profile_card.dart`): the avatar with
 its presence dot and the display name; tapping it opens Settings. The
-community is named in the header above, so the card does not repeat it. The
-wide shell hosts it today; the phone gets it with the tab bar's removal.
+community is named in the header above, so the card does not repeat it, and
+the channel list header carries no Settings avatar on any surface: the card
+is the one way into Settings.
