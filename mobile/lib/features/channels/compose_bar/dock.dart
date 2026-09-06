@@ -38,19 +38,20 @@ class _ComposerDockFrame extends HookWidget {
       }
       return null;
     }, [forceFullWidth, reducedMotion]);
-    // The compact pill rides down into the bottom view inset, but never so
-    // far that less than a gutter of it clears the edge: a desktop window
-    // has no inset to ride into and would otherwise cut off the pill's
-    // rounded bottom. The expanded position is untouched.
-    final viewPaddingBottom = MediaQuery.viewPaddingOf(context).bottom;
+    // The composer sits a step above the bottom view inset, and the compact
+    // pill rides down into that step. Both are floored at a gutter: a
+    // desktop window has no inset, so the expanded composer would hug the
+    // window edge and the compact pill would overhang it. With a home
+    // indicator (iPhone 34, iPad 20) neither floor applies.
+    final expandedBottomInset = math.max(
+      Grid.twelve,
+      MediaQuery.viewPaddingOf(context).bottom + Grid.xxs,
+    );
     final compactVerticalOffset = math.min(
       _kCompactVerticalOffset,
-      viewPaddingBottom + Grid.xxs - Grid.twelve,
+      expandedBottomInset - Grid.twelve,
     );
-    final visibleBottomGutter = math.max(
-      Grid.twelve,
-      viewPaddingBottom + Grid.xxs - compactVerticalOffset,
-    );
+    final visibleBottomGutter = expandedBottomInset - compactVerticalOffset;
     final recordingGutterDelta = visibleBottomGutter - Grid.twelve;
     final backdropHeight = mobileTabFooterBackdropHeight(context);
     return Stack(
@@ -70,7 +71,7 @@ class _ComposerDockFrame extends HookWidget {
           padding: EdgeInsets.only(
             left: Grid.twelve,
             right: Grid.twelve,
-            bottom: MediaQuery.viewPaddingOf(context).bottom + Grid.xxs,
+            bottom: expandedBottomInset,
           ),
           child: Align(
             alignment: Alignment.bottomCenter,

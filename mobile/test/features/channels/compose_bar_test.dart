@@ -789,6 +789,18 @@ void main() {
             greaterThanOrEqualTo(Grid.twelve),
             reason: 'bottom view inset $inset',
           );
+
+          // The expanded composer keeps the same floor, so opening it never
+          // drops it closer to the edge than the pill was.
+          await _expandComposer(tester);
+          final expandedBottom = tester
+              .getRect(find.byKey(const ValueKey('composer-surface')))
+              .bottom;
+          expect(
+            barBottom - expandedBottom,
+            greaterThanOrEqualTo(Grid.twelve),
+            reason: 'expanded, bottom view inset $inset',
+          );
         }
       },
     );
