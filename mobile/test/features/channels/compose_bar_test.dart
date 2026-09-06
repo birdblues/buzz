@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
+import 'package:hooks_riverpod/misc.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart' as http_testing;
 import 'package:image_picker/image_picker.dart';
@@ -16,6 +17,7 @@ import 'package:nostr/nostr.dart' as nostr;
 import 'package:buzz/features/channels/channel.dart';
 import 'package:buzz/features/channels/channel_management_provider.dart';
 import 'package:buzz/features/channels/compose_bar.dart';
+import 'package:buzz/shared/identity_archive/identity_archive.dart';
 import 'package:buzz/shared/link_preview/link_preview_fetcher.dart';
 import 'package:buzz/shared/link_preview/link_preview_metadata.dart';
 import 'package:buzz/features/channels/channels_provider.dart';
@@ -195,9 +197,11 @@ Widget _buildComposeBar({
   VoiceNoteRecorder Function()? voiceNoteRecorderFactory,
   VoiceNotePlayerController Function()? voiceNotePlayerFactory,
   LinkPreviewFetcher? linkPreviewFetcher,
+  List<Override> extraOverrides = const [],
 }) {
   return ProviderScope(
     overrides: [
+      ...extraOverrides,
       customEmojiListProvider.overrideWithValue(customEmoji),
       mediaUploadServiceProvider.overrideWithValue(uploadService),
       // Never let a test reach the network for a preview.
@@ -1733,6 +1737,74 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('Alice'), findsOneWidget);
+    });
+
+    testWidgets('hides a relay-archived agent from mention suggestions', (
+      tester,
+    ) async {
+      final signer = nostr.Keys.generate();
+      final archivedAgent = 'f' * 64;
+      await tester.pumpWidget(
+        _buildComposeBar(
+          uploadService: _testUploadService(signer.nsec),
+          currentPubkey: signer.public,
+          relayAgents: [_testAgent(archivedAgent)],
+          channels: [_makeCurrentChannel(), _makeSharedMemberChannel()],
+          extraOverrides: [
+            archivedIdentityFilterProvider.overrideWith(
+              (ref) async => ArchivedIdentityFilter(
+                archived: {archivedAgent},
+                selfPubkey: signer.public,
+              ),
+            ),
+          ],
+          onSend:
+              (
+                content,
+                mentionPubkeys, {
+                mediaTags = const <List<String>>[],
+              }) async {},
+        ),
+      );
+
+      await _expandComposer(tester);
+      await tester.enterText(find.byType(TextField), '@');
+      await tester.pumpAndSettle();
+
+      expect(find.text('Helper Bot'), findsNothing);
+    });
+
+    testWidgets('keeps suggesting everyone while the archive snapshot loads', (
+      tester,
+    ) async {
+      final signer = nostr.Keys.generate();
+      await tester.pumpWidget(
+        _buildComposeBar(
+          uploadService: _testUploadService(signer.nsec),
+          currentPubkey: signer.public,
+          relayAgents: [_testAgent('f' * 64)],
+          channels: [_makeCurrentChannel(), _makeSharedMemberChannel()],
+          extraOverrides: [
+            // A snapshot that never lands: the fail-open filter must not
+            // hide anyone in the meantime.
+            archivedIdentityFilterProvider.overrideWith(
+              (ref) => Completer<ArchivedIdentityFilter>().future,
+            ),
+          ],
+          onSend:
+              (
+                content,
+                mentionPubkeys, {
+                mediaTags = const <List<String>>[],
+              }) async {},
+        ),
+      );
+
+      await _expandComposer(tester);
+      await tester.enterText(find.byType(TextField), '@');
+      await tester.pumpAndSettle();
+
+      expect(find.text('Helper Bot'), findsOneWidget);
     });
 
     testWidgets('dismisses mention suggestions in the selection frame', (

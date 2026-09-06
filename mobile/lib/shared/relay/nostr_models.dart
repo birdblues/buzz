@@ -18,6 +18,9 @@ abstract final class EventKind {
 
   /// Kind:13534 event containing the current relay-community membership.
   static const relayMembership = 13534;
+
+  /// Kind:13535 relay-signed list of archived identities (NIP-IA).
+  static const identityArchivedList = 13535;
   static const streamMessage = 9;
   static const nip29DeleteEvent = 9005;
   static const presenceUpdate = 20001;
@@ -243,6 +246,20 @@ class NostrFilter {
     tags: tags,
     extensions: extensions,
   );
+
+  /// Return a copy with an updated page size and/or bridge extensions.
+  NostrFilter copyWith({int? limit, Map<String, Object?>? extensions}) =>
+      NostrFilter(
+        kinds: kinds,
+        authors: authors,
+        ids: ids,
+        limit: limit ?? this.limit,
+        since: since,
+        until: until,
+        search: search,
+        tags: tags,
+        extensions: extensions ?? this.extensions,
+      );
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{'kinds': kinds, 'limit': limit};

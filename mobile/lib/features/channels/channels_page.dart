@@ -13,6 +13,7 @@ import '../../shared/auth/auth.dart';
 import '../../shared/layout/layout_mode.dart';
 import '../../shared/community/community_icon_provider.dart';
 import '../../shared/community/community_relay_name_provider.dart';
+import '../../shared/identity_archive/identity_archive.dart';
 import '../../shared/relay/relay.dart';
 import '../../shared/theme/theme.dart';
 import '../../shared/utils/string_utils.dart';

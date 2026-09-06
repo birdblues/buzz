@@ -8,6 +8,7 @@ import '../../shared/auth/auth.dart';
 import '../../shared/custom_emoji/custom_emoji.dart';
 import '../../shared/custom_emoji/custom_emoji_provider.dart';
 import '../../shared/crypto/nip_oa.dart';
+import '../../shared/identity_archive/identity_archive.dart';
 import '../../shared/mentions/agent_identity_provider.dart';
 import '../../shared/relay/relay.dart';
 import '../profile/profile_provider.dart';
@@ -331,8 +332,12 @@ List<DirectoryUser> directoryUsersFromProfileEvents(List<NostrEvent> events) {
 /// People and agents discoverable on the active relay.
 ///
 /// This mirrors desktop's empty-query people directory by listing kind:0
-/// profiles through the HTTP bridge. The relay membership snapshot remains a
-/// fallback for older relays that do not support directory listing.
+/// profiles through the HTTP bridge, walking every page so the sheet never
+/// shows an alphabetized slice of "the 50 most recently updated profiles"
+/// as if it were everyone. The relay membership snapshot remains a fallback
+/// for older relays that do not support directory listing. Identities the
+/// relay has archived (NIP-IA) are left out — see
+/// [archivedIdentityFilterProvider].
 ///
 /// autoDispose so the cached listing is dropped when the New message sheet
 /// closes, and the [relayConfigProvider] watch invalidates it at the
@@ -349,12 +354,17 @@ final relayDirectoryUsersProvider =
       ref.watch(relayConfigProvider);
       final session = ref.watch(relaySessionProvider.notifier);
       final currentPubkey = ref.watch(currentPubkeyProvider)?.toLowerCase();
-      final directoryEvents = await session.queryRelay([
-        const NostrFilter(kinds: [0], limit: 50, extensions: {'page': 1}),
-      ]);
+      final archiveFilter = await ref.watch(
+        archivedIdentityFilterProvider.future,
+      );
+      final directoryEvents = await queryRelayPages(
+        session,
+        const NostrFilter(kinds: [0], limit: relayDirectoryPageSize),
+      );
       var users = directoryUsersFromProfileEvents(directoryEvents);
       if (users.isNotEmpty) {
-        return users
+        return archiveFilter
+            .without(users, (user) => user.pubkey)
             .where((user) => user.pubkey.toLowerCase() != currentPubkey)
             .toList();
       }
@@ -362,9 +372,11 @@ final relayDirectoryUsersProvider =
       final membershipEvents = await session.fetchHistory(
         NostrFilters.relayMembers(),
       );
-      final memberPubkeys = relayMemberPubkeysFromEvents(
-        membershipEvents,
-      ).where((pubkey) => pubkey != currentPubkey).toList();
+      final memberPubkeys = relayMemberPubkeysFromEvents(membershipEvents)
+          .where(
+            (pubkey) => pubkey != currentPubkey && !archiveFilter.hides(pubkey),
+          )
+          .toList();
       if (memberPubkeys.isEmpty) {
         return const [];
       }
@@ -436,12 +448,20 @@ final relayDirectorySearchProvider = FutureProvider.autoDispose
       ref.watch(relayConfigProvider);
       final session = ref.watch(relaySessionProvider.notifier);
       final currentPubkey = ref.watch(currentPubkeyProvider)?.toLowerCase();
-      final events = await session.queryRelay([
-        NostrFilters.searchUsers(trimmed, limit: 50),
-      ]);
-      return directoryUsersFromProfileEvents(
-        events,
-      ).where((user) => user.pubkey.toLowerCase() != currentPubkey).toList();
+      final archiveFilter = await ref.watch(
+        archivedIdentityFilterProvider.future,
+      );
+      final events = await queryRelayPages(
+        session,
+        NostrFilters.searchUsers(trimmed, limit: relayDirectoryPageSize),
+      );
+      return archiveFilter
+          .without(
+            directoryUsersFromProfileEvents(events),
+            (user) => user.pubkey,
+          )
+          .where((user) => user.pubkey.toLowerCase() != currentPubkey)
+          .toList();
     });
 
 /// Build [ChannelDetails] from a kind:39000 metadata event.

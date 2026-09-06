@@ -177,6 +177,8 @@ class ChannelDetailsPage extends HookConsumerWidget {
 
     Future<void> openAddMembers() async {
       final mediaQuery = MediaQuery.of(context);
+      // Fresh NIP-IA snapshot for the picker; see `_newDirectMessageFromHeader`.
+      ref.invalidate(archivedIdentitiesProvider);
       await showBuzzModalBottomSheet<bool>(
         context: context,
         title: 'Add members',

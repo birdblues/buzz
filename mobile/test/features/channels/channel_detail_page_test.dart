@@ -10,6 +10,7 @@ import 'package:flutter/rendering.dart'
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
+import 'package:hooks_riverpod/misc.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart' as http_testing;
 import 'package:lucide_icons_flutter/lucide_icons.dart';
@@ -51,6 +52,7 @@ import 'package:buzz/shared/community/community_provider.dart';
 import 'package:buzz/shared/emoji/emoji_burst.dart';
 import 'package:buzz/shared/mentions/agent_identity_provider.dart';
 import 'package:buzz/shared/huddle/huddle.dart';
+import 'package:buzz/shared/identity_archive/identity_archive.dart';
 import 'package:buzz/shared/relay/relay.dart';
 import 'package:buzz/shared/theme/theme.dart';
 import 'package:buzz/shared/widgets/app_list_card.dart';
@@ -253,6 +255,7 @@ Widget _buildTestable({
   String? huddleCurrentPubkey,
   http.Client? mediaClient,
   Widget? home,
+  List<Override> extraOverrides = const [],
 }) {
   final resolvedChannel = channel ?? _testChannel;
   final navigatorKey = GlobalKey<NavigatorState>();
@@ -380,6 +383,7 @@ Widget _buildTestable({
       appLifecycleProvider.overrideWith(_TestAppLifecycleNotifier.new),
       // Compose bar drafts persist through SharedPreferences.
       savedPrefsProvider.overrideWithValue(_testPrefs),
+      ...extraOverrides,
     ],
     child: MaterialApp(
       navigatorKey: navigatorKey,
@@ -2101,6 +2105,70 @@ void main() {
         findsNothing,
       );
       expect(find.text('Members unavailable'), findsOneWidget);
+    });
+
+    testWidgets('members sheet folds relay-archived members', (tester) async {
+      await tester.pumpWidget(
+        _buildTestable(
+          messages: const [],
+          members: [
+            ChannelMember(
+              pubkey: 'self',
+              role: 'owner',
+              joinedAt: DateTime(2025),
+              displayName: 'Self',
+            ),
+            ChannelMember(
+              pubkey: 'alice',
+              role: 'member',
+              joinedAt: DateTime(2025),
+              displayName: 'Alice',
+            ),
+            ChannelMember(
+              pubkey: 'oldbot',
+              role: 'bot',
+              joinedAt: DateTime(2025),
+              displayName: 'Old Bot',
+            ),
+          ],
+          extraOverrides: [
+            archivedIdentityFilterProvider.overrideWith(
+              (ref) async => const ArchivedIdentityFilter(
+                // Self is archived too: it must stay in People (self-exempt).
+                archived: {'oldbot', 'self'},
+                selfPubkey: 'self',
+              ),
+            ),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(const ValueKey('channel-header-settings-trigger')),
+      );
+      await tester.pumpAndSettle();
+      final seeAllRow = find.byKey(
+        const ValueKey('channel-details-members-row'),
+      );
+      await tester.ensureVisible(seeAllRow);
+      await tester.pumpAndSettle();
+      await tester.tap(seeAllRow);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(MembersSheet), findsOneWidget);
+      expect(find.text('People · 2'), findsOneWidget);
+      expect(find.text('Agents · 1'), findsNothing);
+      final archivedLabel = find.byKey(
+        const ValueKey('members-sheet-archived'),
+      );
+      expect(archivedLabel, findsOneWidget);
+      expect(find.text('Archived · 1'), findsOneWidget);
+      expect(
+        tester.getTopLeft(archivedLabel).dy,
+        greaterThan(tester.getTopLeft(find.text('Alice')).dy),
+        reason: 'archived members fold below the active roster',
+      );
     });
 
     testWidgets('small channel keeps member administration reachable', (

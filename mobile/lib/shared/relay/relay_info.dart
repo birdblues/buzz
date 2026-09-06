@@ -39,10 +39,9 @@ String? validateAppContentUrl(String advertised, String relayBaseUrl) {
       : trimmed;
 }
 
-/// Reads `app_content_url` from the relay's NIP-11 document and validates it
-/// against [relayBaseUrl]. Null when the relay does not advertise a door, the
-/// value fails validation, or the document cannot be read.
-Future<String?> fetchAppContentUrl(
+/// Reads the relay's NIP-11 information document. Null for a non-http relay
+/// URL, a non-200 answer, or a body that is not a JSON object.
+Future<Map<String, dynamic>?> fetchRelayInfoDocument(
   String relayBaseUrl, {
   required http.Client client,
   Duration timeout = const Duration(seconds: 5),
@@ -61,25 +60,80 @@ Future<String?> fetchAppContentUrl(
       .timeout(timeout);
   if (response.statusCode != 200) return null;
   final document = jsonDecode(utf8.decode(response.bodyBytes));
-  if (document is! Map<String, dynamic>) return null;
-  final advertised = document['app_content_url'];
+  return document is Map<String, dynamic> ? document : null;
+}
+
+/// The validated `app_content_url` a NIP-11 [document] advertises, or null.
+String? appContentUrlFromRelayInfo(
+  Map<String, dynamic>? document,
+  String relayBaseUrl,
+) {
+  final advertised = document?['app_content_url'];
   if (advertised is! String) return null;
   return validateAppContentUrl(advertised, relayBaseUrl);
+}
+
+/// Reads `app_content_url` from the relay's NIP-11 document and validates it
+/// against [relayBaseUrl]. Null when the relay does not advertise a door, the
+/// value fails validation, or the document cannot be read.
+Future<String?> fetchAppContentUrl(
+  String relayBaseUrl, {
+  required http.Client client,
+  Duration timeout = const Duration(seconds: 5),
+}) async {
+  final document = await fetchRelayInfoDocument(
+    relayBaseUrl,
+    client: client,
+    timeout: timeout,
+  );
+  return appContentUrlFromRelayInfo(document, relayBaseUrl);
+}
+
+final _hexPubkey = RegExp(r'^[0-9a-f]{64}$');
+
+/// The relay's own signing pubkey from the NIP-11 `self` field, lowercase
+/// hex, or null when absent or malformed. Relay-signed state — the NIP-43
+/// membership roster, the NIP-IA archive snapshot — is trusted only from
+/// this key, so a document without a usable `self` yields no such state.
+String? relaySelfFromRelayInfo(Map<String, dynamic>? document) {
+  final advertised = document?['self'];
+  if (advertised is! String) return null;
+  final normalized = advertised.trim().toLowerCase();
+  return _hexPubkey.hasMatch(normalized) ? normalized : null;
+}
+
+/// Reads the relay's NIP-11 `self` pubkey; see [relaySelfFromRelayInfo].
+Future<String?> fetchRelaySelfPubkey(
+  String relayBaseUrl, {
+  required http.Client client,
+  Duration timeout = const Duration(seconds: 5),
+}) async {
+  final document = await fetchRelayInfoDocument(
+    relayBaseUrl,
+    client: client,
+    timeout: timeout,
+  );
+  return relaySelfFromRelayInfo(document);
 }
 
 /// How long to wait before re-asking after a failed NIP-11 lookup.
 const appContentDiscoveryRetryDelay = Duration(seconds: 30);
 
 /// One NIP-11 answer, remembered together with the relay it came from so a
-/// community switch can never reuse another relay's door.
+/// community switch can never reuse another relay's door or signing key.
 @immutable
 class AppContentDiscovery {
   final String relayBaseUrl;
   final String? appContentUrl;
 
+  /// The relay's NIP-11 `self` pubkey (lowercase hex), read from the same
+  /// document; null when the relay does not advertise one.
+  final String? relaySelf;
+
   const AppContentDiscovery({
     required this.relayBaseUrl,
     required this.appContentUrl,
+    this.relaySelf,
   });
 }
 
@@ -98,10 +152,13 @@ final appContentDiscoveryProvider = FutureProvider<AppContentDiscovery>((
     }
   });
   String? appContentUrl;
+  String? relaySelf;
   try {
-    appContentUrl = await fetchAppContentUrl(baseUrl, client: client);
+    final document = await fetchRelayInfoDocument(baseUrl, client: client);
+    appContentUrl = appContentUrlFromRelayInfo(document, baseUrl);
+    relaySelf = relaySelfFromRelayInfo(document);
   } catch (error) {
-    debugPrint('NIP-11 app_content_url lookup failed: $error');
+    debugPrint('NIP-11 lookup failed: $error');
     // A transport failure while the session stays connected would otherwise
     // leave the door unknown until the next reconnect; ask again shortly.
     final retry = Timer(appContentDiscoveryRetryDelay, ref.invalidateSelf);
@@ -110,7 +167,18 @@ final appContentDiscoveryProvider = FutureProvider<AppContentDiscovery>((
   return AppContentDiscovery(
     relayBaseUrl: baseUrl,
     appContentUrl: appContentUrl,
+    relaySelf: relaySelf,
   );
+});
+
+/// The active relay's NIP-11 `self` pubkey, or null while unknown or when
+/// the relay advertises none. Consumers that verify relay-signed state (the
+/// NIP-IA archive snapshot) treat null as "no such state", never as an error.
+final relaySelfPubkeyProvider = FutureProvider<String?>((ref) async {
+  final baseUrl = ref.watch(relayConfigProvider).baseUrl;
+  final discovery = await ref.watch(appContentDiscoveryProvider.future);
+  if (discovery.relayBaseUrl != baseUrl) return null;
+  return discovery.relaySelf;
 });
 
 /// The relay's app-content origin, or null while unknown or when the relay

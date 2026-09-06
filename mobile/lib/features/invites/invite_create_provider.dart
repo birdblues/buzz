@@ -8,6 +8,7 @@ import 'package:nostr/nostr.dart' as nostr;
 import 'package:share_plus/share_plus.dart';
 
 import '../../shared/community/community_membership_provider.dart';
+import '../../shared/identity_archive/identity_archive.dart';
 import '../../shared/relay/relay.dart';
 
 /// The default lifetime of a newly minted community invite link.
@@ -353,17 +354,25 @@ final communityInviteProfileProvider = FutureProvider.autoDispose
       return CommunityInviteDirectoryUser(pubkey: normalized);
     });
 
-/// Lists inviteable relay identities, excluding the signed-in user.
+/// Lists inviteable relay identities, excluding the signed-in user and the
+/// identities the relay has archived (NIP-IA). Walks every directory page so
+/// a large relay is never silently cut to its first 50 profiles.
 final communityInviteDirectoryProvider =
     FutureProvider.autoDispose<List<CommunityInviteDirectoryUser>>((ref) async {
       ref.watch(relayConfigProvider);
       final currentPubkey = ref.watch(myPubkeyProvider)?.toLowerCase();
-      final events = await ref.watch(relaySessionProvider.notifier).queryRelay([
-        const NostrFilter(kinds: [0], limit: 50, extensions: {'page': 1}),
-      ]);
-      final directoryUsers = _directoryUsersFromEvents(
-        events,
-      ).where((user) => user.pubkey != currentPubkey).toList();
+      final session = ref.watch(relaySessionProvider.notifier);
+      final archiveFilter = await ref.watch(
+        archivedIdentityFilterProvider.future,
+      );
+      final events = await queryRelayPages(
+        session,
+        const NostrFilter(kinds: [0], limit: relayDirectoryPageSize),
+      );
+      final directoryUsers = archiveFilter
+          .without(_directoryUsersFromEvents(events), (user) => user.pubkey)
+          .where((user) => user.pubkey != currentPubkey)
+          .toList();
       if (directoryUsers.isNotEmpty) return directoryUsers;
 
       // Match the existing mobile person picker: older relays may not support
@@ -371,7 +380,9 @@ final communityInviteDirectoryProvider =
       // hydrate whatever profiles are available.
       final membership = await ref.watch(communityMembershipProvider.future);
       final memberPubkeys = membership.pubkeys
-          .where((pubkey) => pubkey != currentPubkey)
+          .where(
+            (pubkey) => pubkey != currentPubkey && !archiveFilter.hides(pubkey),
+          )
           .toList();
       if (memberPubkeys.isEmpty) return const [];
       final profileEvents = await ref
@@ -402,12 +413,18 @@ final communityInviteDirectorySearchProvider = FutureProvider.autoDispose
       }
       ref.watch(relayConfigProvider);
       final currentPubkey = ref.watch(myPubkeyProvider)?.toLowerCase();
-      final events = await ref.watch(relaySessionProvider.notifier).queryRelay([
-        NostrFilters.searchUsers(trimmed, limit: 50),
-      ]);
-      return _directoryUsersFromEvents(
-        events,
-      ).where((user) => user.pubkey != currentPubkey).toList();
+      final session = ref.watch(relaySessionProvider.notifier);
+      final archiveFilter = await ref.watch(
+        archivedIdentityFilterProvider.future,
+      );
+      final events = await queryRelayPages(
+        session,
+        NostrFilters.searchUsers(trimmed, limit: relayDirectoryPageSize),
+      );
+      return archiveFilter
+          .without(_directoryUsersFromEvents(events), (user) => user.pubkey)
+          .where((user) => user.pubkey != currentPubkey)
+          .toList();
     });
 
 /// Shares [inviteUrl] from an optional platform anchor rectangle.

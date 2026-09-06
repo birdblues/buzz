@@ -134,9 +134,142 @@ void main() {
 
     expect(jsonDecode(captured.body), {'ttl_secs': 86400, 'max_uses': 5});
   });
+
+  group('communityInviteDirectoryProvider', () {
+    final relayKeys = nostr.Keys.generate();
+
+    NostrEvent profile(String pubkey, String name) => NostrEvent(
+      id: '$pubkey-profile',
+      pubkey: pubkey,
+      createdAt: 1700000000,
+      kind: 0,
+      tags: const [],
+      content: '{"display_name":"$name"}',
+      sig: 'sig',
+    );
+
+    NostrEvent archiveSnapshot(List<String> archived) {
+      final event = nostr.Event.from(
+        kind: EventKind.identityArchivedList,
+        content: '',
+        secretKey: relayKeys.secret,
+        tags: [
+          ['-'],
+          for (final pubkey in archived) ['p', pubkey],
+        ],
+      );
+      return NostrEvent.fromJson(
+        jsonDecode(event.toJson()) as Map<String, dynamic>,
+      );
+    }
+
+    ProviderContainer buildContainer(_DirectoryRelaySession session) {
+      final container = ProviderContainer(
+        retry: (_, _) => null,
+        overrides: [
+          relayConfigProvider.overrideWith(_TestRelayConfigNotifier.new),
+          relaySessionProvider.overrideWith(() => session),
+          relaySelfPubkeyProvider.overrideWith((ref) async => relayKeys.public),
+          myPubkeyProvider.overrideWithValue('me'),
+        ],
+      );
+      addTearDown(container.dispose);
+      return container;
+    }
+
+    test('walks every directory page', () async {
+      final session = _DirectoryRelaySession(
+        profileEvents: [
+          for (var i = 0; i < 120; i++)
+            profile('pubkey-${i.toString().padLeft(3, '0')}', 'Person $i'),
+        ],
+      );
+      final container = buildContainer(session);
+
+      final users = await container.read(
+        communityInviteDirectoryProvider.future,
+      );
+
+      expect(users, hasLength(120));
+      expect(session.requestedPages, [1, 2, 3]);
+    });
+
+    test('hides relay-archived identities', () async {
+      final bob = 'b' * 64;
+      final session = _DirectoryRelaySession(
+        profileEvents: [profile('alice', 'Alice'), profile(bob, 'Bob')],
+        archiveEvents: [
+          archiveSnapshot([bob]),
+        ],
+      );
+      final container = buildContainer(session);
+
+      final users = await container.read(
+        communityInviteDirectoryProvider.future,
+      );
+      final matches = await container.read(
+        communityInviteDirectorySearchProvider('b').future,
+      );
+
+      expect(users.map((user) => user.label), ['Alice']);
+      expect(matches.map((user) => user.label), ['Alice']);
+    });
+
+    test('lists everyone when the archive snapshot cannot be read', () async {
+      final bob = 'b' * 64;
+      final session = _DirectoryRelaySession(
+        profileEvents: [profile('alice', 'Alice'), profile(bob, 'Bob')],
+        archiveError: StateError('snapshot unavailable'),
+      );
+      final container = buildContainer(session);
+
+      final users = await container.read(
+        communityInviteDirectoryProvider.future,
+      );
+
+      expect(users.map((user) => user.label), ['Alice', 'Bob']);
+    });
+  });
 }
 
 class _UnusedRelaySession extends RelaySessionNotifier {}
+
+/// Serves paged kind:0 listings and the NIP-IA snapshot like the bridge.
+class _DirectoryRelaySession extends RelaySessionNotifier {
+  _DirectoryRelaySession({
+    required this.profileEvents,
+    this.archiveEvents = const [],
+    this.archiveError,
+  });
+
+  final List<NostrEvent> profileEvents;
+  final List<NostrEvent> archiveEvents;
+  final Object? archiveError;
+  final requestedPages = <int>[];
+
+  @override
+  SessionState build() => const SessionState(status: SessionStatus.connected);
+
+  @override
+  Future<List<NostrEvent>> queryRelay(
+    List<NostrFilter> filters, {
+    Duration timeout = const Duration(seconds: 8),
+  }) async {
+    final filter = filters.single;
+    if (filter.kinds.contains(EventKind.identityArchivedList)) {
+      if (archiveError != null) throw archiveError!;
+      return archiveEvents;
+    }
+    final page = (filter.extensions['page'] as int?) ?? 1;
+    requestedPages.add(page);
+    final start = (page - 1) * filter.limit;
+    if (start >= profileEvents.length) return const [];
+    return profileEvents.sublist(
+      start,
+      (start + filter.limit).clamp(0, profileEvents.length),
+    );
+  }
+}
 
 class _TestRelayConfigNotifier extends RelayConfigNotifier {
   @override

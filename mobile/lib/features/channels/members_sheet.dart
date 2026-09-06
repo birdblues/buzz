@@ -3,6 +3,7 @@ import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../../shared/identity_archive/identity_archive.dart';
 import '../../shared/theme/theme.dart';
 import '../../shared/widgets/avatar_image.dart';
 import '../../shared/widgets/buzz_loading_indicator.dart';
@@ -30,8 +31,21 @@ class MembersSheet extends HookConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final membersAsync = ref.watch(channelMembersProvider(channel.id));
     final allMembers = membersAsync.asData?.value ?? const <ChannelMember>[];
-    final people = allMembers.where((member) => !member.isBot).toList();
-    final bots = allMembers.where((member) => member.isBot).toList();
+    // Archived wins over bot: a retired agent key folds into "Archived", not
+    // "Agents". The filter is fail-open while the NIP-IA snapshot loads, so
+    // the list never hides anyone — it only regroups once the relay answers.
+    final archiveFilter =
+        ref.watch(archivedIdentityFilterProvider).value ??
+        ArchivedIdentityFilter.none;
+    final archived = allMembers
+        .where((member) => archiveFilter.hides(member.pubkey))
+        .toList();
+    final activeMembers = archiveFilter.without(
+      allMembers,
+      (member) => member.pubkey,
+    );
+    final people = activeMembers.where((member) => !member.isBot).toList();
+    final bots = activeMembers.where((member) => member.isBot).toList();
     final userCache = ref.watch(userCacheProvider);
     final typingBotPubkeys = ref.watch(workingBotPubkeysProvider(channel.id));
     final statusCache = ref.watch(userStatusCacheProvider);
@@ -130,7 +144,23 @@ class MembersSheet extends HookConsumerWidget {
                         : null,
                   ),
               ],
-              if (people.isEmpty && bots.isEmpty)
+              if (archived.isNotEmpty) ...[
+                const SizedBox(height: Grid.xxs),
+                _SectionLabel(
+                  key: const ValueKey('members-sheet-archived'),
+                  label: 'Archived · ${archived.length}',
+                ),
+                for (final member in archived)
+                  _MemberTile(
+                    member: member,
+                    currentPubkey: currentPubkey,
+                    profile: userCache[member.pubkey.toLowerCase()],
+                    canManage: canManage,
+                    isSelf: false,
+                    channelId: channel.id,
+                  ),
+              ],
+              if (people.isEmpty && bots.isEmpty && archived.isEmpty)
                 Center(
                   child: Text(
                     'No members found.',
@@ -164,7 +194,7 @@ class MembersSheet extends HookConsumerWidget {
 class _SectionLabel extends StatelessWidget {
   final String label;
 
-  const _SectionLabel({required this.label});
+  const _SectionLabel({super.key, required this.label});
 
   @override
   Widget build(BuildContext context) {

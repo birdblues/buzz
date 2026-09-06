@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -25,6 +26,7 @@ import 'package:buzz/shared/theme/theme.dart';
 import 'package:buzz/shared/widgets/avatar_image.dart';
 import 'package:buzz/shared/widgets/frosted_app_bar.dart';
 import 'package:buzz/shared/widgets/skeleton.dart';
+import 'package:nostr/nostr.dart' as nostr;
 
 void main() {
   Widget buildTestable({
@@ -1734,6 +1736,108 @@ void main() {
     );
   });
 
+  group('new message sheet and the relay archive (NIP-IA)', () {
+    final relayKeys = nostr.Keys.generate();
+    final bob = 'b' * 64;
+
+    NostrEvent profile(String pubkey, String name) => NostrEvent(
+      id: '$pubkey-profile',
+      pubkey: pubkey,
+      createdAt: 1700000000,
+      kind: 0,
+      tags: const [],
+      content: '{"display_name":"$name"}',
+      sig: 'sig',
+    );
+
+    NostrEvent archiveSnapshot(List<String> archived) {
+      final event = nostr.Event.from(
+        kind: EventKind.identityArchivedList,
+        content: '',
+        secretKey: relayKeys.secret,
+        tags: [
+          ['-'],
+          for (final pubkey in archived) ['p', pubkey],
+        ],
+      );
+      return NostrEvent.fromJson(
+        jsonDecode(event.toJson()) as Map<String, dynamic>,
+      );
+    }
+
+    Future<void> openNewMessage(
+      WidgetTester tester,
+      _DirectoryRelaySession session,
+    ) async {
+      tester.view.physicalSize = const Size(390, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(
+        buildTestable(
+          overrides: [
+            channelsProvider.overrideWith(() => _FakeNotifier(testChannels)),
+            relaySessionProvider.overrideWith(() => session),
+            relaySelfPubkeyProvider.overrideWith(
+              (ref) async => relayKeys.public,
+            ),
+            myPubkeyProvider.overrideWithValue('me'),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('section-add-DMs')));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('hides people the relay has archived', (tester) async {
+      final session = _DirectoryRelaySession(
+        profileEvents: [profile('alice', 'Alice'), profile(bob, 'Bob')],
+        archiveEvents: [
+          archiveSnapshot([bob]),
+        ],
+      );
+
+      await openNewMessage(tester, session);
+
+      expect(find.byKey(const Key('new-dm-person-alice')), findsOneWidget);
+      expect(find.byKey(Key('new-dm-person-$bob')), findsNothing);
+      expect(
+        session.archiveQueryCount,
+        1,
+        reason: 'opening the picker fetches the snapshot once',
+      );
+    });
+
+    testWidgets('lists everyone while the archive snapshot is unavailable', (
+      tester,
+    ) async {
+      final session = _DirectoryRelaySession(
+        profileEvents: [profile('alice', 'Alice'), profile(bob, 'Bob')],
+        archiveError: StateError('snapshot unavailable'),
+      );
+
+      await openNewMessage(tester, session);
+
+      expect(find.byKey(const Key('new-dm-person-alice')), findsOneWidget);
+      expect(find.byKey(Key('new-dm-person-$bob')), findsOneWidget);
+    });
+
+    testWidgets('lists every directory page', (tester) async {
+      final session = _DirectoryRelaySession(
+        profileEvents: [
+          for (var i = 0; i < 70; i++)
+            profile('pubkey-${i.toString().padLeft(2, '0')}', 'Person $i'),
+        ],
+      );
+
+      await openNewMessage(tester, session);
+
+      expect(session.requestedPages, [1, 2]);
+      expect(find.byKey(const Key('new-dm-person-pubkey-00')), findsOneWidget);
+    });
+  });
+
   testWidgets('new message sheet lists and selects relay members', (
     tester,
   ) async {
@@ -2618,6 +2722,60 @@ class _FakeProfileNotifier extends ProfileNotifier {
   @override
   Future<UserProfile?> build() async =>
       const UserProfile(pubkey: 'aabb', displayName: 'Test');
+}
+
+/// A connected relay that serves paged kind:0 listings and the NIP-IA
+/// snapshot the way the bridge does, so the New message sheet runs through
+/// the production directory providers.
+class _DirectoryRelaySession extends RelaySessionNotifier {
+  _DirectoryRelaySession({
+    required this.profileEvents,
+    this.archiveEvents = const [],
+    this.archiveError,
+  });
+
+  final List<NostrEvent> profileEvents;
+  final List<NostrEvent> archiveEvents;
+  final Object? archiveError;
+  final requestedPages = <int>[];
+  int archiveQueryCount = 0;
+
+  @override
+  SessionState build() => const SessionState(status: SessionStatus.connected);
+
+  @override
+  Future<List<NostrEvent>> fetchHistory(
+    NostrFilter filter, {
+    Duration timeout = const Duration(seconds: 8),
+  }) async => [];
+
+  @override
+  Future<void Function()> subscribe(
+    NostrFilter filter,
+    void Function(NostrEvent) onEvent, {
+    void Function(String message)? onClosed,
+  }) async => () {};
+
+  @override
+  Future<List<NostrEvent>> queryRelay(
+    List<NostrFilter> filters, {
+    Duration timeout = const Duration(seconds: 8),
+  }) async {
+    final filter = filters.single;
+    if (filter.kinds.contains(EventKind.identityArchivedList)) {
+      archiveQueryCount++;
+      if (archiveError != null) throw archiveError!;
+      return archiveEvents;
+    }
+    final page = (filter.extensions['page'] as int?) ?? 1;
+    requestedPages.add(page);
+    final start = (page - 1) * filter.limit;
+    if (start >= profileEvents.length) return const [];
+    return profileEvents.sublist(
+      start,
+      (start + filter.limit).clamp(0, profileEvents.length),
+    );
+  }
 }
 
 class _FakePresenceNotifier extends PresenceNotifier {

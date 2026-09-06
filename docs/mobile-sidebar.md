@@ -85,3 +85,9 @@ its presence dot and the display name; tapping it opens Settings. The
 community is named in the header above, so the card does not repeat it, and
 the channel list header carries no Settings avatar on any surface: the card
 is the one way into Settings.
+
+## People pickers
+
+The DMs `+` (New message), Add members and the invite page list people from
+the relay's kind:0 directory. How that listing pages and how identities the
+relay has archived (NIP-IA) are folded is in `docs/mobile-people-directory.md`.

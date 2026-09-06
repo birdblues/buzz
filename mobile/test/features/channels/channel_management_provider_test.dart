@@ -1,6 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:nostr/nostr.dart' as nostr;
+import 'dart:convert';
+
 import 'package:buzz/features/channels/channel_management_provider.dart';
 import 'package:buzz/features/channels/mobile_huddle_controller.dart';
 import 'package:buzz/shared/relay/relay.dart';
@@ -581,15 +583,162 @@ void main() {
       sig: 'sig',
     );
 
+    final relayKeys = nostr.Keys.generate();
+
+    /// A relay-signed kind:13535 snapshot, exactly as the relay publishes it.
+    NostrEvent archiveSnapshot(List<String> archived) {
+      final event = nostr.Event.from(
+        kind: EventKind.identityArchivedList,
+        content: '',
+        secretKey: relayKeys.secret,
+        tags: [
+          ['-'],
+          for (final pubkey in archived) ['p', pubkey],
+        ],
+      );
+      return NostrEvent.fromJson(
+        jsonDecode(event.toJson()) as Map<String, dynamic>,
+      );
+    }
+
     ProviderContainer buildContainer(_DirectoryFakeRelaySession session) {
       return ProviderContainer(
         retry: (_, _) => null,
         overrides: [
           relaySessionProvider.overrideWith(() => session),
+          relaySelfPubkeyProvider.overrideWith((ref) async => relayKeys.public),
           myPubkeyProvider.overrideWithValue('me'),
         ],
       );
     }
+
+    test('browse directory walks every relay page', () async {
+      final session = _DirectoryFakeRelaySession(
+        profileEvents: [
+          for (var i = 0; i < 120; i++)
+            profile('pubkey-${i.toString().padLeft(3, '0')}', 'Person $i'),
+        ],
+      );
+      final container = buildContainer(session);
+      addTearDown(container.dispose);
+
+      final users = await container.read(relayDirectoryUsersProvider.future);
+
+      expect(users, hasLength(120));
+      expect(session.directoryQueryCount, 3);
+      expect(session.requestedPages, [1, 2, 3]);
+      expect(
+        users.map((user) => user.label).take(3),
+        ['Person 0', 'Person 1', 'Person 10'],
+        reason: 'the merged pages are alphabetized as one directory',
+      );
+    });
+
+    test('search results walk every relay page', () async {
+      final session = _DirectoryFakeRelaySession(
+        profileEvents: [
+          for (var i = 0; i < 60; i++)
+            profile('ali-${i.toString().padLeft(2, '0')}', 'Ali $i'),
+        ],
+      );
+      final container = buildContainer(session);
+      addTearDown(container.dispose);
+
+      final users = await container.read(
+        relayDirectorySearchProvider('ali').future,
+      );
+
+      expect(users, hasLength(60));
+      expect(session.searchQueryCount, 2);
+    });
+
+    test(
+      'a failed directory page fails the listing instead of truncating it',
+      () async {
+        final session = _DirectoryFakeRelaySession(
+          profileEvents: [
+            for (var i = 0; i < 120; i++) profile('pubkey-$i', 'Person $i'),
+          ],
+          failOnPage: 2,
+        );
+        final container = buildContainer(session);
+        addTearDown(container.dispose);
+
+        await expectLater(
+          container.read(relayDirectoryUsersProvider.future),
+          throwsA(isA<StateError>()),
+        );
+      },
+    );
+
+    test(
+      'hides relay-archived identities from the directory and search',
+      () async {
+        final session = _DirectoryFakeRelaySession(
+          profileEvents: [
+            profile('alice', 'Alice'),
+            profile('bob', 'Bob'),
+            profile('alina', 'Alina'),
+          ],
+          archiveEvents: [
+            archiveSnapshot(['b' * 64]),
+          ],
+        );
+        final container = buildContainer(session);
+        addTearDown(container.dispose);
+
+        final users = await container.read(relayDirectoryUsersProvider.future);
+        final matches = await container.read(
+          relayDirectorySearchProvider('ali').future,
+        );
+
+        expect(users.map((user) => user.label), ['Alice', 'Alina', 'Bob']);
+        expect(matches.map((user) => user.label), ['Alice', 'Alina', 'Bob']);
+        expect(session.archiveQueryCount, 1, reason: 'one snapshot per sheet');
+      },
+    );
+
+    test('hides an archived pubkey once the snapshot names it', () async {
+      final bob = 'b' * 64;
+      final session = _DirectoryFakeRelaySession(
+        profileEvents: [profile('alice', 'Alice'), profile(bob, 'Bob')],
+        archiveEvents: [
+          archiveSnapshot([bob]),
+        ],
+      );
+      final container = buildContainer(session);
+      addTearDown(container.dispose);
+
+      final users = await container.read(relayDirectoryUsersProvider.future);
+      final matches = await container.read(
+        relayDirectorySearchProvider('b').future,
+      );
+
+      expect(users.map((user) => user.label), ['Alice']);
+      expect(matches.map((user) => user.label), ['Alice']);
+      final sent = session.archiveFilters.single;
+      expect(sent.kinds, [EventKind.identityArchivedList]);
+      expect(sent.authors, [relayKeys.public]);
+    });
+
+    test('lists everyone when the archive snapshot cannot be read', () async {
+      final bob = 'b' * 64;
+      final session = _DirectoryFakeRelaySession(
+        profileEvents: [profile('alice', 'Alice'), profile(bob, 'Bob')],
+        archiveError: StateError('snapshot unavailable'),
+      );
+      final container = buildContainer(session);
+      addTearDown(container.dispose);
+
+      final users = await container.read(relayDirectoryUsersProvider.future);
+
+      expect(
+        users.map((user) => user.label),
+        ['Alice', 'Bob'],
+        reason:
+            'the archive filter fails open — hiding nobody is the safe failure',
+      );
+    });
 
     test('browse directory refetches when the relay config changes', () async {
       final session = _DirectoryFakeRelaySession(
@@ -772,11 +921,22 @@ class _ConnectionAwareRelaySession extends RelaySessionNotifier {
 /// Fake [RelaySessionNotifier] that serves canned kind:0 profile events from
 /// [queryRelay] and counts directory vs. search queries.
 class _DirectoryFakeRelaySession extends RelaySessionNotifier {
-  _DirectoryFakeRelaySession({required this.profileEvents});
+  _DirectoryFakeRelaySession({
+    required this.profileEvents,
+    this.archiveEvents = const [],
+    this.archiveError,
+    this.failOnPage,
+  });
 
   List<NostrEvent> profileEvents;
+  final List<NostrEvent> archiveEvents;
+  final Object? archiveError;
+  final int? failOnPage;
   int directoryQueryCount = 0;
   int searchQueryCount = 0;
+  int archiveQueryCount = 0;
+  final requestedPages = <int>[];
+  final archiveFilters = <NostrFilter>[];
 
   @override
   SessionState build() => const SessionState(status: SessionStatus.connected);
@@ -786,12 +946,28 @@ class _DirectoryFakeRelaySession extends RelaySessionNotifier {
     List<NostrFilter> filters, {
     Duration timeout = const Duration(seconds: 8),
   }) async {
-    if (filters.any((filter) => filter.search != null)) {
+    final filter = filters.single;
+    if (filter.kinds.contains(EventKind.identityArchivedList)) {
+      archiveQueryCount++;
+      archiveFilters.add(filter);
+      if (archiveError != null) throw archiveError!;
+      return archiveEvents;
+    }
+    if (filter.search != null) {
       searchQueryCount++;
     } else {
       directoryQueryCount++;
     }
-    return profileEvents;
+    // Serve the relay's `page` extension like the bridge does.
+    final page = (filter.extensions['page'] as int?) ?? 1;
+    requestedPages.add(page);
+    if (page == failOnPage) throw StateError('relay unavailable');
+    final start = (page - 1) * filter.limit;
+    if (start >= profileEvents.length) return const [];
+    return profileEvents.sublist(
+      start,
+      (start + filter.limit).clamp(0, profileEvents.length),
+    );
   }
 
   @override

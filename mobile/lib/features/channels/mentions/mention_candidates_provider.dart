@@ -1,6 +1,7 @@
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 import '../../../shared/crypto/nip_oa.dart';
+import '../../../shared/identity_archive/identity_archive.dart';
 import '../../../shared/mentions/agent_identity_provider.dart';
 import '../../../shared/relay/relay.dart';
 import '../../../shared/profile/user_cache_provider.dart';
@@ -69,7 +70,9 @@ UserProfile _profileFromEvent(NostrEvent event) {
 /// Ranked mention candidates for a channel + query. Channel members first,
 /// then the owner's agent teams, then non-member relay agents the user can
 /// actually reach, then global search results; ordering matches desktop's
-/// `rankMentionCandidates`.
+/// `rankMentionCandidates`. Identities the relay has archived (NIP-IA) are
+/// dropped from every source, as desktop's `useMentions` does; the filter is
+/// fail-open while the snapshot loads.
 final mentionCandidatesProvider = Provider.family
     .autoDispose<List<MentionCandidate>, ({String channelId, String query})>((
       ref,
@@ -107,6 +110,10 @@ final mentionCandidatesProvider = Provider.family
           if (channel.isMember && !channel.isArchived) channel.id,
       };
 
+      final archiveFilter =
+          ref.watch(archivedIdentityFilterProvider).value ??
+          ArchivedIdentityFilter.none;
+
       final candidates = buildMentionCandidates(
         members: members,
         relayAgents: relayAgents,
@@ -118,5 +125,8 @@ final mentionCandidatesProvider = Provider.family
         currentPubkey: currentPubkey,
       );
 
-      return rankMentionCandidates(candidates, args.query);
+      return rankMentionCandidates(
+        archiveFilter.without(candidates, (candidate) => candidate.pubkey),
+        args.query,
+      );
     });

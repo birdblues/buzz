@@ -109,6 +109,64 @@ void main() {
     });
   });
 
+  group('relaySelfFromRelayInfo', () {
+    const self =
+        '3ac253597655d56103bf79071cf108d75a784f7d0d6ca2073fe4722699d47561';
+
+    test('reads a well-formed self pubkey, normalized to lowercase', () {
+      expect(relaySelfFromRelayInfo({'self': self.toUpperCase()}), self);
+      expect(relaySelfFromRelayInfo({'self': ' $self '}), self);
+    });
+
+    test('is null when self is absent or malformed', () {
+      expect(relaySelfFromRelayInfo(null), isNull);
+      expect(relaySelfFromRelayInfo({}), isNull);
+      expect(relaySelfFromRelayInfo({'self': 42}), isNull);
+      expect(relaySelfFromRelayInfo({'self': 'npub1abc'}), isNull);
+      expect(relaySelfFromRelayInfo({'self': self.substring(1)}), isNull);
+    });
+  });
+
+  group('fetchRelaySelfPubkey', () {
+    const self =
+        '3ac253597655d56103bf79071cf108d75a784f7d0d6ca2073fe4722699d47561';
+
+    test('reads self from the NIP-11 document', () async {
+      Uri? requested;
+      String? accept;
+      final client = http_testing.MockClient((request) async {
+        requested = request.url;
+        accept = request.headers['Accept'];
+        return http.Response(jsonEncode({'self': self}), 200);
+      });
+
+      expect(await fetchRelaySelfPubkey(_relay, client: client), self);
+      expect(requested, Uri.parse('$_relay/'));
+      expect(accept, 'application/nostr+json');
+    });
+
+    test('is null on a non-200 answer or a document without self', () async {
+      expect(
+        await fetchRelaySelfPubkey(
+          _relay,
+          client: http_testing.MockClient(
+            (_) async => http.Response('nope', 503),
+          ),
+        ),
+        isNull,
+      );
+      expect(
+        await fetchRelaySelfPubkey(
+          _relay,
+          client: http_testing.MockClient(
+            (_) async => http.Response(jsonEncode({'name': 'Buzz'}), 200),
+          ),
+        ),
+        isNull,
+      );
+    });
+  });
+
   test('appContentUri targets the app door path', () {
     expect(
       appContentUri('http://192.168.1.99:3001', _sha),

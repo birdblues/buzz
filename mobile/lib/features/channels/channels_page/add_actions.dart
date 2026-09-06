@@ -37,6 +37,10 @@ Future<void> _newDirectMessageFromHeader(
 ) async {
   unawaited(HapticFeedback.lightImpact());
   final currentPubkey = ref.read(currentPubkeyProvider);
+  // A people picker opens with a fresh NIP-IA snapshot, the way desktop's
+  // query refetches on mount, so an identity archived since the last fetch
+  // is folded before the list renders (the directory awaits the filter).
+  ref.invalidate(archivedIdentitiesProvider);
   final opened = await showBuzzModalBottomSheet<Channel>(
     context: context,
     title: 'New message',

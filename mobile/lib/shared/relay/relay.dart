@@ -9,6 +9,7 @@ export 'nostr_models.dart';
 export 'relay_closed_policy.dart';
 export 'relay_client.dart';
 export 'relay_info.dart';
+export 'relay_paging.dart';
 export 'relay_provider.dart';
 export 'relay_rate_limit_gate.dart';
 export 'relay_session.dart';

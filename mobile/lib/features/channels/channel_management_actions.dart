@@ -225,15 +225,20 @@ class ChannelActions {
     _ref.invalidate(channelCanvasProvider(channelId));
   }
 
-  /// User search via NIP-50 over kind:0 profile events.
+  /// User search via NIP-50 over kind:0 profile events. Identities the relay
+  /// has archived (NIP-IA) are left out, as on every discovery surface.
   Future<List<DirectoryUser>> searchUsers(String query, {int limit = 8}) async {
     final trimmed = query.trim();
     if (trimmed.isEmpty) return const [];
 
+    final archiveFilter = await _ref.read(
+      archivedIdentityFilterProvider.future,
+    );
     final events = await _session.queryRelay([
       NostrFilters.searchUsers(trimmed, limit: limit),
     ]);
-    return directoryUsersFromProfileEvents(events)
+    return archiveFilter
+        .without(directoryUsersFromProfileEvents(events), (user) => user.pubkey)
         .where(
           (user) =>
               _currentPubkey == null ||
