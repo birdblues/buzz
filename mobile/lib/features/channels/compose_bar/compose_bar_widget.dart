@@ -488,10 +488,7 @@ class ComposeBar extends HookConsumerWidget {
       if (!showingChannels && suggestions.isEmpty) {
         return KeyEventResult.ignored;
       }
-      final action = suggestionKeyAction(
-        event,
-        composing: controller.value.composing.isValid,
-      );
+      final action = suggestionKeyAction(event);
       if (action == null) return KeyEventResult.ignored;
       final count = showingChannels
           ? channelSuggestions.length

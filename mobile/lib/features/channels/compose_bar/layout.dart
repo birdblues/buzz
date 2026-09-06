@@ -375,11 +375,11 @@ class _ComposeBarLayout extends HookWidget {
         isDense: true,
       ),
     );
-    // Hardware keyboards only (the Mac, an iPad keyboard): an open
-    // suggestion popover takes Tab/Enter/arrows/Escape first; on the desktop
-    // client Enter then sends, Shift+Enter (any modifier) inserts a newline
-    // and Escape leaves the field. The Focus node never takes focus itself;
-    // it only sees key events on their way up from the field.
+    // Hardware keyboards only: an open suggestion popover takes
+    // Tab/Enter/arrows/Escape first; then, on the Mac and an iPad with a
+    // keyboard, Enter sends, Shift+Enter (any modifier) inserts a newline and
+    // Escape leaves the field. The Focus node never takes focus itself; it
+    // only sees key events on their way up from the field.
     return Focus(
       skipTraversal: true,
       canRequestFocus: false,
@@ -391,10 +391,14 @@ class _ComposeBarLayout extends HookWidget {
   KeyEventResult _handleKey(KeyEvent event) {
     final suggestionResult = onSuggestionKey(event);
     if (suggestionResult != KeyEventResult.ignored) return suggestionResult;
-    return isDesktopHost ? _handleDesktopKey(event) : KeyEventResult.ignored;
+    // On macOS and iOS a key event can only come from a hardware keyboard —
+    // the software keyboard's return key arrives as text, never as a key —
+    // so Enter is safely an action key there. Android soft keyboards can
+    // deliver Enter as a key event, so they keep the newline.
+    return isApplePlatform ? _handleHardwareKey(event) : KeyEventResult.ignored;
   }
 
-  KeyEventResult _handleDesktopKey(KeyEvent event) {
+  KeyEventResult _handleHardwareKey(KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
     final key = event.logicalKey;
     if (key == LogicalKeyboardKey.escape) {
@@ -412,9 +416,12 @@ class _ComposeBarLayout extends HookWidget {
         keyboard.isMetaPressed) {
       return KeyEventResult.ignored;
     }
-    // A Korean/Japanese IME is mid-composition: Enter commits the
-    // composition, it must not send.
-    if (controller.value.composing.isValid) return KeyEventResult.ignored;
+    // Enter sends even mid-composition: the composed syllables are already
+    // in the text, Korean input commits on Enter and passes the key on
+    // (what the desktop app sees from WKWebView), and the engine discards
+    // the IME's marked text once the send clears the field. Letting the key
+    // through instead would commit *and* insert a newline (the engine's
+    // `insertNewline:`), which is how Korean drafts never sent on Enter.
     if (canSend && !isSending && !hasPendingUploads) onSend();
     return KeyEventResult.handled;
   }

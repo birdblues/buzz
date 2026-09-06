@@ -39,20 +39,32 @@ Platform gates live in `lib/shared/platform/apple_platform.dart`:
 | `supportsSandboxApps` | true | `AppWebViewPage` asks the runner for the WebRTC-removal hook (`macos/Runner/SandboxWebViewHardening.swift`, a verbatim copy of the iOS file, installed in `MainFlutterWindow.awakeFromNib` before the Flutter engine starts) |
 | `hasCamera` | false | no Camera entry in the composer, no camera avatar capture, no Animated avatar mode |
 | `hasNativeMediaPipeline` | false | no Video and Voice note entries (transcoding/packaging exist only in the iOS/Android runners) |
-| `isDesktopHost` | true | Photos opens the system open panel; "Save image" uses a save panel; downloaded files open through `NSWorkspace`; Enter sends and Shift+Enter inserts a newline in the composer; Escape leaves the field, then unwinds the shell (nested route → thread pane → main pane) |
+| `isDesktopHost` | true | Photos opens the system open panel; "Save image" uses a save panel; downloaded files open through `NSWorkspace`; a second Escape after leaving the composer unwinds the shell (nested route → thread pane → main pane) |
+| `isApplePlatform` | true | Composer hardware keys: Enter sends and Shift+Enter inserts a newline; Escape leaves the field. Gated on Apple platforms rather than the Mac because there a key event can only come from a hardware keyboard (the software keyboard's return key arrives as text), so an iPad with a keyboard gets the same and iPhones are untouched; Android soft keyboards can deliver Enter as a key event and keep the newline |
 
-Composer keyboard completion is not gated: it answers hardware keys wherever
-they come from, so an iPad with a keyboard gets it too. While a `@` mention
-or `#` channel popover is open, Tab or a plain Enter inserts the highlighted
-row, ↑/↓ move the highlight (wrapping at either end, the list scrolling to
-keep it in view), and Escape closes the popover — on the Mac a second Escape
-then leaves the field. Shift+Tab and modified arrows are left to the text
-field. Enter during Korean composition still commits the syllable; Tab
-completes at once, with the composed syllables as the query. A new query
-starts back at the top row. This mirrors the desktop app's
-`handleMentionKeyDown` / `handleChannelKeyDown` (`compose_bar/suggestions.dart`,
+Composer keyboard completion is likewise not gated on the Mac: it answers
+hardware keys wherever they come from. While a `@` mention or `#` channel
+popover is open, Tab or a plain Enter inserts the highlighted row, ↑/↓ move
+the highlight (wrapping at either end, the list scrolling to keep it in
+view), and Escape closes the popover — a second Escape then leaves the field.
+Shift+Tab and modified arrows are left to the text field. A new query starts
+back at the top row. This mirrors the desktop app's `handleMentionKeyDown` /
+`handleChannelKeyDown` (`compose_bar/suggestions.dart`,
 `suggestionKeyAction`; tests in the `keyboard suggestion completion` group of
 `compose_bar_test.dart`).
+
+Enter and Tab act mid-composition too — a Korean draft's last syllable is
+still marked when the user presses Enter, and that Enter sends the draft
+whole (or picks the highlighted row). This is what the desktop app does:
+Korean input on macOS commits on Enter and passes the key on, and WKWebView
+delivers the keydown after the composition ends. Letting the key through to
+the engine instead would commit *and* insert a newline (the macOS plugin's
+`insertNewline:`), which is why Korean drafts never sent on Enter before.
+Consuming the key does not strand the IME: the engine discards its marked
+text when the framework clears the composing range
+(`FlutterTextInputPlugin.setEditingState`, Flutter 3.41.7). Known limit: a
+Japanese conversion's confirming Enter is indistinguishable and sends (or
+completes) the current candidate.
 
 Known gaps, accepted for the first version: no notifications while the app
 is in the background (push is iOS-only and the settings card hides itself);
@@ -150,13 +162,17 @@ sandbox WebView only ever loads `about:blank` from a string.
 2. Quit and relaunch: still signed in (keychain works).
 3. Resize: the window stops at 1000×700 and never falls back to the phone
    layout (the stacked single column).
-4. Composer: Enter sends, Shift+Enter inserts a newline, Enter during Korean
-   composition commits the syllable without sending, Escape leaves the
-   field, a second Escape closes the thread pane.
+4. Composer: Enter sends, Shift+Enter inserts a newline, a Korean draft
+   sends on one Enter with its last syllable included and no stray syllable
+   on the next keystroke, Escape leaves the field, a second Escape closes
+   the thread pane. On the iPad with a hardware keyboard: the same Enter,
+   Shift+Enter and Escape; the on-screen keyboard's return key still inserts
+   a newline.
    Mention completion: `@Pol` + Tab → `@Pollen `; `@` then ↓ ↓ then Enter
    picks the third row without sending; Escape closes the list and a second
-   Escape leaves the field; `@비서` + Tab mid-composition → `@비서실장 ` with
-   no stray syllable on the next keystroke; `#gen` + Tab → `#general `.
+   Escape leaves the field; `@비서` + Tab or Enter mid-composition →
+   `@비서실장 ` with no stray syllable on the next keystroke; `#gen` + Tab →
+   `#general `.
 5. Attachments: Photos and Files open panels; no Camera/Video/Voice note.
 6. Sandboxed app: open an app card and run `docs/sandbox-probe.html` — every
    row must fail. A "hardening not installed" refusal means the Swift hook

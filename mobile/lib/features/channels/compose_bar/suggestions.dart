@@ -6,16 +6,18 @@ part of '../compose_bar.dart';
 /// highlighted row, Escape closes the popover.
 ///
 /// Shift+Tab stays a backward focus move and a modified arrow stays text
-/// navigation. Enter mid-composition is left to the IME so a Korean or
-/// Japanese syllable commits instead of picking a row; Tab still completes
-/// during composition, because the composed syllables are the query.
+/// navigation. Tab and Enter complete during an IME composition too: the
+/// composed syllables are the query, and Korean input on macOS/iOS commits
+/// on Enter and passes the key on, which is what the desktop app sees from
+/// WKWebView. Consuming the key here does not strand the IME — the engine
+/// discards its marked text when the framework clears the composing range
+/// (`FlutterTextInputPlugin.setEditingState`). A Japanese conversion's
+/// confirming Enter is indistinguishable from this and picks the row; that
+/// is a known limit of the client.
 enum SuggestionKeyAction { moveUp, moveDown, select, dismiss }
 
 @visibleForTesting
-SuggestionKeyAction? suggestionKeyAction(
-  KeyEvent event, {
-  required bool composing,
-}) {
+SuggestionKeyAction? suggestionKeyAction(KeyEvent event) {
   final repeat = event is KeyRepeatEvent;
   if (event is! KeyDownEvent && !repeat) return null;
   final keyboard = HardwareKeyboard.instance;
@@ -33,12 +35,10 @@ SuggestionKeyAction? suggestionKeyAction(
   }
   // Holding a key repeats only the arrows; a held Tab or Enter picks once.
   if (repeat) return null;
-  if (key == LogicalKeyboardKey.tab) {
-    return modified ? null : SuggestionKeyAction.select;
-  }
-  if (key == LogicalKeyboardKey.enter ||
+  if (key == LogicalKeyboardKey.tab ||
+      key == LogicalKeyboardKey.enter ||
       key == LogicalKeyboardKey.numpadEnter) {
-    return modified || composing ? null : SuggestionKeyAction.select;
+    return modified ? null : SuggestionKeyAction.select;
   }
   if (key == LogicalKeyboardKey.escape) return SuggestionKeyAction.dismiss;
   return null;

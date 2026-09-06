@@ -5824,7 +5824,7 @@ void main() {
     });
 
     testWidgets(
-      'Enter sends; Shift+Enter, a composing IME, and Escape do not',
+      'Enter sends, mid-composition too; Shift+Enter and Escape do not',
       (tester) async {
         final previousPlatform = debugDefaultTargetPlatformOverride;
         debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
@@ -5858,7 +5858,8 @@ void main() {
           await tester.pump();
           expect(sent, isEmpty);
 
-          // Mid-composition (Korean/Japanese IME) Enter commits the text.
+          // A Korean draft ends mid-composition (the last syllable is still
+          // marked); Enter must send it whole, with no newline left behind.
           final controller = tester
               .widget<TextField>(find.byType(TextField))
               .controller!;
@@ -5870,18 +5871,10 @@ void main() {
           await tester.pump();
           await tester.sendKeyEvent(LogicalKeyboardKey.enter);
           await tester.pump();
-          expect(sent, isEmpty);
-
-          // Plain Enter on settled text sends it.
-          controller.value = const TextEditingValue(
-            text: '안녕',
-            selection: TextSelection.collapsed(offset: 2),
-          );
-          await tester.pump();
-          await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-          await tester.pump();
           await tester.pump(const Duration(seconds: 1));
           expect(sent, ['안녕']);
+          expect(controller.text, isEmpty);
+          expect(controller.value.composing, TextRange.empty);
 
           // Escape leaves the field instead of sending or clearing it.
           await _expandComposer(tester);
@@ -5898,11 +5891,66 @@ void main() {
       },
     );
 
-    testWidgets('Enter on an iPad keyboard keeps its newline behaviour', (
+    testWidgets(
+      'an iPad hardware keyboard sends with Enter and leaves with Escape',
+      (tester) async {
+        final previousPlatform = debugDefaultTargetPlatformOverride;
+        debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+        final focusNode = FocusNode();
+        addTearDown(focusNode.dispose);
+        final sent = <String>[];
+        try {
+          await tester.pumpWidget(
+            _buildComposeBar(
+              uploadService: _testUploadService(nostr.Keys.generate().nsec),
+              focusNode: focusNode,
+              onSend:
+                  (
+                    content,
+                    mentionPubkeys, {
+                    mediaTags = const <List<String>>[],
+                  }) async {
+                    sent.add(content);
+                  },
+            ),
+          );
+          await _expandComposer(tester);
+          await tester.enterText(find.byType(TextField), 'hello');
+          await tester.pump();
+
+          // Shift+Enter is left to the field (a newline), never a send.
+          await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+          await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+          await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+          await tester.pump();
+          expect(sent, isEmpty);
+
+          await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+          await tester.pump();
+          await tester.pump(const Duration(seconds: 1));
+          expect(sent, ['hello']);
+
+          await _expandComposer(tester);
+          await tester.enterText(find.byType(TextField), 'draft');
+          await tester.pump();
+          expect(focusNode.hasFocus, isTrue);
+          await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+          await tester.pump();
+          expect(focusNode.hasFocus, isFalse);
+          expect(sent, ['hello']);
+        } finally {
+          debugDefaultTargetPlatformOverride = previousPlatform;
+        }
+      },
+    );
+
+    testWidgets('an Android Enter key event keeps its newline behaviour', (
       tester,
     ) async {
+      // Android soft keyboards can deliver Enter as a key event, so the
+      // send-on-Enter gate must stay closed there.
       final previousPlatform = debugDefaultTargetPlatformOverride;
-      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
       final sent = <String>[];
       try {
         await tester.pumpWidget(
@@ -6115,9 +6163,9 @@ void main() {
     );
 
     testWidgets(
-      'Enter mid-composition is left to the IME; Tab still completes',
+      'Enter and Tab both complete mid-composition, without sending',
       (tester) => onPlatform(TargetPlatform.macOS, () async {
-        await pumpComposer(tester);
+        final harness = await pumpComposer(tester);
         final controller = controllerOf(tester);
         controller.value = const TextEditingValue(
           text: '@비서',
@@ -6129,14 +6177,23 @@ void main() {
 
         await tester.sendKeyEvent(LogicalKeyboardKey.enter);
         await tester.pumpAndSettle();
-        expect(controller.text, '@비서');
-        expect(mentionPopover, findsOneWidget);
-
-        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-        await tester.pumpAndSettle();
         expect(controller.text, '@비서실장 ');
         expect(controller.value.composing, TextRange.empty);
         expect(mentionPopover, findsNothing);
+        expect(harness.sent, isEmpty);
+
+        controller.value = const TextEditingValue(
+          text: '@비서실장 @비서',
+          selection: TextSelection.collapsed(offset: 9),
+          composing: TextRange(start: 7, end: 9),
+        );
+        await tester.pumpAndSettle();
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pumpAndSettle();
+        expect(controller.text, '@비서실장 @비서실장 ');
+        expect(controller.value.composing, TextRange.empty);
+        expect(mentionPopover, findsNothing);
+        expect(harness.sent, isEmpty);
         // Let the link-preview debounce armed by the edit run out.
         await tester.pump(const Duration(seconds: 2));
       }),
