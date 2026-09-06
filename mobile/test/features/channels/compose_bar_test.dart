@@ -5930,6 +5930,362 @@ void main() {
       }
     });
   });
+
+  group('keyboard suggestion completion', () {
+    // Members whose names share a prefix, so a query lists several rows in
+    // a known order (Alice ranks above Alfred: same group and score, earlier
+    // in the member list), plus one Korean name for the composition cases.
+    final alice = 'a' * 64;
+    final alfred = 'b' * 64;
+    final secretary = 'c' * 64;
+    final members = [
+      ChannelMember(
+        pubkey: alice,
+        role: 'member',
+        joinedAt: DateTime(2024),
+        displayName: 'Alice',
+      ),
+      ChannelMember(
+        pubkey: alfred,
+        role: 'member',
+        joinedAt: DateTime(2024),
+        displayName: 'Alfred',
+      ),
+      ChannelMember(
+        pubkey: secretary,
+        role: 'member',
+        joinedAt: DateTime(2024),
+        displayName: '비서실장',
+      ),
+    ];
+
+    // The platform override must be back before the test body returns (the
+    // binding checks it before tear-downs run), hence the explicit finally.
+    Future<void> onPlatform(
+      TargetPlatform platform,
+      Future<void> Function() body,
+    ) async {
+      final previousPlatform = debugDefaultTargetPlatformOverride;
+      debugDefaultTargetPlatformOverride = platform;
+      try {
+        await body();
+      } finally {
+        debugDefaultTargetPlatformOverride = previousPlatform;
+      }
+    }
+
+    Future<
+      ({
+        FocusNode focusNode,
+        List<String> sent,
+        List<List<String>> sentMentions,
+      })
+    >
+    pumpComposer(WidgetTester tester) async {
+      final focusNode = FocusNode();
+      addTearDown(focusNode.dispose);
+      final sent = <String>[];
+      final sentMentions = <List<String>>[];
+      await tester.pumpWidget(
+        _buildComposeBar(
+          uploadService: _testUploadService(nostr.Keys.generate().nsec),
+          focusNode: focusNode,
+          members: members,
+          channels: [
+            _makeCurrentChannel(),
+            _makeChannel(name: 'general', channelType: 'stream'),
+            _makeChannel(name: 'design', channelType: 'stream'),
+          ],
+          onSend:
+              (
+                content,
+                mentionPubkeys, {
+                mediaTags = const <List<String>>[],
+              }) async {
+                sent.add(content);
+                sentMentions.add(mentionPubkeys);
+              },
+        ),
+      );
+      await _expandComposer(tester);
+      return (focusNode: focusNode, sent: sent, sentMentions: sentMentions);
+    }
+
+    TextEditingController controllerOf(WidgetTester tester) =>
+        tester.widget<TextField>(find.byType(TextField)).controller!;
+
+    bool rowSelected(WidgetTester tester, String key) =>
+        tester.widget<ListTile>(find.byKey(ValueKey(key))).selected;
+
+    final mentionPopover = find.byKey(
+      const ValueKey('mention-suggestions-popover'),
+    );
+
+    testWidgets(
+      'Tab inserts the highlighted mention and the arrows move the highlight',
+      (tester) => onPlatform(TargetPlatform.macOS, () async {
+        final harness = await pumpComposer(tester);
+        await tester.enterText(find.byType(TextField), '@al');
+        await tester.pumpAndSettle();
+        expect(mentionPopover, findsOneWidget);
+        expect(rowSelected(tester, 'mention-suggestion-0'), isTrue);
+        expect(rowSelected(tester, 'mention-suggestion-1'), isFalse);
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await tester.pump();
+        expect(rowSelected(tester, 'mention-suggestion-0'), isFalse);
+        expect(rowSelected(tester, 'mention-suggestion-1'), isTrue);
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pumpAndSettle();
+        expect(controllerOf(tester).text, '@Alfred ');
+        expect(mentionPopover, findsNothing);
+        expect(harness.focusNode.hasFocus, isTrue);
+
+        // The completed mention reaches the send path as Alfred's pubkey.
+        await tester.tap(find.byIcon(LucideIcons.arrowUp));
+        await tester.pumpAndSettle();
+        expect(harness.sent, ['@Alfred']);
+        expect(harness.sentMentions.single, contains(alfred));
+        expect(harness.sentMentions.single, isNot(contains(alice)));
+      }),
+    );
+
+    testWidgets(
+      'ArrowUp wraps to the last row and Enter inserts it',
+      (tester) => onPlatform(TargetPlatform.macOS, () async {
+        final harness = await pumpComposer(tester);
+        await tester.enterText(find.byType(TextField), '@al');
+        await tester.pumpAndSettle();
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+        await tester.pump();
+        expect(rowSelected(tester, 'mention-suggestion-1'), isTrue);
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await tester.pump();
+        expect(rowSelected(tester, 'mention-suggestion-0'), isTrue);
+
+        // ↑ then Enter inside one frame: Enter must see the move.
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pumpAndSettle();
+        expect(controllerOf(tester).text, '@Alfred ');
+        expect(mentionPopover, findsNothing);
+        // Enter picked a row; it did not send the draft.
+        expect(harness.sent, isEmpty);
+      }),
+    );
+
+    testWidgets(
+      'a new query starts back at the top row',
+      (tester) => onPlatform(TargetPlatform.macOS, () async {
+        await pumpComposer(tester);
+        await tester.enterText(find.byType(TextField), '@a');
+        await tester.pumpAndSettle();
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await tester.pump();
+        expect(rowSelected(tester, 'mention-suggestion-1'), isTrue);
+
+        await tester.enterText(find.byType(TextField), '@al');
+        await tester.pumpAndSettle();
+        expect(rowSelected(tester, 'mention-suggestion-0'), isTrue);
+        expect(rowSelected(tester, 'mention-suggestion-1'), isFalse);
+      }),
+    );
+
+    testWidgets(
+      'Escape closes the suggestions before it leaves the field',
+      (tester) => onPlatform(TargetPlatform.macOS, () async {
+        final harness = await pumpComposer(tester);
+        await tester.enterText(find.byType(TextField), '@al');
+        await tester.pumpAndSettle();
+        expect(mentionPopover, findsOneWidget);
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pumpAndSettle();
+        expect(mentionPopover, findsNothing);
+        expect(controllerOf(tester).text, '@al');
+        expect(harness.focusNode.hasFocus, isTrue);
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pump();
+        expect(harness.focusNode.hasFocus, isFalse);
+      }),
+    );
+
+    testWidgets(
+      'Enter mid-composition is left to the IME; Tab still completes',
+      (tester) => onPlatform(TargetPlatform.macOS, () async {
+        await pumpComposer(tester);
+        final controller = controllerOf(tester);
+        controller.value = const TextEditingValue(
+          text: '@비서',
+          selection: TextSelection.collapsed(offset: 3),
+          composing: TextRange(start: 1, end: 3),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('비서실장'), findsOneWidget);
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pumpAndSettle();
+        expect(controller.text, '@비서');
+        expect(mentionPopover, findsOneWidget);
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pumpAndSettle();
+        expect(controller.text, '@비서실장 ');
+        expect(controller.value.composing, TextRange.empty);
+        expect(mentionPopover, findsNothing);
+        // Let the link-preview debounce armed by the edit run out.
+        await tester.pump(const Duration(seconds: 2));
+      }),
+    );
+
+    testWidgets(
+      'an iPad keyboard completes with Tab',
+      (tester) => onPlatform(TargetPlatform.iOS, () async {
+        await pumpComposer(tester);
+        await tester.enterText(find.byType(TextField), '@al');
+        await tester.pumpAndSettle();
+        expect(mentionPopover, findsOneWidget);
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pumpAndSettle();
+        expect(controllerOf(tester).text, '@Alice ');
+        expect(mentionPopover, findsNothing);
+      }),
+    );
+
+    testWidgets(
+      'Shift+Tab is not a completion',
+      (tester) => onPlatform(TargetPlatform.macOS, () async {
+        final harness = await pumpComposer(tester);
+        await tester.enterText(find.byType(TextField), '@al');
+        await tester.pumpAndSettle();
+        expect(mentionPopover, findsOneWidget);
+        // Shift+Tab stays a backward focus move, which may collapse the
+        // composer; the draft must survive it untouched.
+        final controller = controllerOf(tester);
+
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.pumpAndSettle();
+        expect(controller.text, '@al');
+        expect(harness.sent, isEmpty);
+      }),
+    );
+
+    testWidgets(
+      'Tab inserts the highlighted channel',
+      (tester) => onPlatform(TargetPlatform.macOS, () async {
+        await pumpComposer(tester);
+        await tester.enterText(find.byType(TextField), '#');
+        await tester.pumpAndSettle();
+        final channelPopover = find.byKey(
+          const ValueKey('channel-suggestions-popover'),
+        );
+        expect(channelPopover, findsOneWidget);
+        expect(rowSelected(tester, 'channel-suggestion-0'), isTrue);
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await tester.pump();
+        expect(rowSelected(tester, 'channel-suggestion-1'), isTrue);
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pumpAndSettle();
+        expect(controllerOf(tester).text, '#general ');
+        expect(channelPopover, findsNothing);
+      }),
+    );
+
+    testWidgets(
+      'the list scrolls to keep the highlighted row in view',
+      (tester) => onPlatform(TargetPlatform.macOS, () async {
+        final previousPlatform = debugDefaultTargetPlatformOverride;
+        final focusNode = FocusNode();
+        addTearDown(focusNode.dispose);
+        // Far more rows than the 240pt popover shows at once.
+        final crowd = [
+          for (var i = 0; i < 30; i++)
+            ChannelMember(
+              pubkey: i.toRadixString(16).padLeft(64, '0'),
+              role: 'member',
+              joinedAt: DateTime(2024),
+              displayName: 'Agent ${i.toString().padLeft(2, '0')}',
+            ),
+        ];
+        await tester.pumpWidget(
+          _buildComposeBar(
+            uploadService: _testUploadService(nostr.Keys.generate().nsec),
+            focusNode: focusNode,
+            members: crowd,
+            channels: [_makeCurrentChannel()],
+            onSend:
+                (
+                  content,
+                  mentionPubkeys, {
+                  mediaTags = const <List<String>>[],
+                }) async {},
+          ),
+        );
+        expect(debugDefaultTargetPlatformOverride, previousPlatform);
+        await _expandComposer(tester);
+        await tester.enterText(find.byType(TextField), '@agent');
+        await tester.pumpAndSettle();
+
+        Rect popover() => tester.getRect(mentionPopover);
+        bool rowInView(int index) {
+          final finder = find.byKey(ValueKey('mention-suggestion-$index'));
+          if (finder.evaluate().isEmpty) return false;
+          final rect = tester.getRect(finder);
+          return rect.top >= popover().top - 0.5 &&
+              rect.bottom <= popover().bottom + 0.5;
+        }
+
+        expect(rowInView(0), isTrue);
+        expect(rowInView(29), isFalse);
+
+        // ↑ from the top wraps to the last row, which must come into view.
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+        await tester.pumpAndSettle();
+        expect(rowSelected(tester, 'mention-suggestion-29'), isTrue);
+        expect(rowInView(29), isTrue);
+        expect(rowInView(0), isFalse);
+
+        // ↓ wraps back to the top.
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await tester.pumpAndSettle();
+        expect(rowInView(0), isTrue);
+
+        // Stepping down past the visible rows scrolls just enough.
+        for (var i = 0; i < 8; i++) {
+          await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+          await tester.pumpAndSettle();
+        }
+        expect(rowSelected(tester, 'mention-suggestion-8'), isTrue);
+        expect(rowInView(8), isTrue);
+        expect(rowInView(0), isFalse);
+      }),
+    );
+
+    testWidgets(
+      'Tab without a popover keeps its old meaning',
+      (tester) => onPlatform(TargetPlatform.macOS, () async {
+        final harness = await pumpComposer(tester);
+        await tester.enterText(find.byType(TextField), 'plain text');
+        await tester.pumpAndSettle();
+        // Without a popover Tab is still Flutter's focus move (the composer
+        // may collapse); it must not edit or send the draft.
+        final controller = controllerOf(tester);
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pumpAndSettle();
+        expect(controller.text, 'plain text');
+        expect(harness.sent, isEmpty);
+      }),
+    );
+  });
 }
 
 MediaUploadService _testUploadService(String nsec) {

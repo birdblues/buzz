@@ -158,6 +158,8 @@ void _expandComposer({
 Widget _composerSuggestionPanel({
   required List<Channel> channelSuggestions,
   required List<MentionCandidate> mentionSuggestions,
+  required int channelSelectedIndex,
+  required int mentionSelectedIndex,
   required Map<String, UserProfile> userCache,
   required String? currentPubkey,
   required bool isDmChannel,
@@ -168,6 +170,7 @@ Widget _composerSuggestionPanel({
         key: const ValueKey('channel-suggestions'),
         child: _ChannelSuggestions(
           suggestions: channelSuggestions,
+          selectedIndex: channelSelectedIndex,
           onSelect: onChannelSelect,
         ),
       )
@@ -179,6 +182,7 @@ Widget _composerSuggestionPanel({
           userCache: userCache,
           currentPubkey: currentPubkey,
           isDmChannel: isDmChannel,
+          selectedIndex: mentionSelectedIndex,
           onSelect: onMentionSelect,
         ),
       )

@@ -249,6 +249,11 @@ class ComposeBar extends HookConsumerWidget {
     // Channel autocomplete state ----------------------------------------------
     final channelQuery = useState<String?>(null);
     final channelStartIdx = useState(-1);
+
+    // Keyboard highlight in each suggestion popover, remembered with the
+    // query it belongs to so a new query starts back at the top row.
+    final mentionHighlight = useState<(String?, int)>((null, 0));
+    final channelHighlight = useState<(String?, int)>((null, 0));
     final channelsAsync = ref.watch(channelsProvider);
     _useComposerChannelNames(controller, channelsAsync);
 
@@ -409,6 +414,17 @@ class ComposeBar extends HookConsumerWidget {
     final channels = channelsAsync.asData?.value ?? <Channel>[];
     final channelSuggestions = filterChannels(channels, channelQuery.value);
 
+    final mentionSelectedIndex = _suggestionHighlightIndex(
+      mentionHighlight.value,
+      mentionQuery.value,
+      suggestions.length,
+    );
+    final channelSelectedIndex = _suggestionHighlightIndex(
+      channelHighlight.value,
+      channelQuery.value,
+      channelSuggestions.length,
+    );
+
     // Insert a selected mention into the text field. A team expands into its
     // members — `TeamName(@a @b) ` — and registers each member so their
     // pubkeys (never the team's placeholder) reach the send path. Mirrors
@@ -461,6 +477,63 @@ class ComposeBar extends HookConsumerWidget {
         isModifyingText.value = false;
       }
       channelQuery.value = null;
+    }
+
+    // Hardware-keyboard navigation of whichever suggestion popover is open —
+    // the channel list when it has rows, else the mention list, matching
+    // `_composerSuggestionPanel`. Mirrors desktop's composer key handling:
+    // Tab/Enter insert the highlighted row, arrows move it, Escape closes.
+    KeyEventResult handleSuggestionKey(KeyEvent event) {
+      final showingChannels = channelSuggestions.isNotEmpty;
+      if (!showingChannels && suggestions.isEmpty) {
+        return KeyEventResult.ignored;
+      }
+      final action = suggestionKeyAction(
+        event,
+        composing: controller.value.composing.isValid,
+      );
+      if (action == null) return KeyEventResult.ignored;
+      final count = showingChannels
+          ? channelSuggestions.length
+          : suggestions.length;
+      // Read the highlight now rather than from this build: two keys can
+      // land in one frame (a fast ↓ then Enter) and the second must see the
+      // first's move.
+      final current = showingChannels
+          ? _suggestionHighlightIndex(
+              channelHighlight.value,
+              channelQuery.value,
+              count,
+            )
+          : _suggestionHighlightIndex(
+              mentionHighlight.value,
+              mentionQuery.value,
+              count,
+            );
+      void highlight(int index) {
+        if (showingChannels) {
+          channelHighlight.value = (channelQuery.value, index);
+        } else {
+          mentionHighlight.value = (mentionQuery.value, index);
+        }
+      }
+
+      switch (action) {
+        case SuggestionKeyAction.moveDown:
+          highlight(current < count - 1 ? current + 1 : 0);
+        case SuggestionKeyAction.moveUp:
+          highlight(current > 0 ? current - 1 : count - 1);
+        case SuggestionKeyAction.select:
+          if (showingChannels) {
+            insertChannel(channelSuggestions[current]);
+          } else {
+            insertMention(suggestions[current]);
+          }
+        case SuggestionKeyAction.dismiss:
+          mentionQuery.value = null;
+          channelQuery.value = null;
+      }
+      return KeyEventResult.handled;
     }
 
     // Insert `@` at the cursor to manually trigger mention mode.
@@ -926,6 +999,8 @@ class ComposeBar extends HookConsumerWidget {
     final suggestionPanel = _composerSuggestionPanel(
       channelSuggestions: channelSuggestions,
       mentionSuggestions: suggestions,
+      channelSelectedIndex: channelSelectedIndex,
+      mentionSelectedIndex: mentionSelectedIndex,
       userCache: userCache,
       currentPubkey: currentPubkey,
       isDmChannel: isDmChannel,
@@ -1056,6 +1131,7 @@ class ComposeBar extends HookConsumerWidget {
                 attachmentSurface.value = _AttachmentSurface.closed;
                 showFormatting.value = true;
               },
+              onSuggestionKey: handleSuggestionKey,
               hasPendingUploads: hasPendingUploads,
               canSend: composerText.trim().isNotEmpty || hasAttachments,
               isSending: isSending.value,

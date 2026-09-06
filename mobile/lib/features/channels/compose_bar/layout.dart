@@ -28,6 +28,10 @@ class _ComposeBarLayout extends HookWidget {
   final VoidCallback onChannel;
   final VoidCallback onEmoji;
   final VoidCallback onOpenFormatting;
+
+  /// First look at every hardware key: navigates an open suggestion popover
+  /// (Tab/Enter/arrows/Escape) and answers `handled` when it did.
+  final KeyEventResult Function(KeyEvent event) onSuggestionKey;
   final bool canSend;
   final bool hasPendingUploads;
   final bool isSending;
@@ -60,6 +64,7 @@ class _ComposeBarLayout extends HookWidget {
     required this.onChannel,
     required this.onEmoji,
     required this.onOpenFormatting,
+    required this.onSuggestionKey,
     required this.canSend,
     required this.hasPendingUploads,
     required this.isSending,
@@ -370,16 +375,23 @@ class _ComposeBarLayout extends HookWidget {
         isDense: true,
       ),
     );
-    if (!isDesktopHost) return field;
-    // Desktop keyboard: Enter sends, Shift+Enter (any modifier) inserts a
-    // newline, Escape leaves the field. The Focus node never takes focus
-    // itself; it only sees key events on their way up from the field.
+    // Hardware keyboards only (the Mac, an iPad keyboard): an open
+    // suggestion popover takes Tab/Enter/arrows/Escape first; on the desktop
+    // client Enter then sends, Shift+Enter (any modifier) inserts a newline
+    // and Escape leaves the field. The Focus node never takes focus itself;
+    // it only sees key events on their way up from the field.
     return Focus(
       skipTraversal: true,
       canRequestFocus: false,
-      onKeyEvent: (_, event) => _handleDesktopKey(event),
+      onKeyEvent: (_, event) => _handleKey(event),
       child: field,
     );
+  }
+
+  KeyEventResult _handleKey(KeyEvent event) {
+    final suggestionResult = onSuggestionKey(event);
+    if (suggestionResult != KeyEventResult.ignored) return suggestionResult;
+    return isDesktopHost ? _handleDesktopKey(event) : KeyEventResult.ignored;
   }
 
   KeyEventResult _handleDesktopKey(KeyEvent event) {
