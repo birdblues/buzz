@@ -141,10 +141,11 @@ class Community {
       pushSubscriptionState = pushSubscriptionState
           .withPendingTombstoneAtCursor();
     }
+    final relayUrl = json['relayUrl'] as String;
     return Community(
       id: json['id'] as String,
-      name: json['name'] as String,
-      relayUrl: json['relayUrl'] as String,
+      name: _migratedName(json['name'] as String, relayUrl),
+      relayUrl: relayUrl,
       pubkey: json['pubkey'] as String?,
       nsec: json['nsec'] as String?,
       sensitiveActionPolicy: SensitiveActionPolicy.values.firstWhere(
@@ -160,15 +161,43 @@ class Community {
   }
 
   /// Derive a human-friendly community name from a relay URL.
+  ///
+  /// The community's real name lives only in the desktop app's local list
+  /// (nothing on the relay carries it), so this is the best the phone or the
+  /// Mac client can do without asking: the first label of a subdomain
+  /// (`buzz.example.com` → `buzz`), the whole host otherwise. An IP address
+  /// is never split — `192.168.1.99` used to come out as `192`.
   static String nameFromUrl(String url) {
     try {
       final host = Uri.parse(url).host;
       if (host.contains('localhost') || host == '127.0.0.1') return 'Local Dev';
+      if (_isIpLiteral(host)) return host;
       final parts = host.split('.');
       if (parts.length > 2) return parts.first;
       return host;
     } catch (_) {
       return 'Community';
     }
+  }
+
+  /// A stored name that is the pre-fix derivation of an IP-literal relay
+  /// host (its first octet) is replaced by the current derivation when the
+  /// record is read, so installs paired before the fix stop showing `192`.
+  static String _migratedName(String stored, String relayUrl) {
+    try {
+      final host = Uri.parse(relayUrl).host;
+      if (_isIpLiteral(host) && stored == host.split('.').first) {
+        return nameFromUrl(relayUrl);
+      }
+    } catch (_) {}
+    return stored;
+  }
+
+  static bool _isIpLiteral(String host) {
+    // IPv6 hosts come back from Uri without their brackets.
+    if (host.contains(':')) return true;
+    final parts = host.split('.');
+    return parts.length == 4 &&
+        parts.every((p) => p.isNotEmpty && int.tryParse(p) != null);
   }
 }
