@@ -860,9 +860,17 @@ mobile-build-macos:
     set -euo pipefail
     ./scripts/mobile-worktree-overrides.sh
     unset GIT_DIR GIT_WORK_TREE
+    # pubspec.yaml says 0.0.0+1 (upstream's release pipeline stamps the real
+    # version); give the client a build number the Settings page can show so
+    # two Macs can tell which build they run. The number is the commit count
+    # of the built revision.
+    build_name="${BUZZ_CLIENT_BUILD_NAME:-0.1.0}"
+    build_number="${BUZZ_CLIENT_BUILD_NUMBER:-$(git rev-list --count HEAD)}"
     cd {{mobile_dir}}
     flutter build macos --release --no-pub \
+        --build-name "$build_name" --build-number "$build_number" \
         --dart-define=BUZZ_ALLOW_PRIVATE_RELAY="${BUZZ_ALLOW_PRIVATE_RELAY:-true}"
+    echo "version: $build_name+$build_number"
     app=build/macos/Build/Products/Release/BuzzClient.app
     # Every Mach-O in the bundle must carry both slices, or the app is not
     # universal. Only directories that exist are searched (a plugin-free

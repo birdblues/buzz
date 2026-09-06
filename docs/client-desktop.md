@@ -49,7 +49,11 @@ just mobile-run-macos      # debug run (first run does pod install)
 just mobile-build-macos    # release, universal, zipped for scp
 ```
 
-`mobile-build-macos` passes `--dart-define=BUZZ_ALLOW_PRIVATE_RELAY=true` so
+`mobile-build-macos` stamps the bundle version as
+`0.1.0+<commit count>` (override with `BUZZ_CLIENT_BUILD_NAME` /
+`BUZZ_CLIENT_BUILD_NUMBER`) — `pubspec.yaml` only says `0.0.0+1`, which is
+what a debug run shows in Settings — and passes
+`--dart-define=BUZZ_ALLOW_PRIVATE_RELAY=true` so
 pairing accepts a LAN relay (`ws://192.168.x.x`); invite links to private
 addresses are still refused by `relay_validation.dart`, so a LAN community is
 joined by pairing. It then verifies every Mach-O in the bundle carries both
