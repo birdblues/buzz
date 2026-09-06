@@ -69,7 +69,9 @@ never listed unless you are a member.
 
 The directory loads with the list (once per relay and identity, again after
 a reconnect) instead of on demand, and a pull-to-refresh re-reads it so
-channels created since launch appear. While it loads or after it fails, the
+channels created since launch appear. A mouse wheel never pulls, so the
+Channels and Forums `⋮` menus also carry "Refresh channels" for the macOS
+client. While it loads or after it fails, the
 Channels section ends in a status row (`channels-directory-loading`,
 `channels-directory-retry`).
 

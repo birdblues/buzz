@@ -335,6 +335,21 @@ class _SectionNameDialog extends HookWidget {
 
 const _kSortRecentMenuValue = 'sort_recent';
 const _kSortAlphaMenuValue = 'sort_alpha';
+const _kRefreshMenuValue = 'refresh';
+
+/// A plain action in a section menu, laid out like the sort items.
+PopupMenuItem<String> _actionMenuItem({
+  required String value,
+  required String label,
+}) => PopupMenuItem(
+  value: value,
+  child: Row(
+    children: [
+      Expanded(child: Text(label)),
+      const SizedBox(width: 24),
+    ],
+  ),
+);
 
 PopupMenuItem<String> _sortMenuItem({
   required String value,
@@ -389,6 +404,10 @@ class _ChannelSection extends StatelessWidget {
   /// Opens the section's "add" sheet from the header's `+`.
   final VoidCallback? onAdd;
   final String? addTooltip;
+
+  /// Re-reads the relay's directory from the options menu, for hosts with
+  /// no pull-to-refresh gesture (a mouse wheel never pulls).
+  final VoidCallback? onRefresh;
   final bool showTopDivider;
   final Set<String> unreadChannelIds;
   final Set<String> mutedChannelIds;
@@ -409,6 +428,7 @@ class _ChannelSection extends StatelessWidget {
     this.onRetryDirectory,
     this.onAdd,
     this.addTooltip,
+    this.onRefresh,
     required this.showTopDivider,
     required this.unreadChannelIds,
     required this.mutedChannelIds,
@@ -434,6 +454,7 @@ class _ChannelSection extends StatelessWidget {
           onSortModeChange: onSortModeChange,
           onAdd: onAdd,
           addTooltip: addTooltip,
+          onRefresh: onRefresh,
         ),
         _AnimatedSectionBody(
           expanded: expanded,
@@ -552,6 +573,9 @@ class _SectionHeader extends StatelessWidget {
   final VoidCallback? onAdd;
   final String? addTooltip;
 
+  /// A "Refresh channels" entry at the top of the options menu.
+  final VoidCallback? onRefresh;
+
   const _SectionHeader({
     required this.label,
     required this.icon,
@@ -561,6 +585,7 @@ class _SectionHeader extends StatelessWidget {
     this.onSortModeChange,
     this.onAdd,
     this.addTooltip,
+    this.onRefresh,
   });
 
   @override
@@ -643,9 +668,20 @@ class _SectionHeader extends StatelessWidget {
                         side: BorderSide(color: context.colors.outline),
                       ),
                       surfaceKey: ValueKey('sort-popover-$label'),
-                      items: _sortMenuItems(mode, showDivider: false),
+                      items: [
+                        if (onRefresh != null) ...[
+                          _actionMenuItem(
+                            value: _kRefreshMenuValue,
+                            label: 'Refresh channels',
+                          ),
+                          const PopupMenuDivider(),
+                        ],
+                        ..._sortMenuItems(mode, showDivider: false),
+                      ],
                     );
-                    if (value == _kSortRecentMenuValue) {
+                    if (value == _kRefreshMenuValue) {
+                      onRefresh?.call();
+                    } else if (value == _kSortRecentMenuValue) {
                       onSortModeChange?.call(ChannelSortMode.recent);
                     } else if (value == _kSortAlphaMenuValue) {
                       onSortModeChange?.call(ChannelSortMode.alpha);

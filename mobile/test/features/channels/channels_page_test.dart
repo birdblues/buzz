@@ -160,13 +160,15 @@ void main() {
 
     await tester.tap(find.byTooltip('Channels options'));
     await tester.pumpAndSettle();
+    expect(find.text('Refresh channels'), findsOneWidget);
     expect(find.text('Sort: Recent'), findsOneWidget);
     expect(find.text('Sort: A–Z'), findsOneWidget);
     final popover = find.byKey(const ValueKey('sort-popover-Channels'));
     expect(popover, findsOneWidget);
+    // One divider, between the refresh action and the sort modes.
     expect(
       find.descendant(of: popover, matching: find.byType(PopupMenuDivider)),
-      findsNothing,
+      findsOneWidget,
     );
     final selectedCheck = find.byKey(const ValueKey('sort-selected-check'));
     expect(selectedCheck, findsOneWidget);
@@ -1287,6 +1289,32 @@ void main() {
       findsNothing,
     );
     expect(find.text('general'), findsNothing);
+  });
+
+  testWidgets('the Channels menu re-reads the directory', (tester) async {
+    late _RefreshRecordingNotifier notifier;
+    await tester.pumpWidget(
+      buildTestable(
+        disableAnimations: true,
+        overrides: [
+          channelsProvider.overrideWith(
+            () => notifier = _RefreshRecordingNotifier(testChannels),
+          ),
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Channels options'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Refresh channels'));
+    await tester.pumpAndSettle();
+
+    expect(notifier.refreshes, [true], reason: 'fetchDirectory');
+    // DMs have nothing to discover, so their menu has no refresh entry.
+    await tester.tap(find.byTooltip('DMs options'));
+    await tester.pumpAndSettle();
+    expect(find.text('Refresh channels'), findsNothing);
   });
 
   testWidgets('shows the directory failure in the list and retries it', (
@@ -2412,6 +2440,18 @@ String _activeDirectoryScope(Ref ref) => channelDirectoryScope(
   ref.read(relayConfigProvider).baseUrl,
   ref.read(myPubkeyProvider),
 );
+
+class _RefreshRecordingNotifier extends _FakeNotifier {
+  _RefreshRecordingNotifier(super.channels);
+
+  /// The `fetchDirectory` flag of each refresh.
+  final List<bool> refreshes = [];
+
+  @override
+  Future<void> refresh({bool fetchDirectory = false}) async {
+    refreshes.add(fetchDirectory);
+  }
+}
 
 class _CountingDirectoryNotifier extends _FakeNotifier {
   _CountingDirectoryNotifier(super.channels);

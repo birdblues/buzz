@@ -238,6 +238,12 @@ class _SliverChannelsList extends HookConsumerWidget {
         : dmChannels;
 
     final liveSectionIds = [for (final s in userSections) s.id];
+    // The list refreshes on a pull, but a mouse wheel never pulls: hosts
+    // without the gesture re-read the directory from the section menus.
+    void refreshDirectory() => unawaited(
+      ref.read(channelsProvider.notifier).refresh(fetchDirectory: true),
+    );
+
     void setSortMode(String groupKey, ChannelSortMode mode) {
       ref
           .read(channelSortProvider.notifier)
@@ -398,6 +404,7 @@ class _SliverChannelsList extends HookConsumerWidget {
                 _createChannelFromHeader(context, channelType: 'stream'),
               ),
               addTooltip: 'Create channel',
+              onRefresh: refreshDirectory,
               unreadChannelIds: unreadChannelIds,
               mutedChannelIds: mutedChannelIds,
               currentPubkey: currentPubkey,
@@ -418,6 +425,7 @@ class _SliverChannelsList extends HookConsumerWidget {
                 _createChannelFromHeader(context, channelType: 'forum'),
               ),
               addTooltip: 'New forum',
+              onRefresh: refreshDirectory,
               unreadChannelIds: unreadChannelIds,
               mutedChannelIds: mutedChannelIds,
               currentPubkey: currentPubkey,
