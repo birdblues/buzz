@@ -336,7 +336,7 @@ class _ComposeBarLayout extends HookWidget {
   }
 
   Widget _buildTextField(BuildContext context) {
-    return TextField(
+    final field = TextField(
       controller: controller,
       focusNode: focusNode,
       keyboardType: TextInputType.multiline,
@@ -370,6 +370,41 @@ class _ComposeBarLayout extends HookWidget {
         isDense: true,
       ),
     );
+    if (!isDesktopHost) return field;
+    // Desktop keyboard: Enter sends, Shift+Enter (any modifier) inserts a
+    // newline, Escape leaves the field. The Focus node never takes focus
+    // itself; it only sees key events on their way up from the field.
+    return Focus(
+      skipTraversal: true,
+      canRequestFocus: false,
+      onKeyEvent: (_, event) => _handleDesktopKey(event),
+      child: field,
+    );
+  }
+
+  KeyEventResult _handleDesktopKey(KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.escape) {
+      focusNode.unfocus();
+      return KeyEventResult.handled;
+    }
+    if (key != LogicalKeyboardKey.enter &&
+        key != LogicalKeyboardKey.numpadEnter) {
+      return KeyEventResult.ignored;
+    }
+    final keyboard = HardwareKeyboard.instance;
+    if (keyboard.isShiftPressed ||
+        keyboard.isControlPressed ||
+        keyboard.isAltPressed ||
+        keyboard.isMetaPressed) {
+      return KeyEventResult.ignored;
+    }
+    // A Korean/Japanese IME is mid-composition: Enter commits the
+    // composition, it must not send.
+    if (controller.value.composing.isValid) return KeyEventResult.ignored;
+    if (canSend && !isSending && !hasPendingUploads) onSend();
+    return KeyEventResult.handled;
   }
 }
 

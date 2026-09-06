@@ -25,6 +25,13 @@ void main() {
       expect(layoutModeForSize(const Size(1024, 768)), LayoutMode.wide);
     });
 
+    test('is wide for every size the macOS client window allows', () {
+      // MainFlutterWindow.swift: default 1280x800, content never below
+      // 1000x700 — so the Mac never shows the phone shell.
+      expect(layoutModeForSize(const Size(1280, 800)), LayoutMode.wide);
+      expect(layoutModeForSize(const Size(1000, 700)), LayoutMode.wide);
+    });
+
     test('every iPad fits three columns', () {
       expect(
         kWideSidebarWidth + kWideMainPaneMinWidth + kWideAuxPaneWidth,

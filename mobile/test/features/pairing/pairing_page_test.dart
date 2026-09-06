@@ -390,6 +390,37 @@ void main() {
       }
     });
 
+    testWidgets('uses the native Touch ID label on the macOS client', (
+      tester,
+    ) async {
+      final previousPlatform = debugDefaultTargetPlatformOverride;
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      try {
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              pairingProvider.overrideWith(
+                () => _ConfirmingSasPairingNotifier(),
+              ),
+              enrolledBiometricsProvider.overrideWith(
+                (_) async => const [BiometricType.fingerprint],
+              ),
+            ],
+            child: MaterialApp(
+              theme: AppTheme.dark(),
+              home: const PairingPage(),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        expect(find.text('Use Touch ID'), findsOneWidget);
+        expect(find.text('Use biometrics'), findsNothing);
+      } finally {
+        debugDefaultTargetPlatformOverride = previousPlatform;
+      }
+    });
+
     testWidgets('desktop recovery does not show protection checkbox', (
       tester,
     ) async {

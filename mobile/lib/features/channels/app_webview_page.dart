@@ -1,13 +1,13 @@
 import 'dart:async';
 
 import 'package:flutter/cupertino.dart' show CupertinoPageRoute;
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
+import '../../shared/platform/apple_platform.dart';
 import '../../shared/relay/app_content.dart';
 import '../../shared/relay/media_auth.dart';
 import '../../shared/relay/media_image.dart';
@@ -46,13 +46,13 @@ NavigationDecision decideAppNavigation({
 }
 
 /// Asks the native side whether the WebRTC-removal user script hook is
-/// installed (`ios/Runner/SandboxWebViewHardening.swift`). Apps only run when
-/// it is: WebKit ignores the CSP `webrtc 'block'` directive, so without the
-/// hook a page could reach the network over ICE. Android has no hook yet and
-/// therefore never runs apps. Override in tests.
+/// installed (`SandboxWebViewHardening.swift` in the iOS and macOS runners).
+/// Apps only run when it is: WebKit ignores the CSP `webrtc 'block'`
+/// directive, so without the hook a page could reach the network over ICE.
+/// Android has no hook yet and therefore never runs apps. Override in tests.
 final sandboxHardeningProbeProvider = Provider<Future<bool> Function()>((ref) {
   return () async {
-    if (defaultTargetPlatform != TargetPlatform.iOS) return false;
+    if (!supportsSandboxApps) return false;
     try {
       const channel = MethodChannel('buzz/sandbox_webview');
       return await channel.invokeMethod<bool>('isHardeningInstalled') ?? false;

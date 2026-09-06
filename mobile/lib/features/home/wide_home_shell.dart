@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
@@ -84,126 +85,166 @@ class WideHomeShell extends HookConsumerWidget {
     final canPopShell =
         auxDepth.value <= 1 && auxContent == null && mainDepth.value <= 1;
 
-    return PopScope(
-      canPop: canPopShell,
-      onPopInvokedWithResult: (didPop, _) {
-        if (didPop) return;
-        // System back (Android tablets) unwinds innermost-first: nested
-        // routes in the auxiliary pane, then the pane itself, then routes in
-        // the main pane. Only then does the pop reach the system.
-        final auxNavigator = auxNavigatorKey.currentState;
-        if (auxNavigator != null && auxNavigator.canPop()) {
-          auxNavigator.pop();
-          return;
-        }
-        if (shell.aux != null) {
-          notifier.closeAux();
-          return;
-        }
-        final mainNavigator = mainNavigatorKey.currentState;
-        if (mainNavigator != null && mainNavigator.canPop()) {
-          mainNavigator.pop();
-        }
-      },
-      child: ColoredBox(
-        color: context.colors.surface,
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final sidebarWidth = ref.watch(wideSidebarCollapsedProvider)
-                ? 0.0
-                : kWideSidebarWidth;
-            final contentWidth = constraints.maxWidth - sidebarWidth;
-            final auxOpen = auxContent != null;
-            final auxFocused = auxOpen && shell.auxFocused;
-            final sideWidth = wideAuxPaneWidthFor(contentWidth);
-            final focusWidth = contentWidth - kWideAuxFocusGutter;
-            final auxTargetWidth = !auxOpen
-                ? 0.0
-                : auxFocused
-                ? focusWidth
-                : sideWidth;
-            final retained = retainedAux.value;
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _SidebarColumn(
-                  settingsPageBuilder: settingsPageBuilder,
-                  hasUnreadInbox: hasUnreadInbox,
-                ),
-                Expanded(
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      // The main pane yields room to a side panel and reclaims
-                      // it under a focus drawer, both animated.
-                      AnimatedPadding(
-                        duration: motion,
-                        curve: _kSidebarMotionCurve,
-                        padding: EdgeInsets.only(
-                          right: auxOpen && !auxFocused ? sideWidth : 0,
-                        ),
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(
-                            minWidth: kWideMainPaneMinWidth,
-                          ),
-                          child: _MainPane(
-                            navigatorKey: mainNavigatorKey,
-                            depth: mainDepth,
-                          ),
-                        ),
-                      ),
-                      // Focus mode: a scrim over the strip of channel left
-                      // visible beside the drawer; tapping it docks the
-                      // thread back as a side panel.
-                      Positioned.fill(
-                        child: IgnorePointer(
-                          ignoring: !auxFocused,
-                          child: AnimatedOpacity(
+    // System back (Android tablets) and Escape (a keyboard on the Mac
+    // client or an iPad) unwind innermost-first: nested routes in the
+    // auxiliary pane, then the pane itself, then routes in the main pane.
+    // Only then does a back gesture reach the system.
+    bool unwindOnce() {
+      final auxNavigator = auxNavigatorKey.currentState;
+      if (auxNavigator != null && auxNavigator.canPop()) {
+        auxNavigator.pop();
+        return true;
+      }
+      if (shell.aux != null) {
+        notifier.closeAux();
+        return true;
+      }
+      final mainNavigator = mainNavigatorKey.currentState;
+      if (mainNavigator != null && mainNavigator.canPop()) {
+        mainNavigator.pop();
+        return true;
+      }
+      return false;
+    }
+
+    // Escape is handled as a raw key event rather than through WidgetsApp's
+    // DismissIntent: each pane's nested route wraps its content in a (disabled)
+    // modal dismiss action, and `Actions.invoke` stops at the nearest action
+    // for the intent instead of looking past a disabled one, so an intent
+    // would never reach this widget. Key events do bubble up the focus tree
+    // from whatever holds focus inside the shell.
+    KeyEventResult handleKey(FocusNode _, KeyEvent event) {
+      if (event is! KeyDownEvent ||
+          event.logicalKey != LogicalKeyboardKey.escape) {
+        return KeyEventResult.ignored;
+      }
+      // A focused text field owns Escape (the composer unfocuses on it).
+      final focused = FocusManager.instance.primaryFocus?.context;
+      if (focused != null &&
+          focused.findAncestorWidgetOfExactType<EditableText>() != null) {
+        return KeyEventResult.ignored;
+      }
+      return unwindOnce() ? KeyEventResult.handled : KeyEventResult.ignored;
+    }
+
+    return Focus(
+      skipTraversal: true,
+      canRequestFocus: false,
+      onKeyEvent: handleKey,
+      child: Focus(
+        // Something inside the shell must hold focus for a key event to
+        // reach the handler above when no field or route does.
+        autofocus: true,
+        skipTraversal: true,
+        child: PopScope(
+          canPop: canPopShell,
+          onPopInvokedWithResult: (didPop, _) {
+            if (didPop) return;
+            unwindOnce();
+          },
+          child: ColoredBox(
+            color: context.colors.surface,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final sidebarWidth = ref.watch(wideSidebarCollapsedProvider)
+                    ? 0.0
+                    : kWideSidebarWidth;
+                final contentWidth = constraints.maxWidth - sidebarWidth;
+                final auxOpen = auxContent != null;
+                final auxFocused = auxOpen && shell.auxFocused;
+                final sideWidth = wideAuxPaneWidthFor(contentWidth);
+                final focusWidth = contentWidth - kWideAuxFocusGutter;
+                final auxTargetWidth = !auxOpen
+                    ? 0.0
+                    : auxFocused
+                    ? focusWidth
+                    : sideWidth;
+                final retained = retainedAux.value;
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _SidebarColumn(
+                      settingsPageBuilder: settingsPageBuilder,
+                      hasUnreadInbox: hasUnreadInbox,
+                    ),
+                    Expanded(
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          // The main pane yields room to a side panel and reclaims
+                          // it under a focus drawer, both animated.
+                          AnimatedPadding(
                             duration: motion,
                             curve: _kSidebarMotionCurve,
-                            opacity: auxFocused ? 1 : 0,
-                            child: GestureDetector(
-                              key: const ValueKey('wide-aux-focus-scrim'),
-                              behavior: HitTestBehavior.opaque,
-                              onTap: notifier.toggleAuxFocus,
-                              child: ColoredBox(
-                                color: context.colors.scrim.withValues(
-                                  alpha: 0.32,
+                            padding: EdgeInsets.only(
+                              right: auxOpen && !auxFocused ? sideWidth : 0,
+                            ),
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(
+                                minWidth: kWideMainPaneMinWidth,
+                              ),
+                              child: _MainPane(
+                                navigatorKey: mainNavigatorKey,
+                                depth: mainDepth,
+                              ),
+                            ),
+                          ),
+                          // Focus mode: a scrim over the strip of channel left
+                          // visible beside the drawer; tapping it docks the
+                          // thread back as a side panel.
+                          Positioned.fill(
+                            child: IgnorePointer(
+                              ignoring: !auxFocused,
+                              child: AnimatedOpacity(
+                                duration: motion,
+                                curve: _kSidebarMotionCurve,
+                                opacity: auxFocused ? 1 : 0,
+                                child: GestureDetector(
+                                  key: const ValueKey('wide-aux-focus-scrim'),
+                                  behavior: HitTestBehavior.opaque,
+                                  onTap: notifier.toggleAuxFocus,
+                                  child: ColoredBox(
+                                    color: context.colors.scrim.withValues(
+                                      alpha: 0.32,
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
                           ),
-                        ),
+                          if (retained != null)
+                            Positioned(
+                              top: 0,
+                              bottom: 0,
+                              right: 0,
+                              child: _AuxDrawer(
+                                content: retained.content,
+                                paneKey: retained.key,
+                                navigatorKey: auxNavigatorKey,
+                                depth: auxDepth,
+                                width: auxTargetWidth,
+                                // Content keeps its final width while the drawer
+                                // reveals it, like the sidebar.
+                                contentWidth: auxFocused
+                                    ? focusWidth
+                                    : sideWidth,
+                                focused: auxFocused,
+                                duration: motion,
+                                onMotionEnd: () {
+                                  if (ref.read(wideShellProvider).aux == null) {
+                                    retainedAux.value = null;
+                                  }
+                                },
+                              ),
+                            ),
+                        ],
                       ),
-                      if (retained != null)
-                        Positioned(
-                          top: 0,
-                          bottom: 0,
-                          right: 0,
-                          child: _AuxDrawer(
-                            content: retained.content,
-                            paneKey: retained.key,
-                            navigatorKey: auxNavigatorKey,
-                            depth: auxDepth,
-                            width: auxTargetWidth,
-                            // Content keeps its final width while the drawer
-                            // reveals it, like the sidebar.
-                            contentWidth: auxFocused ? focusWidth : sideWidth,
-                            focused: auxFocused,
-                            duration: motion,
-                            onMotionEnd: () {
-                              if (ref.read(wideShellProvider).aux == null) {
-                                retainedAux.value = null;
-                              }
-                            },
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ],
-            );
-          },
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
         ),
       ),
     );

@@ -541,11 +541,14 @@ class _AttachmentMenu extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // The macOS client has no camera capture and no native media pipeline
+    // (video transcoding, voice-note packaging), so those entries are absent
+    // rather than failing when tapped.
     final items = <(IconData, String, VoidCallback)>[
-      (LucideIcons.camera, 'Camera', onCamera),
+      if (hasCamera) (LucideIcons.camera, 'Camera', onCamera),
       (LucideIcons.images, 'Photos', onPhotos),
-      (LucideIcons.video, 'Video', onVideo),
-      (LucideIcons.mic, 'Voice note', onVoiceNote),
+      if (hasNativeMediaPipeline) (LucideIcons.video, 'Video', onVideo),
+      if (hasNativeMediaPipeline) (LucideIcons.mic, 'Voice note', onVoiceNote),
       (LucideIcons.file, 'Files', onFiles),
     ];
     return SizedBox(

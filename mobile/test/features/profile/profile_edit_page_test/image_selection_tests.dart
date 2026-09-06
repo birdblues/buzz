@@ -32,6 +32,29 @@ void runProfileEditImageSelectionTests() {
     debugDefaultTargetPlatformOverride = null;
   });
 
+  testWidgets('offers only the photo library and no animated mode on the '
+      'macOS client', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    await tester.pumpWidget(
+      WidgetHelpers.testable(
+        overrides: [profileProvider.overrideWith(_FakeProfileNotifier.new)],
+        child: const ProfileEditPage(startInPhotoEditor: true),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // No camera on the Mac: neither the capture entry nor the animated
+    // (camera-recorded) avatar mode is offered.
+    expect(find.byKey(const ValueKey('image-source-library')), findsOneWidget);
+    expect(find.byKey(const ValueKey('image-source-camera')), findsNothing);
+    expect(find.byKey(const ValueKey('avatar-mode-image')), findsOneWidget);
+    expect(find.byKey(const ValueKey('avatar-mode-emoji')), findsOneWidget);
+    expect(find.byKey(const ValueKey('avatar-mode-animated')), findsNothing);
+    // The framework checks this before tearDown runs.
+    debugDefaultTargetPlatformOverride = null;
+  });
+
   testWidgets('opens the inline camera around the existing avatar center', (
     tester,
   ) async {

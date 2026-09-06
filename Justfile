@@ -845,6 +845,37 @@ mobile-dev:
     unset GIT_DIR GIT_WORK_TREE
     flutter run
 
+# Needs Xcode: run this on the Intel Mac, not on the relay host.
+# Run the client-only macOS desktop app (fork target; worktree-aware debug identity)
+mobile-run-macos:
+    ./scripts/mobile-worktree-overrides.sh
+    unset GIT_DIR GIT_WORK_TREE; cd {{mobile_dir}} && flutter run -d macos
+
+# Release, universal (x86_64 + arm64), zipped with ditto so the bundle survives
+# scp to another Mac. LAN relays are reachable through pairing only when
+# BUZZ_ALLOW_PRIVATE_RELAY is set (default true here). See docs/client-desktop.md.
+# Build the client-only macOS desktop app (fork target)
+mobile-build-macos:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ./scripts/mobile-worktree-overrides.sh
+    unset GIT_DIR GIT_WORK_TREE
+    cd {{mobile_dir}}
+    flutter build macos --release --no-pub \
+        --dart-define=BUZZ_ALLOW_PRIVATE_RELAY="${BUZZ_ALLOW_PRIVATE_RELAY:-true}"
+    app=build/macos/Build/Products/Release/BuzzClient.app
+    ditto -c -k --keepParent "$app" build/macos/BuzzClient.zip
+    echo "archs: $(lipo -archs "$app/Contents/MacOS/BuzzClient")"
+    find "$app/Contents/Frameworks" "$app/Contents/PlugIns" -type f -perm +111 2>/dev/null \
+        | while read -r bin; do
+            if file "$bin" | grep -q Mach-O; then
+                archs=$(lipo -archs "$bin" 2>/dev/null || true)
+                case "$archs" in *x86_64*arm64*|*arm64*x86_64*) ;; *) echo "single-arch: $bin ($archs)";; esac
+            fi
+          done
+    codesign --verify --deep --strict "$app" && echo "codesign OK"
+    echo "→ build/macos/BuzzClient.zip"
+
 # Uninstall stale worktree-suffixed Buzz debug installs (production apps kept)
 mobile-clean:
     ./scripts/mobile-worktree-clean.sh

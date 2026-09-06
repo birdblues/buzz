@@ -17,6 +17,7 @@ import 'package:video_player/video_player.dart';
 import '../../shared/clipboard_utils.dart';
 import '../../shared/deeplink/deep_link.dart';
 import '../../shared/deeplink/pending_deep_link_provider.dart';
+import '../../shared/platform/apple_platform.dart';
 import '../../shared/relay/relay.dart';
 import '../../shared/syntax_highlight.dart';
 import '../../shared/theme/theme.dart';
@@ -68,6 +69,14 @@ final openDownloadedFileProvider = Provider<OpenDownloadedFile>((ref) {
       '${DateTime.now().microsecondsSinceEpoch}-$safeName',
     );
     await file.writeAsBytes(response.bodyBytes, flush: true);
+    if (isDesktopHost) {
+      // open_filex has no macOS implementation. NSWorkspace opens the file
+      // with its default application, as a double-click in Finder would.
+      if (!await launchUrl(Uri.file(file.path))) {
+        throw FileSystemException('Could not open the file', file.path);
+      }
+      return;
+    }
     final result = await OpenFilex.open(file.path);
     if (result.type != ResultType.done) {
       throw FileSystemException(result.message, file.path);

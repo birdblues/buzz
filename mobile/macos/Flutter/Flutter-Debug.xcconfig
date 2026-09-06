@@ -1,0 +1,28 @@
+#include? "Pods/Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig"
+#include "ephemeral/Flutter-Generated.xcconfig"
+
+// The client-only macOS desktop app (fork target). Mirrors ios/Flutter/
+// Debug.xcconfig: the same variables, a distinct bundle identifier so the
+// client installs beside the upstream Tauri desktop app, and a distinct name.
+// Internal/custom builds override these without patching tracked files by
+// writing `mobile/macos/Flutter/AppOverrides.xcconfig` (gitignored).
+BUNDLE_IDENTIFIER = xyz.block.buzz.dogfood.client
+APP_DISPLAY_NAME = Buzz Client
+BUZZ_DEVELOPMENT_TEAM = JMTDPW9CG3
+
+// Signing. flutter_secure_storage keeps the identity in the data-protection
+// keychain on macOS, which needs an application identifier from a real
+// provisioning profile: sign with an Apple Development certificate and keep
+// `keychain-access-groups` in the entitlements. To build without a team
+// (ad-hoc) set BUZZ_CODE_SIGN_IDENTITY = - in AppOverrides.xcconfig and drop
+// the keychain-access-groups entitlement; see docs/client-desktop.md.
+BUZZ_CODE_SIGN_IDENTITY = Apple Development
+BUZZ_KEYCHAIN_ACCESS_GROUP = $(BUNDLE_IDENTIFIER)
+
+// Worktree-aware debug identity (gitignored, written by
+// scripts/mobile-worktree-overrides.sh). Release builds never include it.
+#include? "WorktreeOverrides.xcconfig"
+
+// Developer app-specific overrides are included last: xcconfig
+// later-include-wins is per variable.
+#include? "AppOverrides.xcconfig"

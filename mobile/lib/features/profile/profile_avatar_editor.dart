@@ -13,6 +13,7 @@ import '../../shared/emoji/emoji_data.dart';
 import '../../shared/emoji/emoji_data_provider.dart';
 import '../../shared/emoji/emoji_search.dart';
 import '../../shared/emoji/native_emoji_glyph.dart';
+import '../../shared/platform/apple_platform.dart';
 import '../../shared/relay/relay.dart';
 import '../../shared/theme/theme.dart';
 import '../../shared/widgets/buzz_loading_indicator.dart';
@@ -604,8 +605,12 @@ class _AvatarModeControl extends StatelessWidget {
       padding: const EdgeInsets.all(Grid.quarter),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final segmentWidth =
-              constraints.maxWidth / ProfileAvatarMode.values.length;
+          // Animated avatars are captured with the camera, which the macOS
+          // client does not have; that mode is simply not offered there.
+          final modes = hasCamera
+              ? ProfileAvatarMode.values
+              : const [ProfileAvatarMode.image, ProfileAvatarMode.emoji];
+          final segmentWidth = constraints.maxWidth / modes.length;
           return Stack(
             children: [
               TweenAnimationBuilder<double>(
@@ -630,7 +635,7 @@ class _AvatarModeControl extends StatelessWidget {
               ),
               Row(
                 children: [
-                  for (final mode in ProfileAvatarMode.values)
+                  for (final mode in modes)
                     Expanded(
                       child: Semantics(
                         label: switch (mode) {
@@ -700,17 +705,21 @@ class _ImageMode extends StatelessWidget {
         Row(
           children: [
             const Spacer(),
-            Expanded(
-              child: _ImageSourceOption(
-                key: const ValueKey('image-source-camera'),
-                icon: LucideIcons.camera,
-                iosIcon: IosGlassNavigationIcon.camera,
-                label: 'Camera',
-                onTap: isPicking ? null : onCamera,
-                labelMaxWidth: 96,
+            // The macOS client drives no camera (the `camera` plugin has no
+            // macOS implementation), so only the library option is offered.
+            if (hasCamera) ...[
+              Expanded(
+                child: _ImageSourceOption(
+                  key: const ValueKey('image-source-camera'),
+                  icon: LucideIcons.camera,
+                  iosIcon: IosGlassNavigationIcon.camera,
+                  label: 'Camera',
+                  onTap: isPicking ? null : onCamera,
+                  labelMaxWidth: 96,
+                ),
               ),
-            ),
-            const SizedBox(width: Grid.half),
+              const SizedBox(width: Grid.half),
+            ],
             Expanded(
               child: _ImageSourceOption(
                 key: const ValueKey('image-source-library'),

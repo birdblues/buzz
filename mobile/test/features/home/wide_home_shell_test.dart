@@ -39,6 +39,7 @@ import 'package:buzz/shared/relay/relay.dart';
 import 'package:buzz/shared/theme/theme.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:hooks_riverpod/misc.dart';
@@ -350,6 +351,55 @@ void main() {
     expect(find.byKey(const ValueKey('wide-sidebar-toggle')), findsOneWidget);
     expect(find.byType(ChannelQuickActionsLauncher), findsOneWidget);
   });
+
+  testWidgets(
+    'a macOS window renders the three-column shell and Escape unwinds it',
+    (tester) async {
+      final previousPlatform = debugDefaultTargetPlatformOverride;
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      // The client window never shrinks below 1000x700 (MainFlutterWindow);
+      // 1280x800 is its default size.
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      try {
+        await tester.pumpWidget(await _buildApp());
+        await tester.pumpAndSettle();
+
+        expect(find.byType(WideHomeShell), findsOneWidget);
+        expect(find.byType(HomePage), findsNothing);
+        // No iOS-only native chrome is ever constructed on the Mac.
+        expect(find.byType(UiKitView), findsNothing);
+
+        final shell = tester.element(find.byType(WideHomeShell));
+        final container = ProviderScope.containerOf(shell, listen: false);
+        final notifier = container.read(wideShellProvider.notifier);
+        notifier.selectChannel(_channels.first);
+        await tester.pumpAndSettle();
+        notifier.openAux(
+          const WideAuxThread(
+            threadHead: _threadHead,
+            allMessages: [_threadHead],
+            channelId: _generalId,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byType(ThreadDetailPage), findsOneWidget);
+
+        // Escape closes the thread pane, like system back does on a tablet.
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pumpAndSettle();
+        expect(container.read(wideShellProvider).aux, isNull);
+        expect(find.byType(ThreadDetailPage), findsNothing);
+        // With nothing left to unwind the channel stays selected.
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pumpAndSettle();
+        expect(find.byType(ChannelDetailPage), findsOneWidget);
+      } finally {
+        debugDefaultTargetPlatformOverride = previousPlatform;
+      }
+    },
+  );
 
   testWidgets('tapping a channel selects the main pane without pushing', (
     tester,

@@ -19,6 +19,7 @@ import 'package:nostr/nostr.dart' as nostr;
 
 import '../../shared/mentions/agent_identity_provider.dart';
 import '../../shared/huddle/huddle_session.dart';
+import '../../shared/platform/apple_platform.dart';
 import '../../shared/relay/relay.dart';
 import '../../shared/link_preview/link_preview_fetcher.dart';
 import '../../shared/theme/theme.dart';

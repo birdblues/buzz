@@ -939,6 +939,17 @@ class ComposeBar extends HookConsumerWidget {
         onBack: () => attachmentSurface.value = _AttachmentSurface.menu,
         onCamera: openCamera,
         onPhotos: () {
+          if (isDesktopHost) {
+            // No in-app photo grid on the Mac: go straight to the system
+            // open panel (image_picker_macos), like iOS's "All Photos".
+            chooseAttachment(() async {
+              final photos = await ref
+                  .read(mediaUploadServiceProvider)
+                  .pickGalleryImages();
+              queueImages(photos);
+            }, errorMessage: 'Unable to open your photo library.');
+            return;
+          }
           focusNode.unfocus();
           attachmentSurface.value = _AttachmentSurface.photos;
         },

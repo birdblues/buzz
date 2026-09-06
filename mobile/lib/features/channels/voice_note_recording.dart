@@ -10,6 +10,7 @@ import 'package:just_audio/just_audio.dart' as audio;
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
+import '../../shared/platform/apple_platform.dart';
 import '../../shared/relay/media_image.dart';
 
 /// Maximum duration accepted for a recorded voice note.
@@ -467,8 +468,10 @@ class DeviceVoiceNotePlayerController extends VoiceNotePlayerController {
   }) : _coordinator = coordinator,
        _client = client,
        _temporaryDirectory = temporaryDirectory ?? getTemporaryDirectory,
+       // AVPlayer drops custom headers on iOS and macOS alike, so both play
+       // from an authenticated local copy.
        _requiresAuthenticatedLocalFile =
-           requiresAuthenticatedLocalFile ?? Platform.isIOS,
+           requiresAuthenticatedLocalFile ?? isApplePlatform,
        _downloadTimeout = downloadTimeout,
        _maxDownloadBytes = maxDownloadBytes,
        _player = player ?? _DeviceVoiceNoteAudioPlayerBackend() {

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Personal distribution outside the App Store: no App Sandbox, so the
+	     app needs no network/camera/microphone/file entitlements. -->
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+	<!-- flutter_secure_storage uses the data-protection keychain on macOS,
+	     which requires a keychain access group from the provisioning profile
+	     (drop this together with team signing for an ad-hoc build). -->
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)$(BUZZ_KEYCHAIN_ACCESS_GROUP)</string>
+	</array>
+</dict>
+</plist>

@@ -109,7 +109,9 @@ String biometricProtectionLabel(
   TargetPlatform platform,
   Iterable<BiometricType> enrolledBiometrics,
 ) {
-  if (platform == TargetPlatform.iOS) {
+  // local_auth_darwin reports Touch ID as `fingerprint` on both iOS and
+  // macOS; Face ID exists only on iOS devices.
+  if (platform == TargetPlatform.iOS || platform == TargetPlatform.macOS) {
     if (enrolledBiometrics.contains(BiometricType.face)) return 'Use Face ID';
     if (enrolledBiometrics.contains(BiometricType.fingerprint)) {
       return 'Use Touch ID';

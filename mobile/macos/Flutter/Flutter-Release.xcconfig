@@ -1,0 +1,13 @@
+#include? "Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"
+#include "ephemeral/Flutter-Generated.xcconfig"
+
+// Defaults for the macOS Release build of the client-only desktop app (fork
+// target). Personal or internal builds override these without patching
+// tracked files by writing `mobile/macos/Flutter/AppOverrides.xcconfig`
+// (gitignored) — typically BUZZ_DEVELOPMENT_TEAM.
+BUNDLE_IDENTIFIER = xyz.block.buzz.client
+APP_DISPLAY_NAME = Buzz Client
+BUZZ_DEVELOPMENT_TEAM = EYF346PHUG
+BUZZ_CODE_SIGN_IDENTITY = Apple Development
+BUZZ_KEYCHAIN_ACCESS_GROUP = $(BUNDLE_IDENTIFIER)
+#include? "AppOverrides.xcconfig"

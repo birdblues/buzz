@@ -5666,6 +5666,146 @@ void main() {
       expect(sentTags!.where((tag) => tag[0] == 'link-preview'), isEmpty);
     });
   });
+
+  group('macOS client', () {
+    testWidgets('the attachment menu offers no camera, video, or voice note', (
+      tester,
+    ) async {
+      final previousPlatform = debugDefaultTargetPlatformOverride;
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      try {
+        await tester.pumpWidget(
+          _buildComposeBar(
+            uploadService: _testUploadService(nostr.Keys.generate().nsec),
+            onSend:
+                (
+                  content,
+                  mentionPubkeys, {
+                  mediaTags = const <List<String>>[],
+                }) async {},
+          ),
+        );
+        await _expandComposer(tester);
+        await _openAttachmentMenu(tester);
+
+        expect(find.byKey(const ValueKey('attachment-menu')), findsOneWidget);
+        expect(find.text('Photos'), findsOneWidget);
+        expect(find.text('Files'), findsOneWidget);
+        expect(find.text('Camera'), findsNothing);
+        expect(find.text('Video'), findsNothing);
+        expect(find.text('Voice note'), findsNothing);
+      } finally {
+        debugDefaultTargetPlatformOverride = previousPlatform;
+      }
+    });
+
+    testWidgets(
+      'Enter sends; Shift+Enter, a composing IME, and Escape do not',
+      (tester) async {
+        final previousPlatform = debugDefaultTargetPlatformOverride;
+        debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+        final focusNode = FocusNode();
+        addTearDown(focusNode.dispose);
+        final sent = <String>[];
+        try {
+          await tester.pumpWidget(
+            _buildComposeBar(
+              uploadService: _testUploadService(nostr.Keys.generate().nsec),
+              focusNode: focusNode,
+              onSend:
+                  (
+                    content,
+                    mentionPubkeys, {
+                    mediaTags = const <List<String>>[],
+                  }) async {
+                    sent.add(content);
+                  },
+            ),
+          );
+          await _expandComposer(tester);
+          await tester.enterText(find.byType(TextField), 'hello');
+          await tester.pump();
+          expect(focusNode.hasFocus, isTrue);
+
+          // Shift+Enter is a newline, never a send.
+          await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+          await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+          await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+          await tester.pump();
+          expect(sent, isEmpty);
+
+          // Mid-composition (Korean/Japanese IME) Enter commits the text.
+          final controller = tester
+              .widget<TextField>(find.byType(TextField))
+              .controller!;
+          controller.value = const TextEditingValue(
+            text: '안녕',
+            selection: TextSelection.collapsed(offset: 2),
+            composing: TextRange(start: 0, end: 2),
+          );
+          await tester.pump();
+          await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+          await tester.pump();
+          expect(sent, isEmpty);
+
+          // Plain Enter on settled text sends it.
+          controller.value = const TextEditingValue(
+            text: '안녕',
+            selection: TextSelection.collapsed(offset: 2),
+          );
+          await tester.pump();
+          await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+          await tester.pump();
+          await tester.pump(const Duration(seconds: 1));
+          expect(sent, ['안녕']);
+
+          // Escape leaves the field instead of sending or clearing it.
+          await _expandComposer(tester);
+          await tester.enterText(find.byType(TextField), 'draft');
+          await tester.pump();
+          expect(focusNode.hasFocus, isTrue);
+          await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+          await tester.pump();
+          expect(focusNode.hasFocus, isFalse);
+          expect(sent, ['안녕']);
+        } finally {
+          debugDefaultTargetPlatformOverride = previousPlatform;
+        }
+      },
+    );
+
+    testWidgets('Enter on an iPad keyboard keeps its newline behaviour', (
+      tester,
+    ) async {
+      final previousPlatform = debugDefaultTargetPlatformOverride;
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      final sent = <String>[];
+      try {
+        await tester.pumpWidget(
+          _buildComposeBar(
+            uploadService: _testUploadService(nostr.Keys.generate().nsec),
+            onSend:
+                (
+                  content,
+                  mentionPubkeys, {
+                  mediaTags = const <List<String>>[],
+                }) async {
+                  sent.add(content);
+                },
+          ),
+        );
+        await _expandComposer(tester);
+        await tester.enterText(find.byType(TextField), 'hello');
+        await tester.pump();
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+        expect(sent, isEmpty);
+      } finally {
+        debugDefaultTargetPlatformOverride = previousPlatform;
+      }
+    });
+  });
 }
 
 MediaUploadService _testUploadService(String nsec) {

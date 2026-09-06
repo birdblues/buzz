@@ -1,0 +1,12 @@
+# Flutter-related
+**/Flutter/ephemeral/
+**/Pods/
+
+# Xcode-related
+**/dgph
+**/xcuserdata/
+
+# Developer / worktree identity overrides (see ios/.gitignore and
+# scripts/mobile-worktree-overrides.sh)
+Flutter/AppOverrides.xcconfig
+Flutter/WorktreeOverrides.xcconfig

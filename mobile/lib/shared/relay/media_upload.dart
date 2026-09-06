@@ -12,6 +12,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:nostr/nostr.dart' as nostr;
 import 'package:pointycastle/digests/sha256.dart';
 
+import '../platform/apple_platform.dart';
 import 'animated_image_sanitizer.dart';
 import 'media_auth.dart';
 import 'mp4_fast_start.dart';

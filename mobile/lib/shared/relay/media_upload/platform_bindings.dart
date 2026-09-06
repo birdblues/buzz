@@ -21,10 +21,15 @@ final mediaUploadServiceProvider = Provider<MediaUploadService>((ref) {
       source: ImageSource.gallery,
       requestFullMetadata: false,
     ),
-    pickCameraImage: () => picker.pickImage(
-      source: ImageSource.camera,
-      requestFullMetadata: false,
-    ),
+    // image_picker's camera source throws on macOS; the composer hides the
+    // Camera entry there and the service treats a missing picker as "no
+    // camera".
+    pickCameraImage: hasCamera
+        ? () => picker.pickImage(
+            source: ImageSource.camera,
+            requestFullMetadata: false,
+          )
+        : null,
     pickGalleryImages: () => picker.pickMultiImage(requestFullMetadata: false),
     pickGalleryVideo: () => picker.pickVideo(source: ImageSource.gallery),
     pickAttachmentFile: file_selector.openFile,
