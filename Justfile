@@ -869,10 +869,15 @@ mobile-build-macos:
     # bundle has no Contents/PlugIns); a single-arch binary fails the recipe.
     dirs=("$app/Contents/MacOS" "$app/Contents/Frameworks")
     [ -d "$app/Contents/PlugIns" ] && dirs+=("$app/Contents/PlugIns")
+    # Patterns carry a leading "(" because macOS ships bash 3.2, whose parser
+    # cannot read a bare "pattern)" inside a $( ) substitution.
     single=$(find "${dirs[@]}" -type f -perm +111 | while read -r bin; do
         file "$bin" | grep -q Mach-O || continue
         archs=$(lipo -archs "$bin" 2>/dev/null || true)
-        case "$archs" in *x86_64*arm64*|*arm64*x86_64*) ;; *) echo "$bin ($archs)";; esac
+        case "$archs" in
+            (*x86_64*arm64*|*arm64*x86_64*) ;;
+            (*) echo "$bin ($archs)" ;;
+        esac
     done)
     if [ -n "$single" ]; then
         echo "single-arch Mach-O in the bundle:"
