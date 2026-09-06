@@ -46,24 +46,48 @@ class _SidebarColumn extends ConsumerWidget {
                   data: mediaQuery.copyWith(
                     size: Size(kWideSidebarWidth, mediaQuery.size.height),
                   ),
-                  child: Stack(
-                    fit: StackFit.expand,
+                  child: Column(
                     children: [
-                      ChannelsPage(
-                        settingsPageBuilder: settingsPageBuilder,
-                        onSettingsTransitionProgress: (_) {},
-                        pinnedHeader: _SidebarNavRows(
-                          hasUnreadInbox: hasUnreadInbox,
+                      Expanded(
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            ChannelsPage(
+                              settingsPageBuilder: settingsPageBuilder,
+                              onSettingsTransitionProgress: (_) {},
+                              pinnedHeader: _SidebarNavRows(
+                                hasUnreadInbox: hasUnreadInbox,
+                              ),
+                              pinnedHeaderHeight: _SidebarNavRows.height,
+                              // Settings lives in the profile card below,
+                              // like the desktop app.
+                              showProfileAvatar: false,
+                            ),
+                            ChannelQuickActionsLauncher(
+                              visible: !collapsed,
+                              navigationBarHeight: mobileTabBarHeight,
+                              navigationBarBottomGap: mobileTabBarBottomGap,
+                              navigationBarWidth: 0,
+                              systemBottomInset: 0,
+                              rightInset: Grid.xs,
+                            ),
+                          ],
                         ),
-                        pinnedHeaderHeight: _SidebarNavRows.height,
                       ),
-                      ChannelQuickActionsLauncher(
-                        visible: !collapsed,
-                        navigationBarHeight: mobileTabBarHeight,
-                        navigationBarBottomGap: mobileTabBarBottomGap,
-                        navigationBarWidth: 0,
-                        systemBottomInset: mediaQuery.padding.bottom,
-                        rightInset: Grid.xs,
+                      Divider(
+                        height: 1,
+                        thickness: 1,
+                        color: context.colors.outlineVariant.withValues(
+                          alpha: 0.5,
+                        ),
+                      ),
+                      Padding(
+                        padding: EdgeInsets.only(
+                          bottom: mediaQuery.padding.bottom,
+                        ),
+                        child: _SidebarProfileCard(
+                          settingsPageBuilder: settingsPageBuilder,
+                        ),
                       ),
                     ],
                   ),

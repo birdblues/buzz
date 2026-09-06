@@ -20,7 +20,13 @@ earlier desktop work is preserved at tag `fork-desktop-2026-09-06`.
 `flutter build macos` of the mobile app: the same three-column shell the
 iPad uses (`lib/shared/layout/layout_mode.dart` — wide when the content is
 at least 1000×600), the same relay client, link previews, sandboxed HTML
-apps, forum, pulse, search, invites and pairing. Nothing here talks to the
+apps, forum, pulse, search, invites and pairing. The wide shell's sidebar
+ends in a profile card like the desktop's (`wide_home_shell/
+sidebar_profile_card.dart`): your avatar with presence dot and name over
+the active community's icon (🐝 when it has none) and name; the card opens
+Settings and the community row opens the switcher, and the channel list
+header drops its Settings avatar there. The community name comes from the
+relay when one is set (`docs/community-name.md`). Nothing here talks to the
 host desktop except pairing (NIP-AB over the relay); everything else is read
 from the relay.
 

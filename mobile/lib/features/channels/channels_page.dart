@@ -169,10 +169,16 @@ class ChannelsPage extends HookConsumerWidget {
     this.tabReselection,
     this.pinnedHeader,
     this.pinnedHeaderHeight = 0,
+    this.showProfileAvatar = true,
     super.key,
   }) : assert(pinnedHeader == null || pinnedHeaderHeight > 0);
 
   final WidgetBuilder settingsPageBuilder;
+
+  /// Whether the header's trailing profile avatar (the Settings entry point
+  /// on a phone) is shown. The wide shell hides it and offers Settings from
+  /// its sidebar profile card instead, like the desktop app.
+  final bool showProfileAvatar;
 
   /// Content pinned below the community header, above the scrolling list.
   /// The wide shell uses it for its Activity/Search navigation rows.
@@ -313,16 +319,7 @@ class ChannelsPage extends HookConsumerWidget {
       return timer.cancel;
     }, [isReconnectingWithContent]);
 
-    void openCommunitySwitcher() {
-      unawaited(HapticFeedback.selectionClick());
-      ref.invalidate(communityIconProvider);
-      showBuzzModalBottomSheet<void>(
-        context: context,
-        showCloseButton: false,
-        showDragHandle: false,
-        builder: (_) => const _CommunitySwitcherSheet(),
-      );
-    }
+    void openCommunitySwitcher() => showCommunitySwitcher(context, ref);
 
     final topSectionGradient = context.appColors.topSectionGradient;
     final usesPinnedGradient = topSectionGradient != null;
@@ -353,24 +350,26 @@ class ChannelsPage extends HookConsumerWidget {
           onTap: openCommunitySwitcher,
         ),
         actions: [
-          SizedBox(
-            width: Grid.xl,
-            height: Grid.xl,
-            child: Center(
-              child: ProfileAvatar(
-                size: _kTopSectionProfileAvatarSize,
-                showPresence: false,
-                onTap: () {
-                  unawaited(HapticFeedback.lightImpact());
-                  final route = _SettingsPageRoute(
-                    builder: settingsPageBuilder,
-                    onTransitionProgress: onSettingsTransitionProgress,
-                  );
-                  Navigator.of(context).push(route);
-                },
+          if (showProfileAvatar)
+            SizedBox(
+              width: Grid.xl,
+              height: Grid.xl,
+              child: Center(
+                child: ProfileAvatar(
+                  size: _kTopSectionProfileAvatarSize,
+                  showPresence: false,
+                  onTap: () {
+                    unawaited(HapticFeedback.lightImpact());
+                    Navigator.of(context).push(
+                      settingsPageRoute(
+                        builder: settingsPageBuilder,
+                        onTransitionProgress: onSettingsTransitionProgress,
+                      ),
+                    );
+                  },
+                ),
               ),
             ),
-          ),
         ],
         bottomHeight: topSectionBottomHeight,
         bottom: pinnedHeader == null
@@ -397,6 +396,29 @@ class ChannelsPage extends HookConsumerWidget {
 /// A custom route deliberately avoids [MaterialPageRoute]'s platform exit
 /// transition on Home. Settings has a centered scale-and-fade transition, not
 /// a lateral page push.
+/// Opens the community switcher sheet. Shared by the channel list header and
+/// the wide shell's sidebar profile card.
+void showCommunitySwitcher(BuildContext context, WidgetRef ref) {
+  unawaited(HapticFeedback.selectionClick());
+  ref.invalidate(communityIconProvider);
+  showBuzzModalBottomSheet<void>(
+    context: context,
+    showCloseButton: false,
+    showDragHandle: false,
+    builder: (_) => const _CommunitySwitcherSheet(),
+  );
+}
+
+/// The Settings route as pushed from the channel list header, so the wide
+/// shell's sidebar profile card opens Settings with the same transition.
+Route<void> settingsPageRoute({
+  required WidgetBuilder builder,
+  required ValueChanged<double> onTransitionProgress,
+}) => _SettingsPageRoute(
+  builder: builder,
+  onTransitionProgress: onTransitionProgress,
+);
+
 class _SettingsPageRoute extends PageRouteBuilder<void> {
   _SettingsPageRoute({
     required WidgetBuilder builder,
