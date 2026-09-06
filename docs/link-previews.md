@@ -5,6 +5,14 @@ client does with it. The contract is set by the relay and the desktop app
 (upstream "rich link previews" work); this page records it in one place and
 adds the mobile reader.
 
+> **Fork note (2026-09-06).** Desktop behaviour is upstream's own: the
+> fork's desktop tweaks that once accompanied this page (forum post preview
+> clipping in `ForumPostCard`, drawer wiring) were removed from `dev` when
+> `desktop/` was pinned to upstream `block/buzz` main; they survive at tag
+> `fork-desktop-2026-09-06`. Everything below about the mobile reader and
+> the mobile composer applies to the Flutter app on iPhone, iPad and the
+> macOS client build.
+
 ## Contract: the sender previews, readers render
 
 Recipients never contact the linked site. The **sender's** client fetches the

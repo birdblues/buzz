@@ -7,6 +7,17 @@ a full-screen WebView (mobile). Upstream Buzz has no such surface and treats
 HTML as an inert download everywhere; this fork keeps that behaviour on
 `/media/*` and adds a second, gated door.
 
+> **Fork note (2026-09-06).** The desktop (Tauri) side described below —
+> `AppCard`, the auxiliary drawer, `app_content.rs`,
+> `sandbox_frame_hardening.rs`, `navigation_policy.rs`, the
+> `buzz-media://…/app/` proxy branch and the Intel-Mac desktop test — was
+> **removed from `dev`**: the fork now keeps `desktop/` byte-identical to
+> upstream `block/buzz` main, and the Mac mini host runs upstream desktop
+> unmodified. That code is preserved at tag `fork-desktop-2026-09-06`. App
+> cards on a desktop are provided by the Flutter client app (the macOS
+> target of `mobile/`), which shares the mobile implementation. The relay
+> door and the CLI attachment path are unchanged.
+
 ## Threat model in one line
 
 The boundary is the **rendering layer, not the uploader**. Even agent-only
