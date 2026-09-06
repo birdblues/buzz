@@ -10,7 +10,7 @@
 //! | 9030 | Add member      | admin or owner       |
 //! | 9031 | Remove member   | admin or owner       |
 //! | 9032 | Change role     | owner only           |
-//! | 9033 | Set workspace profile (icon) | admin or owner; on an open relay whose community has no admin/owner row at all, any authenticated sender (see [`may_set_workspace_profile`]) |
+//! | 9033 | Set workspace profile (icon; fork: name) | admin or owner; on an open relay whose community has no admin/owner row at all, any authenticated sender (see [`may_set_workspace_profile`]) |
 
 use std::sync::Arc;
 
@@ -92,6 +92,63 @@ fn validate_workspace_icon(icon: &str) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+/// Maximum accepted workspace name length, in characters (fork: NIP-11 `name`).
+const MAX_WORKSPACE_NAME_CHARS: usize = 64;
+
+/// Validate a workspace name tag value (fork). Returns the trimmed name, or
+/// `None` when the tag clears the name (empty or whitespace only). Control
+/// characters — which include newlines — are refused rather than stripped.
+fn validate_workspace_name(raw: &str) -> Result<Option<String>, String> {
+    if raw.chars().any(char::is_control) {
+        return Err("name contains control characters".to_string());
+    }
+    let name = raw.trim();
+    if name.is_empty() {
+        return Ok(None);
+    }
+    let len = name.chars().count();
+    if len > MAX_WORKSPACE_NAME_CHARS {
+        return Err(format!(
+            "name too long: {len} characters (max {MAX_WORKSPACE_NAME_CHARS})"
+        ));
+    }
+    Ok(Some(name.to_string()))
+}
+
+/// What a kind:9033 event asks to change. `None` leaves a field untouched;
+/// `Some(None)` clears it; `Some(Some(value))` sets it.
+#[derive(Debug, PartialEq, Eq)]
+struct WorkspaceProfileUpdate {
+    icon: Option<Option<String>>,
+    name: Option<Option<String>>,
+}
+
+/// Turn the `icon` / `name` tags of a kind:9033 event into the writes to make.
+///
+/// Upstream's contract is that a 9033 without an `icon` tag clears the icon
+/// (the desktop always sends one, empty to clear). The fork's `name` tag must
+/// not inherit that: an event carrying only a `name` leaves the icon alone,
+/// so renaming never needs to know the current icon — and, symmetrically, an
+/// upstream desktop icon update, which never sends `name`, leaves the name
+/// alone.
+fn plan_workspace_profile_update(
+    icon_tag: Option<String>,
+    name_tag: Option<String>,
+) -> Result<WorkspaceProfileUpdate, String> {
+    let icon = if icon_tag.is_some() || name_tag.is_none() {
+        let icon = icon_tag.unwrap_or_default();
+        validate_workspace_icon(&icon)?;
+        Some((!icon.is_empty()).then_some(icon))
+    } else {
+        None
+    };
+    let name = match name_tag {
+        Some(raw) => Some(validate_workspace_name(&raw)?),
+        None => None,
+    };
+    Ok(WorkspaceProfileUpdate { icon, name })
 }
 
 /// Whether `sender_role` may set the workspace profile (kind:9033).
@@ -287,20 +344,35 @@ async fn execute_relay_admin_command(
             );
         }
 
-        // Empty or missing icon tag clears the workspace icon.
-        let icon = extract_tag_value(event, "icon").unwrap_or_default();
-        validate_workspace_icon(&icon)?;
+        // Empty or missing icon tag clears the workspace icon; the fork's
+        // `name` tag is independent (see `plan_workspace_profile_update`).
+        let update = plan_workspace_profile_update(
+            extract_tag_value(event, "icon"),
+            extract_tag_value(event, "name"),
+        )?;
 
-        state
-            .db
-            .set_community_icon(
-                tenant.community(),
-                (!icon.is_empty()).then_some(icon.as_str()),
-            )
-            .await
-            .map_err(|e| format!("failed to store workspace icon: {e}"))?;
+        if let Some(icon) = &update.icon {
+            state
+                .db
+                .set_community_icon(tenant.community(), icon.as_deref())
+                .await
+                .map_err(|e| format!("failed to store workspace icon: {e}"))?;
+        }
+        if let Some(name) = &update.name {
+            state
+                .db
+                .set_community_name(tenant.community(), name.as_deref())
+                .await
+                .map_err(|e| format!("failed to store workspace name: {e}"))?;
+        }
 
-        info!(sender = %sender_hex, icon_len = icon.len(), "workspace profile updated");
+        info!(
+            sender = %sender_hex,
+            icon_len = update.icon.as_ref().and_then(|i| i.as_ref()).map_or(0, String::len),
+            icon_changed = update.icon.is_some(),
+            name_changed = update.name.is_some(),
+            "workspace profile updated"
+        );
         return Ok(());
     }
 
@@ -675,6 +747,96 @@ mod postgres_tests {
     fn workspace_icon_rejects_whitespace_and_control() {
         assert!(validate_workspace_icon("https://example.com/a b.png").is_err());
         assert!(validate_workspace_icon("https://example.com/a\nb.png").is_err());
+    }
+
+    // ─── Fork: workspace name (NIP-11 `name`) ───────────────────────────────
+
+    #[test]
+    fn workspace_name_trims_and_accepts_unicode() {
+        assert_eq!(
+            validate_workspace_name("  슈퍼지구  ").unwrap(),
+            Some("슈퍼지구".to_string())
+        );
+        assert_eq!(
+            validate_workspace_name("Buzz — team relay").unwrap(),
+            Some("Buzz — team relay".to_string())
+        );
+    }
+
+    #[test]
+    fn workspace_name_empty_or_blank_clears() {
+        assert_eq!(validate_workspace_name("").unwrap(), None);
+        assert_eq!(validate_workspace_name("   ").unwrap(), None);
+    }
+
+    #[test]
+    fn workspace_name_rejects_control_characters_and_oversize() {
+        assert!(validate_workspace_name("two\nlines").is_err());
+        assert!(validate_workspace_name("tab\tbed").is_err());
+        assert!(validate_workspace_name("nul\u{0}").is_err());
+        assert!(validate_workspace_name(&"가".repeat(64)).is_ok());
+        assert!(validate_workspace_name(&"가".repeat(65)).is_err());
+    }
+
+    /// The desktop's icon editor sends `icon` only (empty to clear) and must
+    /// keep working exactly as upstream shipped it: the icon is written, the
+    /// name is untouched.
+    #[test]
+    fn profile_update_icon_only_matches_upstream_and_leaves_name_alone() {
+        let set =
+            plan_workspace_profile_update(Some("https://example.com/icon.png".to_string()), None)
+                .unwrap();
+        assert_eq!(
+            set.icon,
+            Some(Some("https://example.com/icon.png".to_string()))
+        );
+        assert_eq!(set.name, None);
+
+        let clear = plan_workspace_profile_update(Some(String::new()), None).unwrap();
+        assert_eq!(clear.icon, Some(None));
+        assert_eq!(clear.name, None);
+
+        // Upstream contract: no tags at all clears the icon.
+        let bare = plan_workspace_profile_update(None, None).unwrap();
+        assert_eq!(bare.icon, Some(None));
+        assert_eq!(bare.name, None);
+    }
+
+    /// A rename (`name` only) never touches the icon, so `buzz community
+    /// set-name` does not need to know the current icon to keep it.
+    #[test]
+    fn profile_update_name_only_leaves_icon_alone() {
+        let update = plan_workspace_profile_update(None, Some("슈퍼지구".to_string())).unwrap();
+        assert_eq!(update.icon, None);
+        assert_eq!(update.name, Some(Some("슈퍼지구".to_string())));
+
+        let clear = plan_workspace_profile_update(None, Some("  ".to_string())).unwrap();
+        assert_eq!(clear.icon, None);
+        assert_eq!(clear.name, Some(None));
+    }
+
+    #[test]
+    fn profile_update_with_both_tags_writes_both() {
+        let update = plan_workspace_profile_update(
+            Some("https://example.com/icon.png".to_string()),
+            Some("Buzz".to_string()),
+        )
+        .unwrap();
+        assert_eq!(
+            update.icon,
+            Some(Some("https://example.com/icon.png".to_string()))
+        );
+        assert_eq!(update.name, Some(Some("Buzz".to_string())));
+    }
+
+    #[test]
+    fn profile_update_rejects_an_invalid_field_without_partial_plans() {
+        assert!(plan_workspace_profile_update(
+            Some("javascript:alert(1)".to_string()),
+            Some("Buzz".to_string())
+        )
+        .is_err());
+        assert!(plan_workspace_profile_update(None, Some("a\nb".to_string())).is_err());
     }
 
     #[test]

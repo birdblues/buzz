@@ -21,6 +21,7 @@ import 'package:buzz/features/profile/profile_provider.dart';
 import 'package:buzz/shared/profile/user_profile.dart';
 import 'package:buzz/shared/auth/auth.dart';
 import 'package:buzz/shared/community/community_icon_provider.dart';
+import 'package:buzz/shared/community/community_relay_name_provider.dart';
 import 'package:buzz/shared/relay/relay.dart';
 import 'package:buzz/shared/theme/theme.dart';
 import 'package:buzz/shared/widgets/avatar_image.dart';
@@ -37,6 +38,7 @@ void main() {
     bool disableAnimations = false,
     double bottomPadding = 0,
     Map<String, String?> communityIcons = const {},
+    Map<String, String?> communityNames = const {},
     ValueChanged<String>? onCommunityIconLoad,
     TextScaler textScaler = TextScaler.noScaling,
     Gradient? topSectionGradient,
@@ -52,6 +54,11 @@ void main() {
           onCommunityIconLoad?.call(relayUrl);
           return communityIcons[relayUrl];
         }),
+        // No relay is reachable from a widget test; a test that wants the
+        // relay to advertise a community name passes it here.
+        communityRelayNameProvider.overrideWith(
+          (ref, relayUrl) async => communityNames[relayUrl],
+        ),
         dmDirectoryPreviewEnabledProvider.overrideWith(
           (ref) => previewDirectory,
         ),
@@ -1119,6 +1126,64 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(iconLoads, greaterThan(initialIconLoads));
+  });
+
+  testWidgets('the header adopts the name the relay advertises', (
+    tester,
+  ) async {
+    // Paired before the relay had a name: the app made one up from the host.
+    final community = Community(
+      id: 'lan',
+      name: '192.168.1.99',
+      relayUrl: 'ws://192.168.1.99:3000',
+      addedAt: DateTime(2025),
+    );
+    final notifier = _FakeCommunityListNotifier([community]);
+
+    await tester.pumpWidget(
+      buildTestable(
+        communityNames: {community.relayUrl: '슈퍼지구'},
+        overrides: [
+          channelsProvider.overrideWith(() => _FakeNotifier(testChannels)),
+          communityListProvider.overrideWith(() => notifier),
+          activeCommunityProvider.overrideWith(
+            (ref) async =>
+                (await ref.watch(communityListProvider.future)).single,
+          ),
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(notifier.adoptedNames, [('lan', '슈퍼지구')]);
+    expect(find.text('슈퍼지구'), findsWidgets);
+    expect(find.text('192.168.1.99'), findsNothing);
+  });
+
+  testWidgets('the header keeps its name when the relay advertises none', (
+    tester,
+  ) async {
+    final community = Community(
+      id: 'lan',
+      name: '192.168.1.99',
+      relayUrl: 'ws://192.168.1.99:3000',
+      addedAt: DateTime(2025),
+    );
+    final notifier = _FakeCommunityListNotifier([community]);
+
+    await tester.pumpWidget(
+      buildTestable(
+        overrides: [
+          channelsProvider.overrideWith(() => _FakeNotifier(testChannels)),
+          communityListProvider.overrideWith(() => notifier),
+          activeCommunityProvider.overrideWith((ref) async => community),
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(notifier.adoptedNames, isEmpty);
+    expect(find.text('192.168.1.99'), findsWidgets);
   });
 
   testWidgets('community switcher header grows with accessible text', (
@@ -2462,9 +2527,20 @@ class _FakeCommunityListNotifier extends CommunityListNotifier {
 
   List<Community> _communities;
   final List<String> removedIds = [];
+  final List<(String, String)> adoptedNames = [];
 
   @override
   Future<List<Community>> build() async => _communities;
+
+  @override
+  Future<void> adoptRelayName(String id, String name) async {
+    adoptedNames.add((id, name));
+    _communities = [
+      for (final community in _communities)
+        community.id == id ? community.copyWith(name: name) : community,
+    ];
+    state = AsyncData(_communities);
+  }
 
   @override
   Future<void> removeCommunity(String id) async {

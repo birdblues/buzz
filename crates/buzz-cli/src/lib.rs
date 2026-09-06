@@ -192,6 +192,9 @@ enum Cmd {
     /// Manage your custom emoji set (workspace palette is the union of all members' sets)
     #[command(subcommand)]
     Emoji(EmojiCmd),
+    /// Read and set the community profile the relay advertises (NIP-11 name and icon)
+    #[command(subcommand)]
+    Community(CommunityCmd),
     /// Search and share GIFs via the relay's KLIPY proxy
     #[command(subcommand)]
     Gifs(GifsCmd),
@@ -772,6 +775,22 @@ pub enum ReactionsCmd {
         /// Event ID (64-char hex)
         #[arg(long)]
         event: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum CommunityCmd {
+    /// Show the profile the relay advertises for this community (NIP-11 `name` and `icon`)
+    Profile,
+    /// Set the community name every client shows (relay admin/owner; fork feature).
+    /// Sends a kind:9033 workspace-profile command with a `name` tag; the icon is untouched.
+    SetName {
+        /// The name, at most 64 characters on one line (required unless --clear)
+        #[arg(required_unless_present = "clear")]
+        name: Option<String>,
+        /// Remove the name so clients fall back to a host-derived one
+        #[arg(long, conflicts_with = "name")]
+        clear: bool,
     },
 }
 
@@ -2116,6 +2135,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
         Cmd::Canvas(sub) => commands::channels::dispatch_canvas(sub, &client).await,
         Cmd::Reactions(sub) => commands::reactions::dispatch(sub, &client).await,
         Cmd::Emoji(sub) => commands::emoji::dispatch(sub, &client).await,
+        Cmd::Community(sub) => commands::community::dispatch(sub, &client).await,
         Cmd::Gifs(sub) => commands::gifs::dispatch(sub, &client).await,
         Cmd::Dms(sub) => commands::dms::dispatch(sub, &client).await,
         Cmd::Users(sub) => commands::users::dispatch(sub, &client, &cli.format).await,

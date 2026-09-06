@@ -451,8 +451,21 @@ class _CommunityHeaderTitle extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final name = ref.watch(activeCommunityProvider).value?.name;
-    final title = name?.trim();
+    final community = ref.watch(activeCommunityProvider).value;
+    if (community != null) {
+      // The relay may advertise a community name (fork: NIP-11 `name`).
+      // Adopt it over the host-derived placeholder as soon as it is known;
+      // the title below re-renders from the stored community.
+      ref.listen(communityRelayNameProvider(community.relayUrl), (_, next) {
+        final relayName = next.value;
+        if (relayName != null && relayName != community.name) {
+          ref
+              .read(communityListProvider.notifier)
+              .adoptRelayName(community.id, relayName);
+        }
+      });
+    }
+    final title = community?.name.trim();
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,

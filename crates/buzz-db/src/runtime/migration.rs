@@ -702,7 +702,8 @@ mod postgres_tests {
         let mut migrations: Vec<_> = MIGRATOR.iter().collect();
         migrations.sort_by_key(|migration| migration.version);
 
-        assert_eq!(migrations.len(), 44);
+        // 44 upstream migrations + the fork's 0045_community_name.
+        assert_eq!(migrations.len(), 45);
         assert_eq!(migrations[0].version, 1);
         assert_eq!(&*migrations[0].description, "initial schema");
         assert!(migrations[0]
@@ -1287,6 +1288,16 @@ mod postgres_tests {
             desired_schema.contains("'rate_limit_violations'\n    ]::TEXT[])"),
             "schema.sql exclusion list must match the pre-0041 body after ledger removal"
         );
+
+        // Fork: per-community workspace name (NIP-11 `name`), the same
+        // additive shape as the 0003 icon column. Its own version, never
+        // folded into an earlier file; schema.sql carries the column too.
+        assert_eq!(migrations[44].version, 45);
+        assert!(migrations[44]
+            .sql
+            .as_str()
+            .contains("ALTER TABLE communities ADD COLUMN name TEXT"));
+        assert!(desired_schema.contains("name            TEXT,"));
     }
 
     #[test]

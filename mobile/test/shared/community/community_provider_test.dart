@@ -71,6 +71,37 @@ void main() {
       expect(snapshots, [isEmpty]);
     });
 
+    test('adopts a relay-advertised name and persists it', () async {
+      final community = Community.create(
+        name: '192.168.1.99',
+        relayUrl: 'ws://192.168.1.99:3000',
+        nsec: nostr.Keys.generate().nsec,
+      );
+      await communityStorage.save(community);
+      container = createContainer();
+      await container.read(communityListProvider.future);
+      final notifier = container.read(communityListProvider.notifier);
+      final snapshotsBefore = snapshots.length;
+
+      await notifier.adoptRelayName(community.id, ' 슈퍼지구 ');
+
+      final inState = container.read(communityListProvider).value!.single;
+      expect(inState.name, '슈퍼지구');
+      expect(inState.relayUrl, community.relayUrl);
+      expect(inState.nsec, community.nsec);
+      final stored = await communityStorage.loadAll();
+      expect(stored.single.name, '슈퍼지구');
+      expect(snapshots.length, snapshotsBefore + 1);
+      expect(snapshots.last.single.name, '슈퍼지구');
+
+      // Same name again, a blank name, or an unknown id: nothing happens.
+      await notifier.adoptRelayName(community.id, '슈퍼지구');
+      await notifier.adoptRelayName(community.id, '   ');
+      await notifier.adoptRelayName('missing', 'Other');
+      expect(snapshots.length, snapshotsBefore + 1);
+      expect(container.read(communityListProvider).value!.single.name, '슈퍼지구');
+    });
+
     test('exports migrated communities on startup', () async {
       final community = Community.create(
         name: 'Migrated',

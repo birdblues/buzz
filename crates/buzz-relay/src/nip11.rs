@@ -158,7 +158,7 @@ impl RelayInfo {
     /// `self`. Pass `Some` whenever the relay has a stable signing key.
     ///
     /// `icon` is the community's workspace icon (see
-    /// [`workspace_icon_for_host`]) — a host-scoped scalar, pre-fetched by
+    /// [`workspace_profile_for_host`]) — a host-scoped scalar, pre-fetched by
     /// the caller so `build` itself stays static-input.
     ///
     /// `advertise_nip43` controls whether NIP-43 (relay membership) is added
@@ -225,6 +225,19 @@ impl RelayInfo {
     }
 }
 
+impl RelayInfo {
+    /// Replaces the default relay name with the community's workspace name
+    /// (fork: `communities.name`, set via the kind:9033 `name` tag). A missing
+    /// or blank name keeps the default, so documents for unnamed communities
+    /// are unchanged.
+    pub fn with_workspace_name(mut self, name: Option<&str>) -> Self {
+        if let Some(name) = name.map(str::trim).filter(|name| !name.is_empty()) {
+            self.name = name.to_string();
+        }
+        self
+    }
+}
+
 /// Axum handler that returns the NIP-11 relay information document as JSON.
 pub async fn relay_info_handler(
     axum::extract::State(state): axum::extract::State<std::sync::Arc<crate::state::AppState>>,
@@ -288,7 +301,7 @@ fn push_descriptor(
 /// config-derived scalar identifiers; no provider credential enters NIP-11.
 pub(crate) async fn nip11_document(state: &crate::state::AppState, raw_host: &str) -> RelayInfo {
     let (relay_self, advertise_nip43) = nip11_facts(state);
-    let icon = workspace_icon_for_host(state, raw_host).await;
+    let (icon, name) = workspace_profile_for_host(state, raw_host).await;
     let admin_api = admin_api_advertisement(state.config.admin.as_ref());
     let mut info = RelayInfo::build(
         relay_self.as_deref(),
@@ -298,7 +311,8 @@ pub(crate) async fn nip11_document(state: &crate::state::AppState, raw_host: &st
         state.config.pairing_relay_url.as_deref(),
         admin_api.as_deref(),
         state.config.klipy.as_ref().map(|_| "klipy"),
-    );
+    )
+    .with_workspace_name(name.as_deref());
     let tenant_host = if state.config.push_enabled {
         crate::tenant::bind_community(&state.db, raw_host)
             .await
@@ -327,25 +341,36 @@ pub(crate) async fn nip11_document(state: &crate::state::AppState, raw_host: &st
     info
 }
 
-/// Fetches the workspace icon for the community bound to `raw_host`, as the
-/// host-scoped scalar consumed by [`RelayInfo::build`].
+/// Fetches the workspace profile — `(icon, name)` — for the community bound
+/// to `raw_host`, as the host-scoped scalars consumed by [`RelayInfo::build`]
+/// and [`RelayInfo::with_workspace_name`].
 ///
-/// The icon is per-community state (`communities.icon`, set by relay
-/// admins/owners via the kind:9033 command) served in the standard NIP-11
-/// `icon` field. The lookup is scoped through
+/// Both are per-community state (`communities.icon` / `communities.name`,
+/// set by relay admins/owners via the kind:9033 command) served in the
+/// standard NIP-11 `icon` and `name` fields. The lookup is scoped through
 /// [`crate::tenant::bind_community`] — never an unscoped query. Fails open to
-/// `None` (no `icon` field): NIP-11 is intentionally served to unmapped hosts
-/// too, and an icon lookup failure must not break that.
-async fn workspace_icon_for_host(state: &crate::state::AppState, raw_host: &str) -> Option<String> {
-    let tenant = crate::tenant::bind_community(&state.db, raw_host)
-        .await
-        .ok()?;
-    state
+/// `None` (no `icon` field, default `name`): NIP-11 is intentionally served
+/// to unmapped hosts too, and a profile lookup failure must not break that.
+async fn workspace_profile_for_host(
+    state: &crate::state::AppState,
+    raw_host: &str,
+) -> (Option<String>, Option<String>) {
+    let Ok(tenant) = crate::tenant::bind_community(&state.db, raw_host).await else {
+        return (None, None);
+    };
+    let icon = state
         .db
         .get_community_icon(tenant.community())
         .await
         .ok()
-        .flatten()
+        .flatten();
+    let name = state
+        .db
+        .get_community_name(tenant.community())
+        .await
+        .ok()
+        .flatten();
+    (icon, name)
 }
 
 /// Derives the two NIP-11 facts that depend on runtime config:
@@ -388,7 +413,7 @@ fn admin_api_advertisement(admin: Option<&crate::config::AdminConfig>) -> Option
 /// and scalar inputs — the per-deployment facts arrive pre-derived through
 /// [`nip11_facts`] (config + relay keypair), and the one host-scoped fact
 /// (the workspace `icon`) arrives as a scalar from
-/// [`workspace_icon_for_host`], whose DB lookup is scoped through
+/// [`workspace_profile_for_host`], whose DB lookup is scoped through
 /// [`crate::tenant::bind_community`] and can therefore only ever surface the
 /// requesting host's own community state.
 ///
@@ -518,6 +543,27 @@ mod tests {
             .supported_extensions
             .expect("extensions")
             .contains(&"buzz-gif".to_string()));
+    }
+
+    /// Fork: a set workspace name replaces the default `name`; no name, or a
+    /// blank one, keeps the default so unnamed communities' documents do not
+    /// change.
+    #[test]
+    fn workspace_name_overrides_default_and_blank_keeps_it() {
+        let build =
+            || RelayInfo::build(None, None, false, DEFAULT_MAX_FRAME_BYTES, None, None, None);
+        assert_eq!(build().name, "Buzz Relay");
+        assert_eq!(
+            build().with_workspace_name(Some("슈퍼지구")).name,
+            "슈퍼지구"
+        );
+        assert_eq!(build().with_workspace_name(Some("  Buzz  ")).name, "Buzz");
+        for blank in [None, Some(""), Some("   ")] {
+            assert_eq!(build().with_workspace_name(blank).name, "Buzz Relay");
+        }
+        let json =
+            serde_json::to_value(build().with_workspace_name(Some("슈퍼지구"))).expect("serialize");
+        assert_eq!(json["name"], "슈퍼지구");
     }
 
     /// NIP-WP → NIP-11 mirror: a set workspace icon is served in the standard

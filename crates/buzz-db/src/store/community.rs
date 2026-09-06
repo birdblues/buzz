@@ -320,6 +320,56 @@ impl Db {
         Ok(())
     }
 
+    /// Returns the community's workspace name (NIP-11 `name`), if set.
+    ///
+    /// Fork feature: set by relay admins/owners via the kind:9033 command's
+    /// `name` tag; validated (length, single line) at that write path.
+    #[datastore_span(name = "get_community_name", system = "postgresql")]
+    pub async fn get_community_name(&self, community_id: CommunityId) -> Result<Option<String>> {
+        let row = sqlx::query(
+            r#"
+            SELECT name
+            FROM communities
+            WHERE id = $1
+            "#,
+        )
+        .bind(community_id.as_uuid())
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row
+            .map(|row| row.try_get::<Option<String>, _>("name"))
+            .transpose()?
+            .flatten()
+            .filter(|name| !name.is_empty()))
+    }
+
+    /// Sets or clears (`None`) the community's workspace name.
+    #[datastore_span(name = "set_community_name", system = "postgresql")]
+    pub async fn set_community_name(
+        &self,
+        community_id: CommunityId,
+        name: Option<&str>,
+    ) -> Result<()> {
+        let mut connection = crate::observability::acquire_writer(
+            &self.pool,
+            crate::observability::WriterOperation::EventWrite,
+        )
+        .await?;
+        sqlx::query(
+            r#"
+            UPDATE communities
+            SET name = $2
+            WHERE id = $1
+            "#,
+        )
+        .bind(community_id.as_uuid())
+        .bind(name)
+        .execute(&mut *connection)
+        .await?;
+        Ok(())
+    }
+
     /// Ensure a configured community host exists and return its row.
     ///
     /// This is the startup/config seeding path for N=1 deployments. Migrations
@@ -713,6 +763,8 @@ mod postgres_tests {
             "lookup_community_host",
             "get_community_icon",
             "set_community_icon",
+            "get_community_name",
+            "set_community_name",
             "ensure_configured_community",
             "create_community_with_owner",
             "archive_community_owned_by",

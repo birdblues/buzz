@@ -273,6 +273,24 @@ class CommunityListNotifier extends AsyncNotifier<List<Community>> {
     return community.id;
   }
 
+  /// Adopt the name the relay advertises for a community (NIP-11 `name`,
+  /// fork feature), replacing the host-derived one this app made up at
+  /// pairing time. Persisted so the switcher, push notification snapshots and
+  /// an offline launch show it too. A no-op when nothing changes.
+  Future<void> adoptRelayName(String id, String name) async {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return;
+    final current = state.value ?? [];
+    final index = current.indexWhere((community) => community.id == id);
+    if (index < 0 || current[index].name == trimmed) return;
+    final updated = current[index].copyWith(name: trimmed);
+    await ref.read(communityStorageProvider).save(updated);
+    final updatedList = [...current];
+    updatedList[index] = updated;
+    state = AsyncData(updatedList);
+    await syncCommunitySnapshot(ref, updatedList);
+  }
+
   Future<void> removeCommunity(String id) =>
       _removeCommunity(id, invalidateAuthentication: true);
 

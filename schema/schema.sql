@@ -57,6 +57,9 @@ CREATE TABLE communities (
     -- Per-community workspace icon (NIP-11 `icon`), set via kind:9033.
     -- Added by migration 0003; kept here so desired-state applies match.
     icon            TEXT,
+    -- Per-community workspace name (NIP-11 `name`), set via the kind:9033
+    -- `name` tag (fork). Added by migration 0045.
+    name            TEXT,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     archived_at     TIMESTAMPTZ,
     deletion_state  TEXT NOT NULL DEFAULT 'active' CHECK (deletion_state IN ('active', 'quiescing', 'fenced', 'tombstone')),
