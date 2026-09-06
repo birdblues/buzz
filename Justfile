@@ -864,16 +864,25 @@ mobile-build-macos:
     flutter build macos --release --no-pub \
         --dart-define=BUZZ_ALLOW_PRIVATE_RELAY="${BUZZ_ALLOW_PRIVATE_RELAY:-true}"
     app=build/macos/Build/Products/Release/BuzzClient.app
-    ditto -c -k --keepParent "$app" build/macos/BuzzClient.zip
+    # Every Mach-O in the bundle must carry both slices, or the app is not
+    # universal. Only directories that exist are searched (a plugin-free
+    # bundle has no Contents/PlugIns); a single-arch binary fails the recipe.
+    dirs=("$app/Contents/MacOS" "$app/Contents/Frameworks")
+    [ -d "$app/Contents/PlugIns" ] && dirs+=("$app/Contents/PlugIns")
+    single=$(find "${dirs[@]}" -type f -perm +111 | while read -r bin; do
+        file "$bin" | grep -q Mach-O || continue
+        archs=$(lipo -archs "$bin" 2>/dev/null || true)
+        case "$archs" in *x86_64*arm64*|*arm64*x86_64*) ;; *) echo "$bin ($archs)";; esac
+    done)
+    if [ -n "$single" ]; then
+        echo "single-arch Mach-O in the bundle:"
+        echo "$single"
+        exit 1
+    fi
     echo "archs: $(lipo -archs "$app/Contents/MacOS/BuzzClient")"
-    find "$app/Contents/Frameworks" "$app/Contents/PlugIns" -type f -perm +111 2>/dev/null \
-        | while read -r bin; do
-            if file "$bin" | grep -q Mach-O; then
-                archs=$(lipo -archs "$bin" 2>/dev/null || true)
-                case "$archs" in *x86_64*arm64*|*arm64*x86_64*) ;; *) echo "single-arch: $bin ($archs)";; esac
-            fi
-          done
-    codesign --verify --deep --strict "$app" && echo "codesign OK"
+    codesign --verify --deep --strict "$app"
+    echo "codesign OK"
+    ditto -c -k --keepParent "$app" build/macos/BuzzClient.zip
     echo "→ build/macos/BuzzClient.zip"
 
 # Uninstall stale worktree-suffixed Buzz debug installs (production apps kept)
