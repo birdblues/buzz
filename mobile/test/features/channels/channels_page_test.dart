@@ -2767,6 +2767,9 @@ class _DirectoryRelaySession extends RelaySessionNotifier {
       if (archiveError != null) throw archiveError!;
       return archiveEvents;
     }
+    // The DM tiles seed their presence dots from a kind:20001 query. It is not
+    // a directory page, so it must not land in requestedPages.
+    if (filter.kinds.contains(EventKind.presenceUpdate)) return const [];
     final page = (filter.extensions['page'] as int?) ?? 1;
     requestedPages.add(page);
     final start = (page - 1) * filter.limit;
