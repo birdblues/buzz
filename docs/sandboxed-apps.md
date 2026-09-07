@@ -132,13 +132,13 @@ app door `http://192.168.1.99:3001`.
 | Piece | Where |
 |---|---|
 | imeta `x`, `preview-light`, `preview-dark`; `MessageMediaKind.app` (= `text/html` + a lowercase 64-hex `x`) | `mobile/lib/features/channels/message_media.dart` |
-| App card: theme-matched preview (`Theme.of(context).brightness`), Run, Download, sender in the chrome. Never in clamped previews (`maxLines`) | `mobile/lib/features/channels/message_content/app_card.dart`, wired from `message_content.dart` (`_buildAppCard`, for both `[…]()` and `![…]()` syntax) |
+| App card: theme-matched preview (`Theme.of(context).brightness`), one tap surface (Run, or Resume when the app is already running — a green dot on the preview says so), sender in the chrome. Never in clamped previews (`maxLines`) | `mobile/lib/features/channels/message_content/app_card.dart`, wired from `message_content.dart` (`_buildAppCard`, for both `[…]()` and `![…]()` syntax) |
 | NIP-11 `app_content_url` discovery with the desktop's validation (bare origin, relay hostname, distinct origin); re-asked on every reconnect; remembered per relay so a community switch cannot reuse another relay's door | `mobile/lib/shared/relay/relay_info.dart` — `appContentUrlProvider`, null = HTML stays a link |
 | Blob-scoped token: `t=get`, `x`, `expiration = now + 300 s`, **no `server` tag**, minted fresh on every Run (never memoized) | `mobile/lib/shared/relay/media_auth.dart` `signAppContentAuth` |
 | Document fetch **in Dart**, the way the desktop proxy does it: `Authorization` header (never a URL token), **no redirects** (a 3xx fails — a custom header must never follow one), `text/html` only, ≤ 8 MiB. The WebView itself never touches the network, so a LAN MITM cannot strip the policy and no ATS exception is needed | `mobile/lib/shared/relay/app_content.dart` (`fetchAppDocument`) |
 | CSP stamped by the client: the relay/desktop policy minus `sandbox`, inserted as the first element (after a leading doctype) so no script can precede it; the document is then loaded with `loadHtmlString` and no base URL → `about:blank`, opaque origin, no storage | `app_content.dart` (`stampSandboxCsp`, `appSandboxCsp`) |
-| Sandbox page: `CupertinoPageRoute` pushed on the **root** navigator (slides in from the right, like the desktop drawer, and takes the whole screen in the wide shell too — a push inside a pane's nested navigator aborts on the compose bar's overlay portal during the pane's layout pass, which left Run silently dead in forum threads), JS unrestricted, **one JavaScript channel at most** (the selection bridge below, only when opened from a message), `onNavigationRequest` allows exactly the first main-frame `about:blank` load and prevents everything else, generation-fenced retry, error states per relay status | `mobile/lib/features/channels/app_webview_page.dart` (`decideAppNavigation`) |
-| Fail closed on the native hook: before running, Dart asks `buzz/sandbox_webview` → `isHardeningInstalled`; false (hook failed, or a platform without one — Android today) shows an error instead of the app | `app_webview_page.dart` (`sandboxHardeningProbeProvider`), `AppDelegate.swift` |
+| Sandbox page: `CupertinoPageRoute` pushed on the **root** navigator (slides in from the right, like the desktop drawer, and takes the whole screen in the wide shell too — a push inside a pane's nested navigator aborts on the compose bar's overlay portal during the pane's layout pass, which left Run silently dead in forum threads), JS unrestricted, **one JavaScript channel at most** (the selection bridge below, only when opened from a message), `onNavigationRequest` allows exactly the first main-frame `about:blank` load and prevents everything else, generation-fenced retry, error states per relay status. The WebView is owned by the session registry, not the page — see *Sessions* below | `mobile/lib/features/channels/sandbox_session.dart` (`decideAppNavigation`, `SandboxSessionsNotifier`), `app_webview_page.dart` |
+| Fail closed on the native hook: before running, Dart asks `buzz/sandbox_webview` → `isHardeningInstalled`; false (hook failed, or a platform without one — Android today) shows an error instead of the app | `sandbox_session.dart` (`sandboxHardeningProbeProvider`), `AppDelegate.swift` |
 | WebRTC + `sendBeacon` removal. `webview_flutter` has no user-script API, so `WKWebView.loadHTMLString(_:baseURL:)` — the sandbox page's only entry point — is swizzled to register the document-start script (all frames) on that web view before the load. `WKUserContentController` is shared by reference with the live page; `webview_flutter` adds its own channel scripts the same way after creation | `mobile/ios/Runner/SandboxWebViewHardening.swift`, installed from `AppDelegate` |
 | Pretendard 1.3.9 (OFL) as a Flutter font family | `mobile/pubspec.yaml`, `mobile/assets/fonts/Pretendard-*.otf` |
 | NIP-11 allowlist widened with `app_content_url`, `admin_api`, `gif`. The push descriptor parser rejects any unknown top-level NIP-11 field, so advertising the door would otherwise have silently disabled push on mobile | `mobile/lib/shared/push/dev_push_lease.dart` |
@@ -190,10 +190,10 @@ decision; nothing in this section enables one).
 |---|---|
 | App side: `window.buzzBridge.select({ kind, ref, text })` in the agent skill's shared runtime calls the host-injected `window.__buzzHost.select` when present, else shows a copy box. Apps never touch `parent.postMessage` or `webkit.messageHandlers` themselves | `~/.hermes/skills/software-development/buzz-sandbox-webapp` (`scripts/build-app.mjs`, `references/bridge.md`) |
 | Native shim: a second document-start `WKUserScript` (main frame only) defines `window.__buzzHost` as a **getter** that resolves to `{ select }` only while `window.buzzHost` — the `webview_flutter` channel object — exists, so an app opened with no composer in scope sees no host. `select` copies three string fields explicitly and posts **one JSON string**; it returns nothing useful | `mobile/ios/Runner/SandboxWebViewHardening.swift` (`bridgeScript`), `mobile/macos/Runner/SandboxWebViewHardening.swift` (byte-identical) |
-| Channel: `addJavaScriptChannel('buzzHost')` **before** `loadHtmlString`, and only when the page was given a `SandboxBridgeTarget` (channel id, message id, thread head) by the message row that opened it. The target is host knowledge; the payload cannot name a channel, message or thread | `app_webview_page.dart` (`_onBridgeMessage`), `message_content.dart` (`appBridge`), wired from the channel bubble, the thread row and both forum rows |
+| Channel: `addJavaScriptChannel('buzzHost')` **before** `loadHtmlString`, and only when the page was given a `SandboxBridgeTarget` (channel id, message id, thread head) by the message row that opened it. The target is host knowledge; the payload cannot name a channel, message or thread. Honoured only while a page shows the app — a backed-out app cannot reach the composer | `sandbox_session.dart` (`_onBridgeMessage`), `message_content.dart` (`appBridge`), wired from the channel bubble, the thread row and both forum rows |
 | Validation, re-applied whatever the app promised: JSON object ≤ 16 KiB; `kind` ∈ {node, edge, path}; `ref` single line ≤ 200 chars; `text` ≤ 2048 chars, control characters stripped, non-empty; one message per 500 ms, extras dropped; generation-fenced so a stale page cannot write | `mobile/lib/features/channels/sandbox_bridge.dart` (`parseSandboxSelect`, `SandboxBridgeRateLimiter`) |
 | App tag: the host stamps the first 8 characters of the app message's event id into the text's leading `[…]` (`[인과그래프] …` → `[인과그래프 #1a2b3c4d] …`), or prefixes `[앱 #…]` when there is none | `sandbox_bridge.dart` (`sandboxBridgePrefillText`) |
-| Delivery: the text is appended to that composer's persisted draft (`composeDraftsProvider`, so a thread composer that is not open yet picks it up when it mounts) and published through `composerPrefillProvider`; a mounted `ComposeBar` with the matching draft key shows the merged draft, expands and takes focus. The sandbox page pops so the reader lands on the composer | `sandbox_bridge.dart` (`ComposerPrefillNotifier`), `compose_bar/draft_lifecycle.dart` (`_listenForComposerPrefill`) |
+| Delivery: the text is appended to that composer's persisted draft (`composeDraftsProvider`, so a thread composer that is not open yet picks it up when it mounts) and published through `composerPrefillProvider`; a mounted `ComposeBar` with the matching draft key shows the merged draft, expands and takes focus. The sandbox page pops so the reader lands on the composer; the app stays alive behind it (*Sessions*), so returning to the card shows the selection still highlighted | `sandbox_bridge.dart` (`ComposerPrefillNotifier`), `compose_bar/draft_lifecycle.dart` (`_listenForComposerPrefill`) |
 | Draft key = the message's composer: `<channelId>` for a channel bubble or a forum post/reply (forum composers are keyed by channel), `<channelId>:<threadHeadId>` for a row inside a thread | `SandboxBridgeTarget.draftKey` |
 | Not a bridge: search hits, profile sheets and previews render `MessageContent` without `appBridge`, so Run from there registers no channel and the app falls back to its copy box | `message_content.dart` |
 
@@ -226,6 +226,51 @@ decision; nothing in this section enables one).
    the sample app so `buzzBridge.select` is called ten times in a loop with a
    5 KB `text` and `kind: 'window'` — the composer must receive at most one
    line per 500 ms and nothing for the bad kind or the oversized text.
+
+## Sessions — Back keeps the app, Close ends it (2026-09-07, Flutter clients only)
+
+Owner decision. The page used to own the WebView, so leaving it restarted the
+app: every selected path, collapsed group and slider position was lost, and the
+Back and Close affordances meant the same thing. Now `sandboxSessionsProvider`
+(`mobile/lib/features/channels/sandbox_session.dart`) owns one session per app
+blob per message, and the page only attaches to it while on screen.
+
+| Rule | Where |
+|---|---|
+| **Back** (the bar's back button, the swipe, Escape on macOS): the page detaches, the WebView keeps its document. The next open for the same key re-attaches the same `WebViewController`; `webview_flutter` hands the same native `WKWebView` to the new platform view, so script state survives | `app_webview_page.dart` (`useEffect` attach/detach), `SandboxSessionsNotifier.attach/detach` |
+| **Close** (× in the bar): the session loads a script-free document over the app — the only navigation the delegate allows once the host marks the document `terminating` — and is dropped. Native release stays with the finalizer; the blank load is what stops the app's timers now | `SandboxSessionsNotifier.terminate`, `_blank`, `_decide` |
+| Expiry: a backed-out session ends **24 h** after Back (`sandboxSessionTtl`) — a `Timer`, re-checked from `AppLifecycleListener.onResume` because iOS does not run Dart timers while suspended | `detach`, `_expireOverdue` |
+| Cap: at most **3** backed-out sessions (`sandboxSessionBackgroundCap`); the one backed out of longest ago is ended when a fourth arrives | `_evictBeyondCap` |
+| Content process killed by the OS (`webContentProcessTerminated`): a hidden app is dropped silently (its dot goes out); a shown one gets the error state with *Try again*, which loads a fresh document in the same session | `_load` (`onWebResourceError`), `retry` |
+| A failed app is dropped when its page goes away — there is nothing to come back to | `detach` |
+| Bridge: selections are honoured only while a page is attached; a hidden app's script cannot reach the composer | `_onBridgeMessage` |
+| Card: one tap surface (whole card, key `app-card-run`), semantics label *Run …* / *Resume …, running*; green dot (`app-card-running`) at the preview's bottom-right, or on the app icon when there is no preview. The Run and Download buttons are gone (owner decision) | `message_content/app_card.dart` |
+| Key: `<sha256>:<messageId>` — the same blob shared in two messages is two sessions with two bridge targets | `sandboxSessionKey` |
+
+Tests: `test/features/channels/sandbox_session_test.dart` (registry rules,
+against a fake `WebViewPlatform` in `fake_webview_platform.dart`),
+`app_webview_page_session_test.dart` (Back keeps / Close ends / bridge pop /
+retry, through the real page), `message_content_app_card_test.dart` (dot and
+semantics). The 24 h and cap rules are unit-tested only.
+
+### Intel-Mac session: verify sessions (macOS client, iPad, iPhone)
+
+1. Open the causal graph, highlight a path, collapse a group, move the
+   slider. Back. The card shows a green dot at the preview's bottom-right.
+   Tap the card: the same state is still there (no reload, no spinner).
+2. Close (×) from the page: the dot goes out; tapping the card loads from
+   scratch.
+3. "에이전트에게 묻기" → the composer is prefilled as before; go back to the
+   card: dot on, and the selection is still highlighted when reopened.
+4. Back out of four different apps in a row: the first card's dot goes out
+   and reopening it starts fresh; the other three resume.
+5. Rotate the device while an app is backed out, then reopen it: the graph
+   fits the new size (the app's resize handler runs on re-attach).
+6. Swipe-back on iPhone/iPad and Escape on macOS keep the app running, like
+   the bar's back button.
+7. Leave an app backed out, put the client in the background for a while,
+   resume: still there (well under 24 h). The 24 h expiry itself is not
+   verified on a device.
 
 ## Sandbox probe
 

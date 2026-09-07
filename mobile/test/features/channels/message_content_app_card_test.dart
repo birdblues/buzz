@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:buzz/features/channels/message_content.dart';
 import 'package:buzz/features/channels/message_content/app_card.dart';
+import 'package:buzz/features/channels/sandbox_bridge.dart';
+import 'package:buzz/features/channels/sandbox_session.dart';
 import 'package:buzz/shared/relay/media_image.dart';
 import 'package:buzz/shared/relay/relay_info.dart';
 import 'package:buzz/shared/theme/theme.dart';
@@ -76,7 +78,8 @@ void main() {
 
     expect(find.byKey(const ValueKey('app-card:$_sha')), findsOneWidget);
     expect(find.byKey(const ValueKey('app-card-run')), findsOneWidget);
-    expect(find.byKey(const ValueKey('app-card-download')), findsOneWidget);
+    expect(find.byKey(const ValueKey('app-card-download')), findsNothing);
+    expect(find.byKey(const ValueKey('app-card-running')), findsNothing);
     expect(find.text('sequence.html'), findsOneWidget);
     expect(
       find.textContaining('App shared by Ada'),
@@ -243,33 +246,53 @@ void main() {
     expect(find.byKey(const ValueKey('app-link:$_sha')), findsOneWidget);
   });
 
-  testWidgets('Download fetches the blob with the media auth headers', (
-    tester,
-  ) async {
-    final calls = <(String, String)>[];
+  testWidgets('a running app shows a green dot on the preview', (tester) async {
+    final running = _RunningSessions();
+    final semantics = tester.ensureSemantics();
     await tester.pumpWidget(
       _testable(
         const MessageContent(
           content: '[sequence.html]($_url)',
           tags: [_appTag],
+          appBridge: SandboxBridgeTarget(channelId: 'chan', messageId: 'm1'),
         ),
         overrides: [
           appContentUrlProvider.overrideWithValue(_door),
-          openDownloadedFileProvider.overrideWithValue((
-            url,
-            headers,
-            name,
-          ) async {
-            calls.add((url, name));
-          }),
+          sandboxSessionsProvider.overrideWith(() => running),
         ],
       ),
     );
     await tester.pump();
+    expect(find.byKey(const ValueKey('app-card-running')), findsNothing);
 
-    await tester.tap(find.byKey(const ValueKey('app-card-download')));
+    running.mark(sandboxSessionKey(_sha, 'm1'));
     await tester.pump();
+    expect(find.byKey(const ValueKey('app-card-running')), findsOneWidget);
+    expect(
+      tester.getSemantics(find.byType(AppCard)).label,
+      contains('Resume sequence.html, running'),
+    );
 
-    expect(calls, [(_url, 'sequence.html')]);
+    // The same blob in another message is a different session.
+    running.mark(sandboxSessionKey(_sha, 'm2'), only: true);
+    await tester.pump();
+    expect(find.byKey(const ValueKey('app-card-running')), findsNothing);
+    semantics.dispose();
   });
+}
+
+class _RunningSessions extends SandboxSessionsNotifier {
+  @override
+  SandboxSessionsState build() => SandboxSessionsState.empty;
+
+  void mark(String key, {bool only = false}) {
+    const view = SandboxSessionView(
+      phase: SandboxSessionPhase.ready,
+      error: null,
+      attached: false,
+      hasDocument: true,
+      prefillSeq: 0,
+    );
+    state = SandboxSessionsState({if (!only) ...state.sessions, key: view});
+  }
 }

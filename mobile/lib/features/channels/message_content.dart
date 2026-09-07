@@ -508,7 +508,8 @@ class MessageContent extends HookConsumerWidget {
   }
 
   /// Sandboxed HTML app attachment (`docs/sandboxed-apps.md`): a static
-  /// preview card; Run opens [AppWebViewPage], Download saves the blob.
+  /// preview card; tapping it opens [AppWebViewPage] (or returns to the
+  /// running app).
   Widget _buildAppCard(
     BuildContext context,
     WidgetRef ref,
@@ -526,6 +527,7 @@ class MessageContent extends HookConsumerWidget {
         previewLight: imeta.previewLight,
         previewDark: imeta.previewDark,
         sharedBy: authorLabel,
+        messageId: appBridge?.messageId,
         // The root navigator: the app takes the whole screen on every
         // layout, and a push inside a wide-shell pane's nested navigator
         // aborts (its compose bar's overlay portal is re-activated during the
@@ -538,7 +540,6 @@ class MessageContent extends HookConsumerWidget {
             bridge: appBridge,
           ),
         ),
-        onDownload: () => _downloadAttachment(context, ref, url, filename),
       ),
     );
   }
