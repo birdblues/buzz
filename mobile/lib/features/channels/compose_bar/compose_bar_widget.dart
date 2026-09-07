@@ -968,12 +968,32 @@ class ComposeBar extends HookConsumerWidget {
       OverlayPortalController.new,
     );
 
+    // The overlay exists only while it has something to show. An
+    // OverlayPortal grafts its overlay child under this composer in the
+    // semantics tree, and if the child appears while the composer itself is
+    // hidden from semantics (a fading route, the thread page's initial
+    // viewport gate), the framework sends the child without a parent and the
+    // desktop engines drop that update — and every later one that touches
+    // the same nodes (`Failed to update ui::AXTree`). Opening on demand means
+    // the composer is visible whenever the overlay is.
+    final wantsSuggestionOverlay =
+        attachmentSurface.value != _AttachmentSurface.closed ||
+        channelSuggestions.isNotEmpty ||
+        suggestions.isNotEmpty;
     useEffect(() {
+      // The controller cannot toggle during build.
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (context.mounted) suggestionOverlayController.show();
+        if (!context.mounted) return;
+        if (wantsSuggestionOverlay) {
+          if (!suggestionOverlayController.isShowing) {
+            suggestionOverlayController.show();
+          }
+        } else if (suggestionOverlayController.isShowing) {
+          suggestionOverlayController.hide();
+        }
       });
       return null;
-    }, [suggestionOverlayController]);
+    }, [suggestionOverlayController, wantsSuggestionOverlay]);
 
     void expandComposer() => _expandComposer(
       context: context,

@@ -1782,6 +1782,9 @@ void main() {
       await _expandComposer(tester);
       await tester.tap(find.byIcon(LucideIcons.atSign));
       await tester.pump();
+      // The suggestion overlay opens on demand, one frame after the query
+      // appears (the portal cannot toggle during a build).
+      await tester.pump();
 
       expect(pendingMembers.isCompleted, isFalse);
       expect(

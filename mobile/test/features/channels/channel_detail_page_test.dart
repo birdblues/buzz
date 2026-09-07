@@ -10587,6 +10587,10 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      // The landing highlight is timer-driven; nothing else keeps frames
+      // coming once the page has settled.
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.pumpAndSettle();
 
       final threadPage = tester.widget<ThreadDetailPage>(
         find.byType(ThreadDetailPage),
@@ -11630,6 +11634,9 @@ void main() {
         expect(latestReply, findsOneWidget);
 
         tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+        await tester.pumpAndSettle();
+        // The Android IME settle is timer-driven; advance past it explicitly.
+        await tester.pump(androidImeMetricsSettleDelay);
         await tester.pumpAndSettle();
 
         expect(
@@ -13023,6 +13030,9 @@ void main() {
 
         final composerSurface = find.byKey(const ValueKey('composer-surface'));
         tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+        await tester.pumpAndSettle();
+        // The Android IME settle is timer-driven; advance past it explicitly.
+        await tester.pump(androidImeMetricsSettleDelay);
         await tester.pumpAndSettle();
 
         expect(
