@@ -1674,7 +1674,9 @@ Photos
           final displayedImage = tester.widget<MediaImage>(
             find.byKey(const ValueKey('message-media-image-viewer-image:1')),
           );
-          expect(displayedImage.decodeWidth, isNotNull);
+          // Settled past the push transition: the visible page has been
+          // promoted from the carousel's preview decode to full resolution.
+          expect(displayedImage.decodeWidth, isNull);
           final selectedThumbnailClip = tester.widget<ClipRRect>(
             find.byKey(
               const ValueKey('message-media-image-viewer-thumbnail-clip:1'),
@@ -1854,6 +1856,54 @@ Photos
         );
         expect(secondCarousel.controller!.page, 0);
       });
+
+      testWidgets(
+        'promotes the fullscreen image to full resolution once the push '
+        'transition has landed, without a pinch',
+        (tester) async {
+          // A mouse or trackpad never pinches, so the pinch-triggered upgrade
+          // never fires on desktop; the viewer must promote on its own.
+          const imageUrl = 'https://example.com/media/sharp.png';
+
+          await tester.pumpWidget(
+            _testable(
+              const MessageContent(
+                content: 'Look\n![image](https://example.com/media/sharp.png)',
+                tags: [
+                  [
+                    'imeta',
+                    'url https://example.com/media/sharp.png',
+                    'm image/png',
+                  ],
+                ],
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+
+          MediaImage viewerImage() => tester.widget<MediaImage>(
+            find.byKey(const ValueKey('message-media-image-viewer-image:0')),
+          );
+
+          await tester.tap(_imagePreview(imageUrl));
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 100));
+          expect(
+            viewerImage().decodeWidth,
+            isNotNull,
+            reason: 'the hero flight still runs on the preview decode',
+          );
+
+          // Past the push transition plus the promotion margin.
+          await tester.pump(const Duration(milliseconds: 260));
+          await tester.pump();
+          expect(
+            viewerImage().decodeWidth,
+            isNull,
+            reason: 'the visible page decodes at full resolution after landing',
+          );
+        },
+      );
 
       testWidgets(
         'disables hero on close after the fullscreen image is transformed',

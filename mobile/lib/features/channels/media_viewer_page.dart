@@ -344,6 +344,32 @@ class MediaImageViewerPage extends HookConsumerWidget {
       fullResolutionIndices.value = {...fullResolutionIndices.value, index};
     }
 
+    // The pinch handlers above are the only other path to full resolution,
+    // and a mouse or trackpad never pinches, so on desktop the viewer would
+    // keep showing the carousel's preview decode (a few hundred pixels wide)
+    // forever: screenshots came out unreadable on macOS. Promote the visible
+    // page once the hero flight has landed — the preview still carries the
+    // transition, the full decode replaces it right after.
+    final animationsDisabled = MediaQuery.disableAnimationsOf(context);
+    useEffect(() {
+      final index = currentIndex.value;
+      if (images[index].previewDecodeWidth == null ||
+          fullResolutionIndices.value.contains(index)) {
+        return null;
+      }
+      if (animationsDisabled) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (context.mounted) upgradeToFullResolution(index);
+        });
+        return null;
+      }
+      final timer = Timer(
+        _imageViewerPushDuration + const Duration(milliseconds: 40),
+        () => upgradeToFullResolution(index),
+      );
+      return timer.cancel;
+    }, [currentIndex.value, images, animationsDisabled]);
+
     void onImageInteractionStart(int index, ScaleStartDetails details) {
       if (details.pointerCount > 1) {
         upgradeToFullResolution(index);
