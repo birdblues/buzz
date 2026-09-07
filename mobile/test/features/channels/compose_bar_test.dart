@@ -6313,6 +6313,49 @@ void main() {
     );
 
     testWidgets(
+      '# after a completed mention on the same line opens channel '
+      'suggestions',
+      (tester) => onPlatform(TargetPlatform.macOS, () async {
+        await pumpComposer(tester);
+        // The @ walk crosses spaces (multi-word names), so without the
+        // nearer-trigger rule this line would stay a mention query
+        // ("alice #") and never offer a channel.
+        await tester.enterText(find.byType(TextField), '@Alice #');
+        await tester.pumpAndSettle();
+        final channelPopover = find.byKey(
+          const ValueKey('channel-suggestions-popover'),
+        );
+        expect(channelPopover, findsOneWidget);
+        expect(mentionPopover, findsNothing);
+
+        await tester.enterText(find.byType(TextField), '@Alice #gen');
+        await tester.pumpAndSettle();
+        expect(rowSelected(tester, 'channel-suggestion-0'), isTrue);
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pumpAndSettle();
+        expect(controllerOf(tester).text, '@Alice #general ');
+        expect(channelPopover, findsNothing);
+      }),
+    );
+
+    testWidgets(
+      '@ after a channel on the same line is still a mention query',
+      (tester) => onPlatform(TargetPlatform.macOS, () async {
+        await pumpComposer(tester);
+        await tester.enterText(find.byType(TextField), '#general @Al');
+        await tester.pumpAndSettle();
+        expect(mentionPopover, findsOneWidget);
+        expect(
+          find.byKey(const ValueKey('channel-suggestions-popover')),
+          findsNothing,
+        );
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pumpAndSettle();
+        expect(controllerOf(tester).text, '#general @Alice ');
+      }),
+    );
+
+    testWidgets(
       'the list scrolls to keep the highlighted row in view',
       (tester) => onPlatform(TargetPlatform.macOS, () async {
         final previousPlatform = debugDefaultTargetPlatformOverride;

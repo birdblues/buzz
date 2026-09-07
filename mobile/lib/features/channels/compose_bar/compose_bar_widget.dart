@@ -357,10 +357,17 @@ class ComposeBar extends HookConsumerWidget {
         }
 
         // Walk backward from cursor looking for trigger characters.
-        // stopAtSpace: false — @mentions support multi-word display names.
+        // stopAtSpace: false — @mentions support multi-word display names,
+        // so the @ walk crosses spaces and reaches a mention completed
+        // earlier on the same line. A # trigger between that @ and the
+        // cursor is the newer intent: the channel query wins there, and the
+        // mention query stays in charge only while no # follows it.
         final atPos = findTrigger(text, cursor, '@', stopAtSpace: false);
+        final hashPos = findTrigger(text, cursor, '#');
+        final channelActive =
+            hashPos != null && (atPos == null || hashPos > atPos);
 
-        if (atPos != null) {
+        if (atPos != null && !channelActive) {
           mentionQuery.value = text.substring(atPos + 1, cursor).toLowerCase();
           mentionStartIdx.value = atPos;
           channelQuery.value = null;
@@ -368,18 +375,12 @@ class ComposeBar extends HookConsumerWidget {
           mentionQuery.value = null;
         }
 
-        // Channel autocomplete detection — only when no @mention is active.
-        if (mentionQuery.value == null) {
-          final hashPos = findTrigger(text, cursor, '#');
-          if (hashPos != null) {
-            channelQuery.value = text
-                .substring(hashPos + 1, cursor)
-                .toLowerCase();
-            channelStartIdx.value = hashPos;
-          } else {
-            channelQuery.value = null;
-          }
-        } else {
+        if (channelActive) {
+          channelQuery.value = text
+              .substring(hashPos + 1, cursor)
+              .toLowerCase();
+          channelStartIdx.value = hashPos;
+        } else if (mentionQuery.value == null) {
           channelQuery.value = null;
         }
       }
