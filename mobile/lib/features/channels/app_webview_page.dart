@@ -193,16 +193,16 @@ class _AppWebViewPageState extends ConsumerState<AppWebViewPage> {
     final controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted);
     if (bridge != null) {
-      // Registered before the load: the channel's own document-start script
-      // must precede the app's script, and the native `__buzzHost` shim
-      // keys off its presence.
-      unawaited(
-        controller.addJavaScriptChannel(
-          sandboxBridgeChannelName,
-          onMessageReceived: (message) =>
-              _onBridgeMessage(generation, message.message),
-        ),
+      // Registered — and acknowledged — before the load: the channel's own
+      // document-start script must precede the app's script, and the
+      // native `__buzzHost` shim keys off its presence. Awaiting removes the
+      // platform-channel ordering assumption an unawaited call would make.
+      await controller.addJavaScriptChannel(
+        sandboxBridgeChannelName,
+        onMessageReceived: (message) =>
+            _onBridgeMessage(generation, message.message),
       );
+      if (_stale(generation)) return;
     }
     controller
       ..setNavigationDelegate(

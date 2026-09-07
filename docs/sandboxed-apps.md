@@ -209,11 +209,19 @@ decision; nothing in this section enables one).
    forum post (composer = the forum channel).
 2. Type before tapping: an existing draft must survive, with the phrase
    appended on a new line.
-3. Run the same app from a search hit or a profile sheet: the button must
-   show the copy box (no channel registered).
-4. Upload `docs/sandbox-probe.html` again: rows 1–20 unchanged (all
-   blocked, row 20 `origin=null href=about:blank`); the new row 21 reads
-   *present* when opened from a message and *absent* from a search hit.
+3. ~~Run the same app from a search hit or a profile sheet~~ — **not
+   reachable today** (Intel-Mac finding, 2026-09-07): search hits, profile
+   sheets and inbox rows render `MessageContent` with `maxLines`, which
+   disables app cards, and the only card surface without a bridge
+   (`pulse/note_card.dart`) has no route into it. The no-bridge fallback is
+   fail-closed by construction and covered by widget tests only. Re-add
+   this step if a card surface without `appBridge` ever becomes reachable.
+4. Upload `docs/sandbox-probe.html` again (an owner call — it posts a real
+   message): rows 1–20 unchanged (all blocked, row 20
+   `origin=null href=about:blank`); the new row 21 reads *present* when
+   opened from a message. Repeat the Run three or four times: row 21 must
+   read *present* every time (the channel is registered and awaited before
+   the load, so an intermittent *absent* would be a defect).
 5. Paste a hostile payload via the probe's console-free path: edit a copy of
    the sample app so `buzzBridge.select` is called ten times in a loop with a
    5 KB `text` and `kind: 'window'` — the composer must receive at most one
