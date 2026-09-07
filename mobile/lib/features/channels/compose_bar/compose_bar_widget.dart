@@ -986,6 +986,17 @@ class ComposeBar extends HookConsumerWidget {
       androidImeFallbackTimer: androidImeFallbackTimer,
     );
 
+    _listenForComposerPrefill(
+      ref: ref,
+      controller: controller,
+      draftKey: draftKey,
+      isModifyingText: isModifyingText,
+      lastObservedEditingValue: lastObservedEditingValue,
+      isExpanded: isComposerExpanded,
+      focusNode: focusNode,
+      expandComposer: expandComposer,
+    );
+
     _useComposerFocusRestorer(
       onChanged: onFocusRestorerChanged,
       isExpanded: isComposerExpanded,

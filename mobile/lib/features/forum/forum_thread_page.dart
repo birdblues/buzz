@@ -15,6 +15,7 @@ import '../../shared/widgets/frosted_scaffold.dart';
 import '../../shared/widgets/modal_presentation.dart';
 import '../channels/compose_bar.dart';
 import '../channels/message_content.dart';
+import '../channels/sandbox_bridge.dart';
 import '../../shared/profile/user_cache_provider.dart';
 import '../../shared/profile/user_profile.dart';
 import '../profile/user_profile_sheet.dart';
@@ -405,6 +406,10 @@ class _OriginalPost extends ConsumerWidget {
             mentionNames: mentionNames,
             agentMentionPubkeys: agentMentionPubkeys,
             tags: post.tags,
+            appBridge: SandboxBridgeTarget(
+              channelId: post.channelId,
+              messageId: post.eventId,
+            ),
             baseStyle: messageBodyTextStyle.copyWith(
               color: context.colors.onSurface,
             ),
@@ -527,6 +532,10 @@ class _ReplyRow extends ConsumerWidget {
               mentionNames: mentionNames,
               agentMentionPubkeys: agentMentionPubkeys,
               tags: reply.tags,
+              appBridge: SandboxBridgeTarget(
+                channelId: channelId,
+                messageId: reply.eventId,
+              ),
               baseStyle: messageBodyTextStyle.copyWith(
                 color: context.colors.onSurface,
               ),

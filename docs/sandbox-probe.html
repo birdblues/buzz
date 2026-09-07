@@ -135,6 +135,21 @@
       if (origin !== 'null') return true;
       return 'origin=null href=' + location.href;
     }],
+    ['selection bridge surface (window.__buzzHost / window.buzzHost)', function () {
+      // Informational, like row 3. The Flutter clients expose exactly one
+      // app→host surface: `__buzzHost.select({ kind, ref, text })`, which can
+      // only prefill the composer of the message the app came from (the user
+      // still sends). It exists only when the app was opened from a message.
+      // Anything else on `window.buzzHost` — or the surface present on the
+      // desktop, which has no bridge — is a leak.
+      var host = window.__buzzHost;
+      var channel = window.buzzHost;
+      if (!host && !channel) return 'absent (no bridge on this surface)';
+      if (host && typeof host.select === 'function' && channel && typeof channel.postMessage === 'function') {
+        return 'present: __buzzHost.select + buzzHost.postMessage — tap "ask the agent" in a real app to verify it only prefills the composer';
+      }
+      return true; // one half without the other is not the shipped shape
+    }],
   ];
   total = attempts.length;
   attempts.forEach(function (a) { row(a[0], a[1]); });

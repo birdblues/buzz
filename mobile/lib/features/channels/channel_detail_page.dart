@@ -65,6 +65,7 @@ import 'message_actions.dart';
 import 'message_action_backdrop_state.dart';
 import 'message_gesture_region.dart';
 import 'message_content.dart';
+import 'sandbox_bridge.dart';
 import '../../shared/read_state/deferred_read_state_update.dart';
 import '../../shared/read_state/read_state_format.dart';
 import '../../shared/read_state/read_state_provider.dart';

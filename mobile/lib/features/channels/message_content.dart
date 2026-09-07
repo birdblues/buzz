@@ -35,6 +35,7 @@ import 'message_content/link_normalizer.dart';
 import 'message_content/link_preview_card.dart';
 import 'message_content/link_preview_snapshot.dart';
 import 'message_media.dart';
+import 'sandbox_bridge.dart';
 import 'voice_note_attachment.dart';
 
 part 'message_content/media_carousel.dart';
@@ -125,6 +126,13 @@ class MessageContent extends HookConsumerWidget {
   /// is just a clipped card, so they show none.
   final bool allowAppCards;
 
+  /// The message this content belongs to, for the selection bridge of a
+  /// sandboxed app it carries (`sandbox_bridge.dart`): the app's
+  /// "ask the agent" lands in that message's composer. Null where no
+  /// composer is in scope (search hits, profiles, previews) — the app then
+  /// falls back to a copy-and-paste box.
+  final SandboxBridgeTarget? appBridge;
+
   /// Called when a #channel link is tapped.
   final void Function(String channelId)? onChannelTap;
 
@@ -169,6 +177,7 @@ class MessageContent extends HookConsumerWidget {
     this.tags = const [],
     this.authorLabel,
     this.allowAppCards = true,
+    this.appBridge,
     this.onChannelTap,
     this.onMentionTap,
     this.onMediaReply,
@@ -526,6 +535,7 @@ class MessageContent extends HookConsumerWidget {
             sha256: sha256,
             filename: filename,
             sharedBy: authorLabel,
+            bridge: appBridge,
           ),
         ),
         onDownload: () => _downloadAttachment(context, ref, url, filename),

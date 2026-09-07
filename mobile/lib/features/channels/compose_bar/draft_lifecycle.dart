@@ -129,3 +129,38 @@ void _useComposeDraftLifecycle({
     return () => controller.removeListener(persistDraft);
   }, [controller, draftKey, draftIdentity, onDraftIdentityChanged]);
 }
+
+/// A sandboxed app asked to talk to the agent (`sandbox_bridge.dart`). The
+/// merged draft is already persisted for this composer; show it, open the
+/// editor and hand it the caret. Nothing is sent — the user does that.
+void _listenForComposerPrefill({
+  required WidgetRef ref,
+  required _MarkdownEditingController controller,
+  required String draftKey,
+  required ObjectRef<bool> isModifyingText,
+  required ObjectRef<TextEditingValue> lastObservedEditingValue,
+  required ValueNotifier<bool> isExpanded,
+  required FocusNode focusNode,
+  required VoidCallback expandComposer,
+}) {
+  ref.listen<ComposerPrefill?>(composerPrefillProvider, (_, prefill) {
+    if (prefill == null || prefill.key != draftKey) return;
+    if (controller.text != prefill.text) {
+      // Not a keystroke: skip the mention/typing listener the way
+      // formatting inserts do, then let it observe the new value.
+      isModifyingText.value = true;
+      try {
+        controller.value = TextEditingValue(
+          text: prefill.text,
+          selection: TextSelection.collapsed(offset: prefill.text.length),
+        );
+      } finally {
+        isModifyingText.value = false;
+      }
+      lastObservedEditingValue.value = controller.value;
+    }
+    final wasExpanded = isExpanded.value;
+    expandComposer();
+    if (wasExpanded) focusNode.requestFocus();
+  });
+}

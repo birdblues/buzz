@@ -238,6 +238,10 @@ class _MessageBubble extends HookConsumerWidget {
                                 agentMentionPubkeys: agentMentionPubkeys,
                                 channelNames: channelNames,
                                 tags: message.tags,
+                                appBridge: SandboxBridgeTarget(
+                                  channelId: currentChannelId,
+                                  messageId: message.id,
+                                ),
                                 baseStyle: messageBodyTextStyle.copyWith(
                                   color: context.colors.onSurface,
                                 ),

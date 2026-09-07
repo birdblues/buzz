@@ -37,6 +37,41 @@ enum SandboxWebViewHardening {
   })();
   """#
 
+  /// Selection bridge (`docs/sandboxed-apps.md`, "Selection bridge"): the
+  /// host-owned `window.__buzzHost.select(payload)` the agent skill's
+  /// `buzzBridge` runtime looks for. It resolves only while Dart has
+  /// registered the `buzzHost` JavaScript channel for this load — the getter
+  /// checks for the channel object on every access, so the app sees no host
+  /// (and falls back to its copy box) when the page was opened without a
+  /// composer to land in. Three string fields are copied explicitly and sent
+  /// as one JSON string; nothing comes back through it.
+  static let bridgeScript = #"""
+  (function () {
+    var select = function (p) {
+      var channel = window.buzzHost;
+      if (!channel || typeof channel.postMessage !== 'function') return false;
+      p = (p && typeof p === 'object') ? p : {};
+      channel.postMessage(JSON.stringify({
+        v: 1,
+        kind: String(p.kind == null ? '' : p.kind),
+        ref: String(p.ref == null ? '' : p.ref),
+        text: String(p.text == null ? '' : p.text)
+      }));
+      return true;
+    };
+    var host = Object.freeze({ select: select });
+    try {
+      Object.defineProperty(window, '__buzzHost', {
+        get: function () {
+          var channel = window.buzzHost;
+          return (channel && typeof channel.postMessage === 'function') ? host : undefined;
+        },
+        configurable: false, enumerable: false
+      });
+    } catch (e) {}
+  })();
+  """#
+
   private static let log = OSLog(subsystem: "dev.birdblues.buzz", category: "sandbox-webview")
   private static var installed = false
 
@@ -75,6 +110,8 @@ enum SandboxWebViewHardening {
     if controller.userScripts.contains(where: { $0.source == script }) { return }
     controller.addUserScript(
       WKUserScript(source: script, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+    controller.addUserScript(
+      WKUserScript(source: bridgeScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
     os_log(.info, log: log, "sandbox hardening registered for %{public}@", webView.description)
   }
 }

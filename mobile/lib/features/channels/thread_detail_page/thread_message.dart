@@ -4,6 +4,10 @@ class _ThreadMessage extends HookConsumerWidget {
   final TimelineMessage message;
   final Map<String, String> channelNames;
   final String channelId;
+
+  /// Head of the thread this row is shown in — the thread composer's key,
+  /// where a sandboxed app's selection bridge lands.
+  final String threadHeadId;
   final String? currentPubkey;
   final bool showAuthor;
   final bool isHighlighted;
@@ -21,6 +25,7 @@ class _ThreadMessage extends HookConsumerWidget {
     required this.message,
     required this.channelNames,
     required this.channelId,
+    required this.threadHeadId,
     required this.currentPubkey,
     required this.showAuthor,
     this.isHighlighted = false,
@@ -251,6 +256,11 @@ class _ThreadMessage extends HookConsumerWidget {
                                   agentMentionPubkeys: agentMentionPubkeys,
                                   channelNames: channelNames,
                                   tags: message.tags,
+                                  appBridge: SandboxBridgeTarget(
+                                    channelId: channelId,
+                                    messageId: message.id,
+                                    threadHeadId: threadHeadId,
+                                  ),
                                   baseStyle: messageBodyTextStyle.copyWith(
                                     color: context.colors.onSurface,
                                   ),

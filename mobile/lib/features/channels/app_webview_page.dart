@@ -16,6 +16,7 @@ import '../../shared/theme/theme.dart';
 import '../../shared/widgets/buzz_loading_indicator.dart';
 import '../../shared/widgets/frosted_app_bar.dart';
 import '../../shared/widgets/frosted_scaffold.dart';
+import 'sandbox_bridge.dart';
 
 /// The only document the sandbox WebView ever navigates to: the app is
 /// handed over as a string (`loadHtmlString` without a base URL), which
@@ -71,18 +72,25 @@ final sandboxHardeningProbeProvider = Provider<Future<bool> Function()>((ref) {
 /// (no redirects, size-capped — see [fetchAppDocument]), the sandbox CSP is
 /// stamped into it ([stampSandboxCsp]), and the result is loaded as
 /// `about:blank` with an opaque origin. Navigation is locked to that one
-/// load, no JavaScript channels are registered, and WebRTC is removed
-/// natively before the page's script runs.
+/// load and WebRTC is removed natively before the page's script runs.
+///
+/// The one JavaScript channel, `buzzHost`, exists only when [bridge] names
+/// the message the app was shared in. It carries the selection bridge
+/// (`sandbox_bridge.dart`): a validated `{ kind, ref, text }` from the app
+/// becomes a draft in that message's composer, the page pops, and the user
+/// decides what to send. Nothing flows back into the app.
 class AppWebViewPage extends ConsumerStatefulWidget {
   final String sha256;
   final String filename;
   final String? sharedBy;
+  final SandboxBridgeTarget? bridge;
 
   const AppWebViewPage({
     super.key,
     required this.sha256,
     required this.filename,
     this.sharedBy,
+    this.bridge,
   });
 
   /// Slides in from the right — the same direction as the desktop auxiliary
@@ -91,6 +99,7 @@ class AppWebViewPage extends ConsumerStatefulWidget {
     required String sha256,
     required String filename,
     String? sharedBy,
+    SandboxBridgeTarget? bridge,
   }) {
     return CupertinoPageRoute<void>(
       title: filename,
@@ -98,6 +107,7 @@ class AppWebViewPage extends ConsumerStatefulWidget {
         sha256: sha256,
         filename: filename,
         sharedBy: sharedBy,
+        bridge: bridge,
       ),
     );
   }
@@ -115,6 +125,8 @@ class _AppWebViewPageState extends ConsumerState<AppWebViewPage> {
   /// fetch, the WebView callbacks — checks it and drops out once stale, so a
   /// late error or finish can never overwrite the current load's state.
   int _generation = 0;
+
+  final _bridgeRate = SandboxBridgeRateLimiter();
 
   @override
   void initState() {
@@ -177,8 +189,22 @@ class _AppWebViewPageState extends ConsumerState<AppWebViewPage> {
     if (_stale(generation)) return;
 
     var initialPending = true;
+    final bridge = widget.bridge;
     final controller = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setJavaScriptMode(JavaScriptMode.unrestricted);
+    if (bridge != null) {
+      // Registered before the load: the channel's own document-start script
+      // must precede the app's script, and the native `__buzzHost` shim
+      // keys off its presence.
+      unawaited(
+        controller.addJavaScriptChannel(
+          sandboxBridgeChannelName,
+          onMessageReceived: (message) =>
+              _onBridgeMessage(generation, message.message),
+        ),
+      );
+    }
+    controller
       ..setNavigationDelegate(
         NavigationDelegate(
           onNavigationRequest: (request) {
@@ -206,6 +232,31 @@ class _AppWebViewPageState extends ConsumerState<AppWebViewPage> {
       )
       ..loadHtmlString(stampSandboxCsp(html));
     setState(() => _controller = controller);
+  }
+
+  /// One selection from the app. Everything the app sent is re-checked here
+  /// (shape, size, rate); what passes becomes a draft in the composer of the
+  /// message this app came from, and the page closes so the reader lands on
+  /// that composer. The app id tag comes from [SandboxBridgeTarget], never
+  /// from the payload.
+  void _onBridgeMessage(int generation, String raw) {
+    if (_stale(generation)) return;
+    final bridge = widget.bridge;
+    if (bridge == null) return;
+    if (!_bridgeRate.allow(DateTime.now())) return;
+    final select = parseSandboxSelect(raw);
+    if (select == null) return;
+    ref
+        .read(composerPrefillProvider.notifier)
+        .request(
+          channelId: bridge.channelId,
+          threadHeadId: bridge.threadHeadId,
+          text: sandboxBridgePrefillText(
+            select: select,
+            messageId: bridge.messageId,
+          ),
+        );
+    Navigator.of(context).maybePop();
   }
 
   String _describeFetchError(AppContentFetchException error) {

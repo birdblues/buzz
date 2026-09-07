@@ -137,7 +137,7 @@ app door `http://192.168.1.99:3001`.
 | Blob-scoped token: `t=get`, `x`, `expiration = now + 300 s`, **no `server` tag**, minted fresh on every Run (never memoized) | `mobile/lib/shared/relay/media_auth.dart` `signAppContentAuth` |
 | Document fetch **in Dart**, the way the desktop proxy does it: `Authorization` header (never a URL token), **no redirects** (a 3xx fails — a custom header must never follow one), `text/html` only, ≤ 8 MiB. The WebView itself never touches the network, so a LAN MITM cannot strip the policy and no ATS exception is needed | `mobile/lib/shared/relay/app_content.dart` (`fetchAppDocument`) |
 | CSP stamped by the client: the relay/desktop policy minus `sandbox`, inserted as the first element (after a leading doctype) so no script can precede it; the document is then loaded with `loadHtmlString` and no base URL → `about:blank`, opaque origin, no storage | `app_content.dart` (`stampSandboxCsp`, `appSandboxCsp`) |
-| Sandbox page: `CupertinoPageRoute` pushed on the **root** navigator (slides in from the right, like the desktop drawer, and takes the whole screen in the wide shell too — a push inside a pane's nested navigator aborts on the compose bar's overlay portal during the pane's layout pass, which left Run silently dead in forum threads), JS unrestricted, **no JavaScript channels**, `onNavigationRequest` allows exactly the first main-frame `about:blank` load and prevents everything else, generation-fenced retry, error states per relay status | `mobile/lib/features/channels/app_webview_page.dart` (`decideAppNavigation`) |
+| Sandbox page: `CupertinoPageRoute` pushed on the **root** navigator (slides in from the right, like the desktop drawer, and takes the whole screen in the wide shell too — a push inside a pane's nested navigator aborts on the compose bar's overlay portal during the pane's layout pass, which left Run silently dead in forum threads), JS unrestricted, **one JavaScript channel at most** (the selection bridge below, only when opened from a message), `onNavigationRequest` allows exactly the first main-frame `about:blank` load and prevents everything else, generation-fenced retry, error states per relay status | `mobile/lib/features/channels/app_webview_page.dart` (`decideAppNavigation`) |
 | Fail closed on the native hook: before running, Dart asks `buzz/sandbox_webview` → `isHardeningInstalled`; false (hook failed, or a platform without one — Android today) shows an error instead of the app | `app_webview_page.dart` (`sandboxHardeningProbeProvider`), `AppDelegate.swift` |
 | WebRTC + `sendBeacon` removal. `webview_flutter` has no user-script API, so `WKWebView.loadHTMLString(_:baseURL:)` — the sandbox page's only entry point — is swizzled to register the document-start script (all frames) on that web view before the load. `WKUserContentController` is shared by reference with the live page; `webview_flutter` adds its own channel scripts the same way after creation | `mobile/ios/Runner/SandboxWebViewHardening.swift`, installed from `AppDelegate` |
 | Pretendard 1.3.9 (OFL) as a Flutter font family | `mobile/pubspec.yaml`, `mobile/assets/fonts/Pretendard-*.otf` |
@@ -176,13 +176,57 @@ app door `http://192.168.1.99:3001`.
    `lib/features/pulse/` is not referenced from the rest of the mobile app,
    so that call site is covered by widget tests only.
 
+## Selection bridge (2026-09-07, Flutter clients only)
+
+The one deliberate app→host path. A reader picks a node, edge or path in an
+app (the causal-graph template's "ask the agent" button) and the phrase the
+app composed lands in the composer of the message the app was shared in —
+**prefilled, never sent.** The user edits and sends; the agent that built the
+app reads `[인과그래프 #1a2b3c4d] 간선 e4 …` and resolves the app from the
+tag. Nothing flows back into the app (an inbound reply channel is a separate
+decision; nothing in this section enables one).
+
+| Piece | Where |
+|---|---|
+| App side: `window.buzzBridge.select({ kind, ref, text })` in the agent skill's shared runtime calls the host-injected `window.__buzzHost.select` when present, else shows a copy box. Apps never touch `parent.postMessage` or `webkit.messageHandlers` themselves | `~/.hermes/skills/software-development/buzz-sandbox-webapp` (`scripts/build-app.mjs`, `references/bridge.md`) |
+| Native shim: a second document-start `WKUserScript` (main frame only) defines `window.__buzzHost` as a **getter** that resolves to `{ select }` only while `window.buzzHost` — the `webview_flutter` channel object — exists, so an app opened with no composer in scope sees no host. `select` copies three string fields explicitly and posts **one JSON string**; it returns nothing useful | `mobile/ios/Runner/SandboxWebViewHardening.swift` (`bridgeScript`), `mobile/macos/Runner/SandboxWebViewHardening.swift` (byte-identical) |
+| Channel: `addJavaScriptChannel('buzzHost')` **before** `loadHtmlString`, and only when the page was given a `SandboxBridgeTarget` (channel id, message id, thread head) by the message row that opened it. The target is host knowledge; the payload cannot name a channel, message or thread | `app_webview_page.dart` (`_onBridgeMessage`), `message_content.dart` (`appBridge`), wired from the channel bubble, the thread row and both forum rows |
+| Validation, re-applied whatever the app promised: JSON object ≤ 16 KiB; `kind` ∈ {node, edge, path}; `ref` single line ≤ 200 chars; `text` ≤ 2048 chars, control characters stripped, non-empty; one message per 500 ms, extras dropped; generation-fenced so a stale page cannot write | `mobile/lib/features/channels/sandbox_bridge.dart` (`parseSandboxSelect`, `SandboxBridgeRateLimiter`) |
+| App tag: the host stamps the first 8 characters of the app message's event id into the text's leading `[…]` (`[인과그래프] …` → `[인과그래프 #1a2b3c4d] …`), or prefixes `[앱 #…]` when there is none | `sandbox_bridge.dart` (`sandboxBridgePrefillText`) |
+| Delivery: the text is appended to that composer's persisted draft (`composeDraftsProvider`, so a thread composer that is not open yet picks it up when it mounts) and published through `composerPrefillProvider`; a mounted `ComposeBar` with the matching draft key shows the merged draft, expands and takes focus. The sandbox page pops so the reader lands on the composer | `sandbox_bridge.dart` (`ComposerPrefillNotifier`), `compose_bar/draft_lifecycle.dart` (`_listenForComposerPrefill`) |
+| Draft key = the message's composer: `<channelId>` for a channel bubble or a forum post/reply (forum composers are keyed by channel), `<channelId>:<threadHeadId>` for a row inside a thread | `SandboxBridgeTarget.draftKey` |
+| Not a bridge: search hits, profile sheets and previews render `MessageContent` without `appBridge`, so Run from there registers no channel and the app falls back to its copy box | `message_content.dart` |
+
+### Intel-Mac session: verify the bridge (iPad and the macOS client)
+
+1. Build the causal-graph sample with the skill (`build-app.mjs … --graph`)
+   or reuse the posted `policy-rate-50bp-causal.html`; post it in a channel.
+   Run → tap an edge → "에이전트에게 묻기". Expected: the app closes, the
+   channel composer opens focused with `[인과그래프 #<8 hex>] 간선 … — 이 관계를
+   더 설명해줘`, the tag matching the message's event id, and **nothing was
+   sent** (no new message in the channel, no typing indicator beyond the
+   usual). Repeat from a thread reply (composer = that thread) and from a
+   forum post (composer = the forum channel).
+2. Type before tapping: an existing draft must survive, with the phrase
+   appended on a new line.
+3. Run the same app from a search hit or a profile sheet: the button must
+   show the copy box (no channel registered).
+4. Upload `docs/sandbox-probe.html` again: rows 1–20 unchanged (all
+   blocked, row 20 `origin=null href=about:blank`); the new row 21 reads
+   *present* when opened from a message and *absent* from a search hit.
+5. Paste a hostile payload via the probe's console-free path: edit a copy of
+   the sample app so `buzzBridge.select` is called ten times in a loop with a
+   5 KB `text` and `kind: 'window'` — the composer must receive at most one
+   line per 500 ms and nothing for the bad kind or the oversized text.
+
 ## Sandbox probe
 
 Upload `docs/sandbox-probe.html` as an app and Run it. Every row must read
 **blocked**; if any reads *allowed*, do not ship. Row 20 also prints the
 document's `location.href` and origin (`null` on both clients); rows 4–6
 (fetch) are the proof that the policy is enforced, rows 12–13 that the origin
-is opaque, row 9 that the native WebRTC removal ran.
+is opaque, row 9 that the native WebRTC removal ran. Row 21 is informational
+(like row 3): it names the selection-bridge surface when present.
 
 ## Fonts
 

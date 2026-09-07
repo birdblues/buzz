@@ -14,6 +14,7 @@ import 'package:http/testing.dart' as http_testing;
 import 'package:image_picker/image_picker.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:nostr/nostr.dart' as nostr;
+import 'package:buzz/features/activity/compose_drafts_provider.dart';
 import 'package:buzz/features/channels/channel.dart';
 import 'package:buzz/features/channels/channel_management_provider.dart';
 import 'package:buzz/features/channels/compose_bar.dart';
@@ -22,6 +23,7 @@ import 'package:buzz/shared/link_preview/link_preview_fetcher.dart';
 import 'package:buzz/shared/link_preview/link_preview_metadata.dart';
 import 'package:buzz/features/channels/channels_provider.dart';
 import 'package:buzz/features/channels/photo_library.dart';
+import 'package:buzz/features/channels/sandbox_bridge.dart';
 import 'package:buzz/features/channels/voice_note_play_pause_icon.dart';
 import 'package:buzz/features/channels/voice_note_recording.dart';
 import 'package:buzz/features/channels/voice_note_waveform.dart';
@@ -680,6 +682,56 @@ void main() {
   });
 
   group('ComposeBar', () {
+    testWidgets(
+      'a sandbox bridge prefill fills, expands and focuses its composer only',
+      (tester) async {
+        await tester.pumpWidget(
+          _buildComposeBar(
+            uploadService: _testUploadService(nostr.Keys.generate().nsec),
+            onSend:
+                (
+                  content,
+                  mentionPubkeys, {
+                  mediaTags = const <List<String>>[],
+                }) async {},
+          ),
+        );
+        expect(find.byType(TextField), findsNothing);
+
+        const phrase = '[인과그래프 #1a2b3c4d] 간선 e4 A → B — 설명해줘';
+        final container = ProviderScope.containerOf(
+          tester.element(find.byType(ComposeBar)),
+        );
+        container
+            .read(composerPrefillProvider.notifier)
+            .request(channelId: 'channel-1', text: phrase);
+        await tester.pumpAndSettle();
+
+        final textField = tester.widget<TextField>(find.byType(TextField));
+        expect(textField.controller!.text, phrase);
+        expect(
+          textField.controller!.selection,
+          TextSelection.collapsed(offset: phrase.length),
+        );
+        expect(textField.focusNode!.hasFocus, isTrue);
+        expect(
+          container.read(composeDraftsProvider.notifier).textFor('channel-1'),
+          phrase,
+          reason: 'the prefill is the persisted draft',
+        );
+
+        // A prefill for another composer's key leaves this one alone.
+        container
+            .read(composerPrefillProvider.notifier)
+            .request(channelId: 'channel-2', text: 'elsewhere');
+        await tester.pumpAndSettle();
+        expect(
+          tester.widget<TextField>(find.byType(TextField)).controller!.text,
+          phrase,
+        );
+      },
+    );
+
     testWidgets('starts compact and grows to the full-width composer', (
       tester,
     ) async {
