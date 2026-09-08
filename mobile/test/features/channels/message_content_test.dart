@@ -1620,6 +1620,60 @@ void main() {
       );
 
       testWidgets(
+        'a wide window keeps carousel cards card-sized and shows tall photos '
+        'whole',
+        (tester) async {
+          // A desktop-width window used to stretch the carousel across the
+          // whole content column, and a portrait photo was magnified to cover
+          // that flat box.
+          _setSurfaceSize(tester, const Size(1280, 800));
+          addTearDown(() {
+            tester.view.resetPhysicalSize();
+            tester.view.resetDevicePixelRatio();
+          });
+
+          const tall = 'https://example.com/media/tall-shot.png';
+          const wide = 'https://example.com/media/wide-shot.png';
+          await tester.pumpWidget(
+            _testable(
+              const MessageContent(
+                content:
+                    '''
+Photos
+![image]($tall)
+![image]($wide)
+''',
+                tags: [
+                  ['imeta', 'url $tall', 'm image/png', 'dim 1179x2556'],
+                  ['imeta', 'url $wide', 'm image/png', 'dim 1920x1080'],
+                ],
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+
+          final carousel = find.byKey(const ValueKey('message-media-carousel'));
+          // A page is 90% of the carousel, so the card stays near the 320pt
+          // cap a single image preview uses — nowhere near the ~855pt column.
+          expect(tester.getSize(carousel).width, lessThan(420));
+
+          BoxFit fitOf(String url) => tester
+              .widget<MediaImage>(
+                find.descendant(
+                  of: find.byKey(ValueKey('message-media-carousel-page:$url')),
+                  matching: find.byType(MediaImage),
+                ),
+              )
+              .fit!;
+
+          // Taller than the card: show all of it rather than a magnified band.
+          expect(fitOf(tall), BoxFit.contain);
+          // Wider than the card: filling it loses almost nothing, as before.
+          expect(fitOf(wide), BoxFit.cover);
+        },
+      );
+
+      testWidgets(
         'groups uploaded photos into a carousel and opens the full gallery',
         (tester) async {
           const first = 'https://example.com/media/one.png';
@@ -1649,7 +1703,13 @@ Photos
           expect(carousel, findsOneWidget);
           expect(find.text('3 images'), findsOneWidget);
 
-          await tester.drag(carousel, const Offset(-600, 0));
+          // One card's worth, so the page the tap targets is the one that
+          // scrolled in. A fixed distance was tuned to the old full-width
+          // carousel and now overshoots.
+          await tester.drag(
+            carousel,
+            Offset(-tester.getSize(carousel).width, 0),
+          );
           await tester.pumpAndSettle();
 
           await tester.tap(

@@ -2,6 +2,18 @@ part of '../message_content.dart';
 
 const _messageMediaCarouselHeight = 220.0;
 
+/// Whether an image of [aspectRatio] fills a [itemWidth] × carousel-height card
+/// without losing much of itself to the crop.
+///
+/// True for anything at least as wide as the card, which covers the landscape
+/// and square photos the gallery was built around. False for a portrait photo —
+/// a phone screenshot in a card half again as wide as it is tall keeps only a
+/// horizontal slice under `cover`. An unknown ratio keeps the old behaviour.
+bool _carouselFitsWithoutCropping(double? aspectRatio, double itemWidth) {
+  if (aspectRatio == null || aspectRatio <= 0) return true;
+  return aspectRatio >= itemWidth / _messageMediaCarouselHeight;
+}
+
 @immutable
 class _MessageGalleryItem {
   final String url;
@@ -148,8 +160,22 @@ class _MessageImageCarousel extends HookConsumerWidget {
               final contentWidth = constraints.hasBoundedWidth
                   ? constraints.maxWidth
                   : _messageMediaMaxWidth(context);
-              final carouselWidth =
+              final naturalWidth =
                   contentWidth + leadingOverflow + trailingOverflow;
+              // A desktop-width column stretched one card to about 855pt, and
+              // a portrait photo dropped into that flat 220pt-tall box was
+              // magnified roughly fourfold to cover it, leaving a band of the
+              // middle. Hold cards near the width a single image preview uses.
+              //
+              // Only where the column dwarfs a card: on a phone the row is
+              // meant to run to the screen edge, and clamping it there would
+              // trade one layout bug for another.
+              final maxCarouselWidth =
+                  (_messageMediaMaxWidth(context) + Grid.half) /
+                  controller.viewportFraction;
+              final carouselWidth = naturalWidth > maxCarouselWidth * 1.5
+                  ? maxCarouselWidth
+                  : naturalWidth;
               final leadingExtent = leadingOverflow;
               final isLeftToRight =
                   Directionality.of(context) == TextDirection.ltr;
@@ -246,7 +272,17 @@ class _MessageImageCarousel extends HookConsumerWidget {
                                 child: MediaImage(
                                   url: item.url,
                                   decodeWidth: previewDecodeWidths[index],
-                                  fit: BoxFit.cover,
+                                  // Cover crops to fill, which is right for a
+                                  // photo at least as wide as the card but
+                                  // turns a portrait one into a magnified
+                                  // sliver. Show those whole instead.
+                                  fit:
+                                      _carouselFitsWithoutCropping(
+                                        item.aspectRatio,
+                                        previewDecodeWidths[index],
+                                      )
+                                      ? BoxFit.cover
+                                      : BoxFit.contain,
                                   semanticLabel: item.semanticLabel,
                                   errorBuilder: (_, _, _) =>
                                       const _MediaPreviewFallback(
