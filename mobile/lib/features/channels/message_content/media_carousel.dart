@@ -169,11 +169,10 @@ class _MessageImageCarousel extends HookConsumerWidget {
               final contentWidth = constraints.hasBoundedWidth
                   ? constraints.maxWidth
                   : _messageMediaMaxWidth(context);
-              // A column this wide belongs to the mosaic: one 220pt-tall card
-              // stretched across it turned a portrait photo into a magnified
-              // band, and narrowing the card instead left the rest of the row
-              // painted but untouchable, so pages past the first were out of
-              // reach. The row and the PageView are the same width again.
+              // The mosaic owns every surface a reader actually holds —
+              // phone, tablet, macOS — and this carousel is left only for an
+              // auxiliary pane too narrow for two columns. The row and the
+              // PageView are the same width, so the whole strip is draggable.
               if (_useMessageMediaMosaic(context, contentWidth)) {
                 return _MessageImageMosaic(
                   items: items,
@@ -240,6 +239,23 @@ class _MessageImageCarousel extends HookConsumerWidget {
                   onPageChanged: (index) => currentIndex.value = index,
                   itemBuilder: (context, index) {
                     final item = items[index];
+                    // The tap action lives on the semantics node as well as
+                    // the detector below it: `excludeSemantics` drops the
+                    // child's own action, so a screen reader could announce a
+                    // button it had no way to press.
+                    void openAt() => openImageViewer(
+                      context,
+                      imageUrl: item.url,
+                      heroTag: heroTags[index],
+                      semanticLabel: item.semanticLabel,
+                      previewDecodeWidth: previewDecodeWidths[index],
+                      aspectRatio: item.aspectRatio,
+                      galleryItems: viewerItems,
+                      initialIndex: index,
+                      onReply: onReply,
+                      onMore: onMore,
+                    );
+
                     return Padding(
                       key: ValueKey('message-media-carousel-page:${item.url}'),
                       padding: EdgeInsetsDirectional.only(
@@ -249,22 +265,12 @@ class _MessageImageCarousel extends HookConsumerWidget {
                         button: true,
                         excludeSemantics: true,
                         label: 'Open ${item.semanticLabel}',
+                        onTap: openAt,
                         child: GestureDetector(
                           key: ValueKey(
                             'message-media-carousel-item:${item.url}',
                           ),
-                          onTap: () => openImageViewer(
-                            context,
-                            imageUrl: item.url,
-                            heroTag: heroTags[index],
-                            semanticLabel: item.semanticLabel,
-                            previewDecodeWidth: previewDecodeWidths[index],
-                            aspectRatio: item.aspectRatio,
-                            galleryItems: viewerItems,
-                            initialIndex: index,
-                            onReply: onReply,
-                            onMore: onMore,
-                          ),
+                          onTap: openAt,
                           child: Container(
                             clipBehavior: Clip.antiAlias,
                             decoration: BoxDecoration(

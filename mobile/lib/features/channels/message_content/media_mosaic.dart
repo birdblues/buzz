@@ -1,12 +1,15 @@
 part of '../message_content.dart';
 
-/// Narrowest message body column that gets the mosaic instead of the carousel.
+/// Narrowest message body column that still gets the mosaic inside a wide
+/// shell.
 ///
 /// This is the column beside the avatar, not the window or the pane: roughly
-/// the pane width less the row gutters, the avatar and its gap. A thread pane
-/// at its 340pt minimum leaves about 246pt here and keeps the carousel; a 14"
-/// window with the thread open leaves about 460pt and gets the mosaic.
-const _messageMediaMosaicMinWidth = 400.0;
+/// the pane width less the row gutters, the avatar and its gap (a 400pt
+/// surface measures 306 here). It only gates auxiliary panes, which override
+/// `MediaQuery` with their own width and bottom out at [kWideAuxPaneWidth] —
+/// about 246pt of body column, where two columns would be 120pt each. A phone
+/// never consults this: see [_useMessageMediaMosaic].
+const _messageMediaMosaicMinPaneWidth = 300.0;
 
 /// Widest the mosaic itself grows, matching desktop's `max-w-lg`.
 const _messageMediaMosaicMaxWidth = 512.0;
@@ -24,14 +27,17 @@ const _messageMediaMosaicPrecacheLimit = 12;
 
 /// Whether a gallery [contentWidth] wide should be laid out as a mosaic.
 ///
-/// Both halves matter. The shell mode keeps a landscape phone — compact by
-/// [kWideLayoutMinShortestSide] even though its body column is wide — on the
-/// carousel. The width keeps a narrow pane inside a wide shell on the carousel
-/// too, because a pane overrides `MediaQuery` with its own width and can be as
-/// slim as [kWideAuxPaneWidth].
+/// Every phone gets one, at any size and either orientation, so that the four
+/// surfaces — phone, tablet, macOS and the desktop app — draw a gallery the
+/// same way. The carousel shows one photo at a time and gives no sign that
+/// eleven more are behind it; on the narrowest phone its two columns are still
+/// about 110pt each, which reads.
+///
+/// The width only gates a wide shell, where an auxiliary pane can be narrower
+/// than any phone while a full-size column sits next to it.
 bool _useMessageMediaMosaic(BuildContext context, double contentWidth) {
-  return LayoutModeScope.isWide(context) &&
-      contentWidth >= _messageMediaMosaicMinWidth;
+  return !LayoutModeScope.isWide(context) ||
+      contentWidth >= _messageMediaMosaicMinPaneWidth;
 }
 
 /// A message's images as a two-column mosaic, the way the desktop client draws

@@ -1629,56 +1629,62 @@ void main() {
         },
       );
 
-      testWidgets('a phone carousel shows a tall photo whole, not magnified', (
-        tester,
-      ) async {
-        _setSurfaceSize(tester, const Size(390, 844));
-        addTearDown(() {
-          tester.view.resetPhysicalSize();
-          tester.view.resetDevicePixelRatio();
-        });
+      testWidgets(
+        'a narrow-pane carousel shows a tall photo whole, not magnified',
+        (tester) async {
+          // Only an auxiliary pane still gets the carousel; every phone now
+          // draws the mosaic.
+          _setSurfaceSize(tester, const Size(1280, 1600));
+          addTearDown(() {
+            tester.view.resetPhysicalSize();
+            tester.view.resetDevicePixelRatio();
+          });
 
-        const tall = 'https://example.com/media/tall-shot.png';
-        const wide = 'https://example.com/media/wide-shot.png';
-        await tester.pumpWidget(
-          _testable(
-            const MessageContent(
-              content:
-                  '''
+          const tall = 'https://example.com/media/tall-shot.png';
+          const wide = 'https://example.com/media/wide-shot.png';
+          await tester.pumpWidget(
+            _testable(
+              const SizedBox(
+                width: 280,
+                child: MessageContent(
+                  content:
+                      '''
 Photos
 ![image]($tall)
 ![image]($wide)
 ''',
-              tags: [
-                ['imeta', 'url $tall', 'm image/png', 'dim 1179x2556'],
-                ['imeta', 'url $wide', 'm image/png', 'dim 1920x1080'],
-              ],
-            ),
-          ),
-        );
-        await tester.pumpAndSettle();
-
-        BoxFit fitOf(String url) => tester
-            .widget<MediaImage>(
-              find.descendant(
-                of: find.byKey(ValueKey('message-media-carousel-page:$url')),
-                matching: find.byType(MediaImage),
+                  tags: [
+                    ['imeta', 'url $tall', 'm image/png', 'dim 1179x2556'],
+                    ['imeta', 'url $wide', 'm image/png', 'dim 1920x1080'],
+                  ],
+                ),
               ),
-            )
-            .fit!;
+            ),
+          );
+          await tester.pumpAndSettle();
 
-        // Taller than the card: show all of it rather than a magnified band.
-        expect(fitOf(tall), BoxFit.contain);
-        // Wider than the card: filling it loses almost nothing, as before.
-        expect(fitOf(wide), BoxFit.cover);
-      });
+          BoxFit fitOf(String url) => tester
+              .widget<MediaImage>(
+                find.descendant(
+                  of: find.byKey(ValueKey('message-media-carousel-page:$url')),
+                  matching: find.byType(MediaImage),
+                ),
+              )
+              .fit!;
 
-      testWidgets('a phone carousel spans the row it can be dragged on', (
+          // Taller than the card: show all of it rather than a magnified band.
+          expect(fitOf(tall), BoxFit.contain);
+          // Wider than the card: filling it loses almost nothing, as before.
+          expect(fitOf(wide), BoxFit.cover);
+        },
+      );
+
+      testWidgets('a narrow-pane carousel spans the row it can be dragged on', (
         tester,
       ) async {
         // Narrowing the PageView inside a wider row left the rest of it
         // painted but untouchable, so pages past the first were unreachable.
-        _setSurfaceSize(tester, const Size(390, 844));
+        _setSurfaceSize(tester, const Size(1280, 1600));
         addTearDown(() {
           tester.view.resetPhysicalSize();
           tester.view.resetDevicePixelRatio();
@@ -1686,24 +1692,27 @@ Photos
 
         await tester.pumpWidget(
           _testable(
-            const MessageContent(
-              content: '''
+            const SizedBox(
+              width: 280,
+              child: MessageContent(
+                content: '''
 Photos
 ![image](https://example.com/media/reach-one.png)
 ![image](https://example.com/media/reach-two.png)
 ''',
-              tags: [
-                [
-                  'imeta',
-                  'url https://example.com/media/reach-one.png',
-                  'm image/png',
+                tags: [
+                  [
+                    'imeta',
+                    'url https://example.com/media/reach-one.png',
+                    'm image/png',
+                  ],
+                  [
+                    'imeta',
+                    'url https://example.com/media/reach-two.png',
+                    'm image/png',
+                  ],
                 ],
-                [
-                  'imeta',
-                  'url https://example.com/media/reach-two.png',
-                  'm image/png',
-                ],
-              ],
+              ),
             ),
           ),
         );
@@ -1832,12 +1841,13 @@ Photos
           handle.dispose();
         });
 
-        testWidgets('keep a narrow column on the carousel', (tester) async {
-          // A wide window can still hand a message a slim column — the thread
-          // pane bottoms out at 340pt — and two columns do not fit there.
+        testWidgets('keep a narrow pane on the carousel', (tester) async {
+          // A wide window can still hand a message a slim column: the thread
+          // pane bottoms out at 340pt, leaving about 246pt of body column,
+          // where two columns would be 120pt each.
           useWideWindow(tester);
           await tester.pumpWidget(
-            _testable(SizedBox(width: 399, child: gallery(4))),
+            _testable(SizedBox(width: 299, child: gallery(4))),
           );
           await tester.pumpAndSettle();
 
@@ -1854,7 +1864,7 @@ Photos
         testWidgets('switch to the mosaic at the threshold', (tester) async {
           useWideWindow(tester);
           await tester.pumpWidget(
-            _testable(SizedBox(width: 400, child: gallery(4))),
+            _testable(SizedBox(width: 300, child: gallery(4))),
           );
           await tester.pumpAndSettle();
 
@@ -1863,10 +1873,29 @@ Photos
             findsOneWidget,
           );
         });
+
+        testWidgets('give a phone the mosaic at any width', (tester) async {
+          // The four surfaces draw a gallery the same way. A phone body
+          // column is narrower than the pane threshold above, but a phone has
+          // no second column to fall back to and the carousel hides how many
+          // photos there are.
+          _setSurfaceSize(tester, const Size(390, 844));
+          await tester.pumpWidget(_testable(gallery(4)));
+          await tester.pumpAndSettle();
+
+          expect(
+            find.byKey(const ValueKey('message-media-mosaic')),
+            findsOneWidget,
+          );
+          expect(
+            find.byKey(const ValueKey('message-media-carousel')),
+            findsNothing,
+          );
+        });
       });
 
       testWidgets(
-        'groups uploaded photos into a carousel and opens the full gallery',
+        'groups uploaded photos into a mosaic and opens the full gallery',
         (tester) async {
           _setSurfaceSize(tester, const Size(390, 844));
           addTearDown(() {
@@ -1896,21 +1925,15 @@ Photos
           );
           await tester.pumpAndSettle();
 
-          final carousel = find.byKey(const ValueKey('message-media-carousel'));
-          expect(carousel, findsOneWidget);
+          expect(
+            find.byKey(const ValueKey('message-media-mosaic')),
+            findsOneWidget,
+          );
           expect(find.text('3 images'), findsOneWidget);
 
-          // One card's worth, so the page the tap targets is the one that
-          // scrolled in. A fixed distance was tuned to the old full-width
-          // carousel and now overshoots.
-          await tester.drag(
-            carousel,
-            Offset(-tester.getSize(carousel).width, 0),
-          );
-          await tester.pumpAndSettle();
-
+          // Every cell is on screen, so the second photo opens with one tap.
           await tester.tap(
-            find.byKey(const ValueKey('message-media-carousel-item:$second')),
+            find.byKey(const ValueKey('message-media-mosaic-item:$second')),
           );
           await tester.pumpAndSettle();
 
@@ -1932,7 +1955,7 @@ Photos
             find.byKey(const ValueKey('message-media-image-viewer-image:1')),
           );
           // Settled past the push transition: the visible page has been
-          // promoted from the carousel's preview decode to full resolution.
+          // promoted from the cell's preview decode to full resolution.
           expect(displayedImage.decodeWidth, isNull);
           final selectedThumbnailClip = tester.widget<ClipRRect>(
             find.byKey(
@@ -1968,7 +1991,7 @@ Photos
       testWidgets(
         'keeps adjacent carousel images active and ends with a gutter',
         (tester) async {
-          _setSurfaceSize(tester, const Size(390, 844));
+          _setSurfaceSize(tester, const Size(1280, 1600));
           addTearDown(() {
             tester.view.resetPhysicalSize();
             tester.view.resetDevicePixelRatio();
@@ -1977,16 +2000,19 @@ Photos
           const second = 'https://example.com/media/gutter-two.png';
           await tester.pumpWidget(
             _testable(
-              const MessageContent(
-                content:
-                    '''
+              const SizedBox(
+                width: 280,
+                child: MessageContent(
+                  content:
+                      '''
 ![image]($first)
 ![image]($second)
 ''',
-                tags: [
-                  ['imeta', 'url $first', 'm image/png'],
-                  ['imeta', 'url $second', 'm image/png'],
-                ],
+                  tags: [
+                    ['imeta', 'url $first', 'm image/png'],
+                    ['imeta', 'url $second', 'm image/png'],
+                  ],
+                ),
               ),
             ),
           );
@@ -2044,7 +2070,7 @@ Photos
           await tester.pumpAndSettle();
 
           await tester.tap(
-            find.byKey(const ValueKey('message-media-carousel-item:$first')),
+            find.byKey(const ValueKey('message-media-mosaic-item:$first')),
           );
           await tester.pumpAndSettle();
           await tester.tap(
@@ -2072,7 +2098,7 @@ Photos
       testWidgets('resets carousel paging when gallery images change', (
         tester,
       ) async {
-        _setSurfaceSize(tester, const Size(390, 844));
+        _setSurfaceSize(tester, const Size(1280, 1600));
         addTearDown(() {
           tester.view.resetPhysicalSize();
           tester.view.resetDevicePixelRatio();
@@ -2088,11 +2114,14 @@ Photos
         ];
 
         Widget gallery(List<String> urls) => _testable(
-          MessageContent(
-            content: urls.map((url) => '![image]($url)').join('\n'),
-            tags: [
-              for (final url in urls) ['imeta', 'url $url', 'm image/png'],
-            ],
+          SizedBox(
+            width: 280,
+            child: MessageContent(
+              content: urls.map((url) => '![image]($url)').join('\n'),
+              tags: [
+                for (final url in urls) ['imeta', 'url $url', 'm image/png'],
+              ],
+            ),
           ),
         );
 

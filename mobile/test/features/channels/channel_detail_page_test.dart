@@ -3608,7 +3608,7 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.longPress(
-        find.byKey(const ValueKey('message-media-carousel-item:$firstImage')),
+        find.byKey(const ValueKey('message-media-mosaic-item:$firstImage')),
       );
       await tester.pumpAndSettle();
 
@@ -3718,62 +3718,64 @@ void main() {
       expect(messageActionBackdropActive.value, isFalse);
     });
 
-    testWidgets(
-      'keeps image galleries body-aligned and flush with the trailing edge',
-      (tester) async {
-        tester.view.physicalSize = const Size(400, 800);
-        tester.view.devicePixelRatio = 1;
-        addTearDown(tester.view.resetPhysicalSize);
-        addTearDown(tester.view.resetDevicePixelRatio);
+    testWidgets('keeps image galleries body-aligned under their count label', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(400, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
 
-        const firstImage = 'https://example.com/media/first.png';
-        const secondImage = 'https://example.com/media/second.png';
-        await tester.pumpWidget(
-          _buildTestable(
-            messages: [
-              _textMsg(
-                id: 'gallery',
-                pubkey: 'alice',
-                content:
-                    'Gallery\n'
-                    '![First]($firstImage)\n'
-                    '![Second]($secondImage)',
-                extraTags: const [
-                  ['imeta', 'url $firstImage', 'm image/png'],
-                  ['imeta', 'url $secondImage', 'm image/png'],
-                ],
-              ),
-            ],
-            users: const {
-              'alice': UserProfile(pubkey: 'alice', displayName: 'Alice'),
-            },
-          ),
-        );
-        await tester.pumpAndSettle();
+      const firstImage = 'https://example.com/media/first.png';
+      const secondImage = 'https://example.com/media/second.png';
+      await tester.pumpWidget(
+        _buildTestable(
+          messages: [
+            _textMsg(
+              id: 'gallery',
+              pubkey: 'alice',
+              content:
+                  'Gallery\n'
+                  '![First]($firstImage)\n'
+                  '![Second]($secondImage)',
+              extraTags: const [
+                ['imeta', 'url $firstImage', 'm image/png'],
+                ['imeta', 'url $secondImage', 'm image/png'],
+              ],
+            ),
+          ],
+          users: const {
+            'alice': UserProfile(pubkey: 'alice', displayName: 'Alice'),
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
 
-        final carousel = find.byKey(const ValueKey('message-media-carousel'));
-        final imageCount = find.byKey(
-          const ValueKey('message-media-carousel-count'),
-        );
-        final carouselRect = tester.getRect(carousel);
-        final imageCountRect = tester.getRect(imageCount);
+      // The carousel used to bleed past the body column to the screen
+      // edge. The mosaic that replaced it is a block in the column, so the
+      // contract is alignment with the label above it, not the edge.
+      final mosaic = find.byKey(const ValueKey('message-media-mosaic'));
+      final imageCount = find.byKey(
+        const ValueKey('message-media-carousel-count'),
+      );
+      final mosaicRect = tester.getRect(mosaic);
+      final imageCountRect = tester.getRect(imageCount);
 
-        expect(carouselRect.left, imageCountRect.left);
-        expect(carouselRect.right, tester.view.physicalSize.width);
-        expect(carouselRect.top - imageCountRect.bottom, Grid.half + 2);
+      expect(mosaicRect.left, imageCountRect.left);
+      expect(
+        mosaicRect.right,
+        lessThan(tester.view.physicalSize.width.toDouble()),
+      );
+      expect(mosaicRect.top - imageCountRect.bottom, Grid.half + 2);
 
-        final messageMaterial = find
-            .ancestor(
-              of: find.byKey(const ValueKey('message-row-gallery')),
-              matching: find.byType(Material),
-            )
-            .first;
-        expect(
-          tester.widget<Material>(messageMaterial).clipBehavior,
-          Clip.none,
-        );
-      },
-    );
+      final messageMaterial = find
+          .ancestor(
+            of: find.byKey(const ValueKey('message-row-gallery')),
+            matching: find.byType(Material),
+          )
+          .first;
+      expect(tester.widget<Material>(messageMaterial).clipBehavior, Clip.none);
+    });
 
     testWidgets('uses larger participant avatars in reply summaries', (
       tester,
