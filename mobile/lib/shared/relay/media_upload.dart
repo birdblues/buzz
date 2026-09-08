@@ -69,6 +69,14 @@ const _maxFileSizeBytes = 100 * 1024 * 1024; // 100MB
 const _mediaPolicyUploadMessage =
     'The server rejected this image. Try exporting it again.';
 
+/// Shown when the picture could not be read or repacked on this machine.
+///
+/// The native encoder answers a file it cannot decode with a platform error
+/// whose text — a code, a mime type, a null — names nothing anyone can act on,
+/// and it used to reach the composer verbatim.
+const _mediaPreparationMessage =
+    "We couldn't read this image. The file may be damaged.";
+
 typedef PickGalleryImage = Future<XFile?> Function();
 
 /// Captures one image with the system camera, or returns null when cancelled.
@@ -95,6 +103,18 @@ class MediaPolicyUploadException implements Exception {
 
   @override
   String toString() => _mediaPolicyUploadMessage;
+}
+
+/// The picture never became something that could be sent.
+///
+/// Distinct from [MediaPolicyUploadException] in the part that matters to a
+/// reader: nothing left the machine. The decoder could not read the file, or
+/// its container could not be brought within what the relay accepts.
+class MediaPreparationException implements Exception {
+  const MediaPreparationException();
+
+  @override
+  String toString() => _mediaPreparationMessage;
 }
 
 /// Cancels a single user-initiated media upload without closing the shared
@@ -575,7 +595,7 @@ class MediaUploadService {
           mode: ImageScrubMode.original,
         );
       } on FormatException {
-        throw Exception('failed to sanitize image for upload');
+        throw const MediaPreparationException();
       }
     }
     return _uploadPreparedBytes(
@@ -785,7 +805,7 @@ class MediaUploadService {
           mimeType: mimeType,
         );
       } on FormatException {
-        throw Exception('failed to sanitize image for upload');
+        throw const MediaPreparationException();
       }
     }
 
@@ -795,7 +815,7 @@ class MediaUploadService {
 
     final encodedBytes = await _sanitizeImageBytes(bytes, mimeType);
     if (encodedBytes.isEmpty) {
-      throw Exception('failed to sanitize image for upload');
+      throw const MediaPreparationException();
     }
     return _scrubReencodedUploadImage(encodedBytes);
   }
@@ -820,7 +840,7 @@ class MediaUploadService {
       // The reason names a container detail no reader can act on, so it goes
       // to the log and the composer keeps the short line.
       debugPrint('[MediaUploadService] scrub rejected $mimeType: $error');
-      throw Exception('failed to sanitize image for upload');
+      throw const MediaPreparationException();
     }
   }
 }

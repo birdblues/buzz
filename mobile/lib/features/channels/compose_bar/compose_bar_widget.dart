@@ -210,7 +210,9 @@ class ComposeBar extends HookConsumerWidget {
       ],
     );
     useEffect(() {
-      if (defaultTargetPlatform != TargetPlatform.iOS) return null;
+      // Both Apple runners answer this; Android has no equivalent and its
+      // keyboards insert pictures through `onContentInserted` instead.
+      if (!isApplePlatform) return null;
 
       var disposed = false;
       Future<void> refreshClipboardAvailability() async {
@@ -806,6 +808,20 @@ class ComposeBar extends HookConsumerWidget {
       }());
     }, [context, ref, queueAttachment, uploadError]);
 
+    /// Answers Cmd+V when the pasteboard holds a picture.
+    ///
+    /// Returns false for anything else so the keystroke falls through to the
+    /// field and pastes text as it always did. The answer has to be immediate,
+    /// which is why it reads the cached probe rather than the pasteboard: the
+    /// probe refreshes whenever the composer takes focus and whenever the app
+    /// comes back, and copying happens in another app, so the window between
+    /// the two is small.
+    final pasteImageIfAvailable = useCallback(() {
+      if (!isDesktopHost || !clipboardHasImage.value) return false;
+      pasteClipboardImage();
+      return true;
+    }, [clipboardHasImage, pasteClipboardImage]);
+
     final buildContextMenu = useCallback<EditableTextContextMenuBuilder>((
       context,
       editableTextState,
@@ -826,8 +842,7 @@ class ComposeBar extends HookConsumerWidget {
       }
 
       final buttonItems = [...editableTextState.contextMenuButtonItems];
-      if (defaultTargetPlatform == TargetPlatform.iOS &&
-          clipboardHasImage.value) {
+      if (clipboardHasImage.value) {
         buttonItems.insert(
           0,
           ContextMenuButtonItem(
@@ -1128,6 +1143,7 @@ class ComposeBar extends HookConsumerWidget {
               focusNode: focusNode,
               contextMenuBuilder: buildContextMenu,
               onContentInserted: uploadPastedImage,
+              onPasteImage: pasteImageIfAvailable,
               onSend: () => unawaited(send()),
               resolvedHint: resolvedHint,
               attachmentSurface: attachmentSurface.value,

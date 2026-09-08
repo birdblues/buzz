@@ -145,6 +145,22 @@ void _setMockMediaUploadPlatformHandler(
       .setMockMethodCallHandler(_mediaUploadPlatformChannel, handler);
 }
 
+void _restoreMediaUploadPlatformHandler() {
+  _setMockMediaUploadPlatformHandler((call) async {
+    switch (call.method) {
+      case 'sanitizeImageForUpload':
+        final arguments = call.arguments as Map<Object?, Object?>;
+        return arguments['bytes'] as Uint8List;
+      case 'transcodeImageToJpeg':
+        return _pngBytes;
+      case 'clipboardHasImage':
+        return true;
+      default:
+        return null;
+    }
+  });
+}
+
 void _setMockNativeAttachmentPopoverHandler(
   Future<Object?> Function(MethodCall call)? handler,
 ) {
@@ -4038,7 +4054,7 @@ void main() {
       }
     });
 
-    testWidgets('does not add Paste Image to non-iOS context menus', (
+    testWidgets('does not add Paste Image when the clipboard has none', (
       tester,
     ) async {
       final uploadService = MediaUploadService(
@@ -4074,6 +4090,183 @@ void main() {
       expect(
         menu.buttonItems!.where((item) => item.label == 'Paste Image'),
         isEmpty,
+      );
+    });
+
+    group('macOS clipboard', () {
+      /// Runs [body] as the Mac.
+      ///
+      /// The override is restored inside the test rather than in a tearDown:
+      /// a widget test checks that no foundation debug variable outlived its
+      /// body, and tearDowns run after that check.
+      Future<void> asMacOS(Future<void> Function() body) async {
+        final previousPlatform = debugDefaultTargetPlatformOverride;
+        debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+        try {
+          await body();
+        } finally {
+          debugDefaultTargetPlatformOverride = previousPlatform;
+        }
+      }
+
+      Future<void> pumpWithClipboardImage(
+        WidgetTester tester, {
+        required MediaUploadService uploadService,
+      }) async {
+        await tester.pumpWidget(
+          _buildComposeBar(
+            uploadService: uploadService,
+            onSend:
+                (
+                  content,
+                  mentionPubkeys, {
+                  mediaTags = const <List<String>>[],
+                }) async {},
+          ),
+        );
+        await _expandComposer(tester);
+        await tester.tap(find.byType(TextField));
+        await tester.pumpAndSettle();
+      }
+
+      testWidgets(
+        'Cmd+V attaches the picture on the pasteboard',
+        (tester) async => asMacOS(() async {
+          // The Mac used to do nothing at all here: the keystroke reached a text
+          // handler with no text to paste, and the runner had no way to read an
+          // image off the pasteboard.
+          await pumpWithClipboardImage(
+            tester,
+            uploadService: MediaUploadService(
+              baseUrl: 'https://relay.example',
+              nsec: nostr.Keys.generate().nsec,
+              httpClient: http_testing.MockClient((request) async {
+                return http.Response(
+                  jsonEncode({
+                    'url': 'https://relay.example/media/pasted.png',
+                    'sha256':
+                        '7777777777777777777777777777777777777777777777777777777777777777',
+                    'size': request.bodyBytes.length,
+                    'type': 'image/png',
+                    'uploaded': 1,
+                  }),
+                  200,
+                );
+              }),
+              pickGalleryVideo: () async => null,
+              pickGalleryImage: () async => null,
+              readClipboardImage: () async => _pngBytes,
+            ),
+          );
+
+          await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+          await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+          await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+          await tester.pumpAndSettle();
+
+          expect(find.byTooltip('Remove attachment'), findsOneWidget);
+        }),
+      );
+
+      testWidgets(
+        'a plain V still types',
+        (tester) async => asMacOS(() async {
+          // Only the shortcut is claimed; the letter has to reach the field.
+          await pumpWithClipboardImage(
+            tester,
+            uploadService: MediaUploadService(
+              baseUrl: 'https://relay.example',
+              nsec: nostr.Keys.generate().nsec,
+              pickGalleryVideo: () async => null,
+              pickGalleryImage: () async => null,
+              readClipboardImage: () async => _pngBytes,
+            ),
+          );
+
+          await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+          await tester.pumpAndSettle();
+
+          expect(find.byTooltip('Remove attachment'), findsNothing);
+        }),
+      );
+
+      testWidgets(
+        'the context menu offers Paste Image too',
+        (tester) async => asMacOS(() async {
+          await pumpWithClipboardImage(
+            tester,
+            uploadService: MediaUploadService(
+              baseUrl: 'https://relay.example',
+              nsec: nostr.Keys.generate().nsec,
+              pickGalleryVideo: () async => null,
+              pickGalleryImage: () async => null,
+              readClipboardImage: () async => _pngBytes,
+            ),
+          );
+
+          final textField = tester.widget<TextField>(find.byType(TextField));
+          final editableTextState = tester.state<EditableTextState>(
+            find.byType(EditableText),
+          );
+          final menu =
+              textField.contextMenuBuilder!(
+                    tester.element(find.byType(TextField)),
+                    editableTextState,
+                  )
+                  as AdaptiveTextSelectionToolbar;
+
+          expect(
+            menu.buttonItems!.where((item) => item.label == 'Paste Image'),
+            isNotEmpty,
+          );
+        }),
+      );
+
+      testWidgets(
+        'a runner failure reads as a sentence, not a code',
+        (tester) async => asMacOS(() async {
+          // The composer shows the text of whatever it catches, and a
+          // PlatformException's text is its code, the mime type and a null.
+          _setMockMediaUploadPlatformHandler((call) async {
+            if (call.method == 'sanitizeImageForUpload') {
+              throw PlatformException(
+                code: 'sanitize_failed',
+                message: 'Unable to prepare the picked image.',
+                details: 'image/png',
+              );
+            }
+            if (call.method == 'clipboardHasImage') return true;
+            return null;
+          });
+          addTearDown(_restoreMediaUploadPlatformHandler);
+
+          await pumpWithClipboardImage(
+            tester,
+            uploadService: MediaUploadService(
+              baseUrl: 'https://relay.example',
+              nsec: nostr.Keys.generate().nsec,
+              pickGalleryVideo: () async => null,
+              pickGalleryImage: () async => null,
+              readClipboardImage: () async => _pngBytes,
+            ),
+          );
+
+          await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+          await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+          await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+          await tester.pumpAndSettle();
+          expect(find.byTooltip('Remove attachment'), findsOneWidget);
+
+          // The picture is only read when the message goes.
+          await tester.tap(find.byIcon(LucideIcons.arrowUp));
+          await tester.pumpAndSettle();
+
+          expect(
+            find.text("We couldn't read this image. The file may be damaged."),
+            findsOneWidget,
+          );
+          expect(find.textContaining('sanitize_failed'), findsNothing);
+        }),
       );
     });
 
@@ -4707,6 +4900,45 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byTooltip('Remove attachment'), findsOneWidget);
+    });
+
+    testWidgets('a plugin failure reads as a sentence, not a code', (
+      tester,
+    ) async {
+      // A picker plugin answers with a PlatformException, whose text is an
+      // error code and a stack — the composer prints the text of whatever it
+      // catches, so without a guard that code reaches the reader.
+      final uploadService = MediaUploadService(
+        baseUrl: 'https://relay.example',
+        nsec: nostr.Keys.generate().nsec,
+        pickGalleryImage: () async => null,
+        pickGalleryVideo: () async => throw PlatformException(
+          code: 'multiple_request',
+          message: 'Cancelled by a second request.',
+        ),
+      );
+
+      await tester.pumpWidget(
+        _buildComposeBar(
+          uploadService: uploadService,
+          onSend:
+              (
+                content,
+                mentionPubkeys, {
+                mediaTags = const <List<String>>[],
+              }) async {},
+        ),
+      );
+
+      await _openAttachmentMenu(tester);
+      await tester.tap(find.text('Video'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Something went wrong with this attachment. Try again.'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('multiple_request'), findsNothing);
     });
 
     testWidgets('taps Video in chooser sheet and uploads video', (

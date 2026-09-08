@@ -31,11 +31,20 @@ enum MediaImageCodec {
     case "image/jpeg":
       return try encodeJpeg(data)
     case "image/png", "image/webp":
-      let image = try decodeOriented(data)
-      return try encode(image, as: pngIdentifier, quality: nil)
+      return try encodePng(data)
     default:
       throw CodecError.encodeFailed
     }
+  }
+
+  /// Redraws `data` as PNG, whatever it arrived as.
+  ///
+  /// The clipboard path uses this: macOS often holds a copied picture only as
+  /// TIFF, which the upload path has no name for, and declaring it something
+  /// it is not fails in the scrubber instead.
+  static func encodePng(_ data: Data) throws -> Data {
+    let image = try decodeOriented(data)
+    return try encode(image, as: pngIdentifier, quality: nil)
   }
 
   /// Redraws `data` as JPEG. This is the HEIC path, and anything else the

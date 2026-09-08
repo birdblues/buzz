@@ -64,12 +64,48 @@ class MainFlutterWindow: NSWindow {
     super.awakeFromNib()
   }
 
-  /// Answers `sanitizeImageForUpload` and `transcodeImageToJpeg`.
+  /// The pasteboard types a copied picture can arrive as, best first.
   ///
-  /// Only those two: the rest of `buzz/media_upload` — video transcoding,
-  /// poster extraction, voice-note packaging, clipboard reads — has no macOS
-  /// implementation, and `hasNativeMediaPipeline` keeps the composer from
-  /// offering them. Anything else must fall through to
+  /// TIFF is last and handled apart: it is what Preview, Finder and the
+  /// screenshot tool leave behind, and it is the one representation the upload
+  /// path has no name for.
+  private static let clipboardImageTypes: [NSPasteboard.PasteboardType] = [
+    .png,
+    NSPasteboard.PasteboardType("public.jpeg"),
+    NSPasteboard.PasteboardType("public.heic"),
+    NSPasteboard.PasteboardType("public.heif"),
+    NSPasteboard.PasteboardType("org.webmproject.webp"),
+    NSPasteboard.PasteboardType("com.compuserve.gif"),
+    .tiff,
+  ]
+
+  /// Whether the pasteboard holds a picture, without copying it.
+  ///
+  /// The composer asks on focus and on activation to decide whether Cmd+V
+  /// belongs to an image or to text, so this runs often and must stay cheap.
+  static func clipboardHasImage(_ pasteboard: NSPasteboard) -> Bool {
+    return pasteboard.availableType(from: clipboardImageTypes) != nil
+  }
+
+  /// The pasteboard's picture, in a container the upload path can name.
+  ///
+  /// Mirrors `AppDelegate.clipboardImageData` in the iOS runner. TIFF is
+  /// re-encoded rather than passed on: the upload path names a picture by its
+  /// bytes, and calling a TIFF a PNG fails later in the scrubber, which is
+  /// exactly the error a reader cannot act on.
+  static func clipboardImageData(from pasteboard: NSPasteboard) -> Data? {
+    for type in clipboardImageTypes where type != .tiff {
+      if let data = pasteboard.data(forType: type) { return data }
+    }
+    guard let tiff = pasteboard.data(forType: .tiff) else { return nil }
+    return try? MediaImageCodec.encodePng(tiff)
+  }
+
+  /// Answers the image methods of `buzz/media_upload`.
+  ///
+  /// Only these four: video transcoding, poster extraction and voice-note
+  /// packaging have no macOS implementation, and `hasNativeMediaPipeline`
+  /// keeps the composer from offering them. Anything else must fall through to
   /// `FlutterMethodNotImplemented` rather than fail silently.
   private static func handleMediaUpload(
     _ call: FlutterMethodCall,
@@ -107,6 +143,22 @@ class MainFlutterWindow: NSWindow {
       }
       encode(result: result, code: "transcode_failed", details: nil) {
         try MediaImageCodec.encodeJpeg(typedData.data)
+      }
+    case "clipboardHasImage":
+      result(clipboardHasImage(.general))
+    case "readClipboardImage":
+      // Reading can mean decoding a TIFF, so it does not belong on the main
+      // thread; the answer is nil when the pasteboard holds no picture, which
+      // the composer reads as "let this paste be text".
+      DispatchQueue.global(qos: .userInitiated).async {
+        let data = autoreleasepool { clipboardImageData(from: .general) }
+        DispatchQueue.main.async {
+          guard let data else {
+            result(nil)
+            return
+          }
+          result(FlutterStandardTypedData(bytes: data))
+        }
       }
     default:
       result(FlutterMethodNotImplemented)

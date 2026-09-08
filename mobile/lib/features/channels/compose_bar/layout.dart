@@ -13,6 +13,10 @@ class _ComposeBarLayout extends HookWidget {
   final FocusNode focusNode;
   final EditableTextContextMenuBuilder contextMenuBuilder;
   final ValueChanged<KeyboardInsertedContent> onContentInserted;
+
+  /// Handles Cmd+V when the pasteboard holds a picture, and answers whether it
+  /// did. False lets the keystroke through so text pastes as usual.
+  final bool Function() onPasteImage;
   final VoidCallback onSend;
   final String resolvedHint;
   final _AttachmentSurface attachmentSurface;
@@ -49,6 +53,7 @@ class _ComposeBarLayout extends HookWidget {
     required this.focusNode,
     required this.contextMenuBuilder,
     required this.onContentInserted,
+    required this.onPasteImage,
     required this.onSend,
     required this.resolvedHint,
     required this.attachmentSurface,
@@ -401,6 +406,17 @@ class _ComposeBarLayout extends HookWidget {
   KeyEventResult _handleHardwareKey(KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
     final key = event.logicalKey;
+    // Cmd+V with a picture on the pasteboard attaches it. The field itself
+    // would paste nothing at all, which is what the Mac did before: the
+    // keystroke landed on a text handler that had no text to insert.
+    if (key == LogicalKeyboardKey.keyV &&
+        HardwareKeyboard.instance.isMetaPressed &&
+        !HardwareKeyboard.instance.isShiftPressed &&
+        !HardwareKeyboard.instance.isAltPressed &&
+        !HardwareKeyboard.instance.isControlPressed &&
+        onPasteImage()) {
+      return KeyEventResult.handled;
+    }
     if (key == LogicalKeyboardKey.escape) {
       focusNode.unfocus();
       return KeyEventResult.handled;

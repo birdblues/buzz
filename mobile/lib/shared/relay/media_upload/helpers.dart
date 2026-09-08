@@ -123,17 +123,33 @@ Future<Uint8List> _sanitizePickedImageBytes(
   );
 }
 
+/// Calls a runner method that must answer with bytes.
+///
+/// A platform failure is turned into [MediaPreparationException] here rather
+/// than left to travel: a `PlatformException`'s text is its error code, the
+/// mime type and a null, and the composer shows the text of whatever it
+/// catches. The code still reaches the log, where it is worth something.
 Future<Uint8List> _invokeRequiredPlatformBytesMethod(
   String method, {
   Object? arguments,
   required String errorMessage,
 }) async {
-  final result = await _mediaUploadPlatformChannel.invokeMethod<Uint8List>(
-    method,
-    arguments,
-  );
+  final Uint8List? result;
+  try {
+    result = await _mediaUploadPlatformChannel.invokeMethod<Uint8List>(
+      method,
+      arguments,
+    );
+  } on PlatformException catch (error) {
+    debugPrint('[MediaUploadService] $method failed: $error');
+    throw const MediaPreparationException();
+  } on MissingPluginException catch (error) {
+    debugPrint('[MediaUploadService] $method is not implemented: $error');
+    throw const MediaPreparationException();
+  }
   if (result == null || result.isEmpty) {
-    throw Exception(errorMessage);
+    debugPrint('[MediaUploadService] $method returned nothing: $errorMessage');
+    throw const MediaPreparationException();
   }
   return result;
 }

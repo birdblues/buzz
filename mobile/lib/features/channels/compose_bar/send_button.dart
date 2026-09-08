@@ -44,6 +44,20 @@ class _SendButton extends StatelessWidget {
   }
 }
 
+/// The line the composer shows under a failed attachment.
+///
+/// Our own upload exceptions already read as sentences. Anything else is
+/// either an `Exception` whose message was written for a person, or something
+/// with no message for one at all — a platform error naming a code and a mime
+/// type, say — and those get a plain line while the original goes to the log.
 String _formatUploadError(Object error) {
-  return error.toString().replaceFirst('Exception: ', '');
+  if (error is MediaPolicyUploadException ||
+      error is MediaPreparationException) {
+    return error.toString();
+  }
+  if (error is Exception && error is! PlatformException) {
+    return error.toString().replaceFirst('Exception: ', '');
+  }
+  debugPrint('[ComposeBar] attachment failed: $error');
+  return 'Something went wrong with this attachment. Try again.';
 }
