@@ -95,11 +95,21 @@ re-uploaded from macOS loses its manifest chunk, which used to survive because
 the file went up untouched; the client never creates those, so only forwarding
 one is affected.
 
+**Right-click opens no context menu**, in the composer or in any other text
+field — not even cut, copy and paste. Verified on device, and older than the
+clipboard work above. The framework is not the reason: Flutter routes a
+secondary tap to `showToolbar` on macOS like everywhere else
+(`text_selection.dart`, `onSecondaryTap`), and nothing in `lib/` handles or
+suppresses a secondary button. So the Paste Image entry the composer adds when
+the pasteboard holds a picture cannot currently be reached, and Cmd+V is the
+only way to paste one; the entry is covered by a widget test rather than on
+device. Whoever picks this up starts at the engine embedding, not at the
+widgets.
+
 Known gaps, accepted for the first version: no notifications while the app
 is in the background (push is iOS-only and the settings card hides itself);
-no clipboard-image detection in the composer's context menu (keyboard paste
-works); no Huddles; no Face ID (Touch ID works through `local_auth_darwin`);
-no drag-and-drop, hover states or menu-bar shortcuts beyond the template's.
+no Huddles; no Face ID (Touch ID works through `local_auth_darwin`); no
+drag-and-drop, hover states or menu-bar shortcuts beyond the template's.
 
 ## Building
 
