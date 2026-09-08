@@ -17,6 +17,7 @@ import 'package:video_player/video_player.dart';
 import '../../shared/clipboard_utils.dart';
 import '../../shared/deeplink/deep_link.dart';
 import '../../shared/deeplink/pending_deep_link_provider.dart';
+import '../../shared/layout/layout_mode.dart';
 import '../../shared/platform/apple_platform.dart';
 import '../../shared/relay/relay.dart';
 import '../../shared/syntax_highlight.dart';
@@ -39,6 +40,7 @@ import 'sandbox_bridge.dart';
 import 'voice_note_attachment.dart';
 
 part 'message_content/media_carousel.dart';
+part 'message_content/media_mosaic.dart';
 part 'message_content/token_pill.dart';
 part 'message_content/video_preview.dart';
 

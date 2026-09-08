@@ -39,9 +39,14 @@ class _MessageGalleryPrecache extends HookWidget {
   final List<ImageProvider<Object>> providers;
   final int focusedIndex;
 
+  /// How many neighbours either side of [focusedIndex] to warm. The carousel
+  /// shows one page at a time; the mosaic shows every cell at once.
+  final int radius;
+
   const _MessageGalleryPrecache({
     required this.providers,
     required this.focusedIndex,
+    this.radius = 2,
   });
 
   @override
@@ -53,7 +58,11 @@ class _MessageGalleryPrecache extends HookWidget {
         if (cancelled || !context.mounted) {
           return;
         }
-        for (var index = focusedIndex - 2; index <= focusedIndex + 2; index++) {
+        for (
+          var index = focusedIndex - radius;
+          index <= focusedIndex + radius;
+          index++
+        ) {
           if (index < 0 || index >= providers.length) {
             continue;
           }
@@ -63,7 +72,7 @@ class _MessageGalleryPrecache extends HookWidget {
         }
       });
       return () => cancelled = true;
-    }, [focusedIndex, providerSignature]);
+    }, [focusedIndex, radius, providerSignature]);
     return const SizedBox.shrink();
   }
 }
@@ -160,22 +169,22 @@ class _MessageImageCarousel extends HookConsumerWidget {
               final contentWidth = constraints.hasBoundedWidth
                   ? constraints.maxWidth
                   : _messageMediaMaxWidth(context);
-              final naturalWidth =
+              // A column this wide belongs to the mosaic: one 220pt-tall card
+              // stretched across it turned a portrait photo into a magnified
+              // band, and narrowing the card instead left the rest of the row
+              // painted but untouchable, so pages past the first were out of
+              // reach. The row and the PageView are the same width again.
+              if (_useMessageMediaMosaic(context, contentWidth)) {
+                return _MessageImageMosaic(
+                  items: items,
+                  heroTags: heroTags,
+                  width: contentWidth,
+                  onReply: onReply,
+                  onMore: onMore,
+                );
+              }
+              final carouselWidth =
                   contentWidth + leadingOverflow + trailingOverflow;
-              // A desktop-width column stretched one card to about 855pt, and
-              // a portrait photo dropped into that flat 220pt-tall box was
-              // magnified roughly fourfold to cover it, leaving a band of the
-              // middle. Hold cards near the width a single image preview uses.
-              //
-              // Only where the column dwarfs a card: on a phone the row is
-              // meant to run to the screen edge, and clamping it there would
-              // trade one layout bug for another.
-              final maxCarouselWidth =
-                  (_messageMediaMaxWidth(context) + Grid.half) /
-                  controller.viewportFraction;
-              final carouselWidth = naturalWidth > maxCarouselWidth * 1.5
-                  ? maxCarouselWidth
-                  : naturalWidth;
               final leadingExtent = leadingOverflow;
               final isLeftToRight =
                   Directionality.of(context) == TextDirection.ltr;

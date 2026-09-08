@@ -1524,6 +1524,11 @@ void main() {
       testWidgets('uses unique hero tags for repeated identical image urls', (
         tester,
       ) async {
+        _setSurfaceSize(tester, const Size(390, 844));
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
         await tester.pumpWidget(
           _testable(
             const MessageContent(
@@ -1562,6 +1567,11 @@ void main() {
       testWidgets(
         'keeps voice notes out of image carousels for audio-only and mixed media',
         (tester) async {
+          _setSurfaceSize(tester, const Size(390, 844));
+          addTearDown(() {
+            tester.view.resetPhysicalSize();
+            tester.view.resetDevicePixelRatio();
+          });
           const firstAudio = 'https://example.com/media/voice-note-first.mp4';
           const secondAudio = 'https://example.com/media/voice-note-second.mp4';
           const image = 'https://example.com/media/photo.png';
@@ -1619,63 +1629,250 @@ void main() {
         },
       );
 
-      testWidgets(
-        'a wide window keeps carousel cards card-sized and shows tall photos '
-        'whole',
-        (tester) async {
-          // A desktop-width window used to stretch the carousel across the
-          // whole content column, and a portrait photo was magnified to cover
-          // that flat box.
-          _setSurfaceSize(tester, const Size(1280, 800));
-          addTearDown(() {
-            tester.view.resetPhysicalSize();
-            tester.view.resetDevicePixelRatio();
-          });
+      testWidgets('a phone carousel shows a tall photo whole, not magnified', (
+        tester,
+      ) async {
+        _setSurfaceSize(tester, const Size(390, 844));
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
 
-          const tall = 'https://example.com/media/tall-shot.png';
-          const wide = 'https://example.com/media/wide-shot.png';
-          await tester.pumpWidget(
-            _testable(
-              const MessageContent(
-                content:
-                    '''
+        const tall = 'https://example.com/media/tall-shot.png';
+        const wide = 'https://example.com/media/wide-shot.png';
+        await tester.pumpWidget(
+          _testable(
+            const MessageContent(
+              content:
+                  '''
 Photos
 ![image]($tall)
 ![image]($wide)
 ''',
-                tags: [
-                  ['imeta', 'url $tall', 'm image/png', 'dim 1179x2556'],
-                  ['imeta', 'url $wide', 'm image/png', 'dim 1920x1080'],
-                ],
-              ),
+              tags: [
+                ['imeta', 'url $tall', 'm image/png', 'dim 1179x2556'],
+                ['imeta', 'url $wide', 'm image/png', 'dim 1920x1080'],
+              ],
             ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        BoxFit fitOf(String url) => tester
+            .widget<MediaImage>(
+              find.descendant(
+                of: find.byKey(ValueKey('message-media-carousel-page:$url')),
+                matching: find.byType(MediaImage),
+              ),
+            )
+            .fit!;
+
+        // Taller than the card: show all of it rather than a magnified band.
+        expect(fitOf(tall), BoxFit.contain);
+        // Wider than the card: filling it loses almost nothing, as before.
+        expect(fitOf(wide), BoxFit.cover);
+      });
+
+      testWidgets('a phone carousel spans the row it can be dragged on', (
+        tester,
+      ) async {
+        // Narrowing the PageView inside a wider row left the rest of it
+        // painted but untouchable, so pages past the first were unreachable.
+        _setSurfaceSize(tester, const Size(390, 844));
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
+        await tester.pumpWidget(
+          _testable(
+            const MessageContent(
+              content: '''
+Photos
+![image](https://example.com/media/reach-one.png)
+![image](https://example.com/media/reach-two.png)
+''',
+              tags: [
+                [
+                  'imeta',
+                  'url https://example.com/media/reach-one.png',
+                  'm image/png',
+                ],
+                [
+                  'imeta',
+                  'url https://example.com/media/reach-two.png',
+                  'm image/png',
+                ],
+              ],
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final carousel = find.byKey(const ValueKey('message-media-carousel'));
+        final pageView = find.byType(PageView);
+        expect(
+          tester.getSize(pageView).width,
+          closeTo(tester.getSize(carousel).width, 0.5),
+        );
+      });
+
+      group('wide columns', () {
+        const one = 'https://example.com/media/mosaic-1.png';
+        const two = 'https://example.com/media/mosaic-2.png';
+        const three = 'https://example.com/media/mosaic-3.png';
+
+        Widget gallery(int count) {
+          final urls = [
+            for (var index = 1; index <= count; index++)
+              'https://example.com/media/mosaic-$index.png',
+          ];
+          return MessageContent(
+            content: [
+              'Photos',
+              for (final url in urls) '![image]($url)',
+            ].join('\n'),
+            tags: [
+              for (final url in urls)
+                ['imeta', 'url $url', 'm image/png', 'dim 1179x2556'],
+            ],
+          );
+        }
+
+        Finder cellOf(String url) =>
+            find.byKey(ValueKey('message-media-mosaic-item:$url'));
+
+        void useWideWindow(WidgetTester tester) {
+          // Tall enough that a seven-image mosaic fits: the message list
+          // scrolls in production, this harness does not.
+          _setSurfaceSize(tester, const Size(1280, 1600));
+          addTearDown(() {
+            tester.view.resetPhysicalSize();
+            tester.view.resetDevicePixelRatio();
+          });
+        }
+
+        testWidgets('lay the gallery out as a two-column mosaic', (
+          tester,
+        ) async {
+          useWideWindow(tester);
+          await tester.pumpWidget(_testable(gallery(7)));
+          await tester.pumpAndSettle();
+
+          final mosaic = find.byKey(const ValueKey('message-media-mosaic'));
+          expect(mosaic, findsOneWidget);
+          expect(find.byType(PageView), findsNothing);
+          // Desktop caps its mosaic the same way; a 1280pt window must not
+          // stretch the cells across the whole column.
+          expect(tester.getSize(mosaic).width, lessThanOrEqualTo(512));
+
+          final first = tester.getRect(cellOf(one));
+          final second = tester.getRect(cellOf(two));
+          expect(second.left, greaterThan(first.right));
+          expect(second.top, closeTo(first.top, 0.5));
+          expect(second.width, closeTo(first.width, 0.5));
+
+          // An odd tail takes the whole width, as it does on desktop.
+          final last = tester.getRect(
+            cellOf('https://example.com/media/mosaic-7.png'),
+          );
+          expect(last.width, closeTo(tester.getSize(mosaic).width, 0.5));
+
+          final cellImage = tester.widget<MediaImage>(
+            find.descendant(of: cellOf(one), matching: find.byType(MediaImage)),
+          );
+          expect(cellImage.fit, BoxFit.cover);
+          expect(cellImage.decodeWidth, closeTo(first.width, 0.5));
+        });
+
+        testWidgets('give three images a full-height first cell', (
+          tester,
+        ) async {
+          useWideWindow(tester);
+          await tester.pumpWidget(_testable(gallery(3)));
+          await tester.pumpAndSettle();
+
+          final first = tester.getRect(cellOf(one));
+          final second = tester.getRect(cellOf(two));
+          final third = tester.getRect(cellOf(three));
+          expect(first.height, closeTo(320, 0.5));
+          expect(second.height, closeTo((320 - 6) / 2, 0.5));
+          expect(third.top, greaterThan(second.bottom - 0.5));
+        });
+
+        testWidgets('open the viewer on the cell that was tapped', (
+          tester,
+        ) async {
+          useWideWindow(tester);
+          await tester.pumpWidget(_testable(gallery(7)));
+          await tester.pumpAndSettle();
+
+          await tester.tap(cellOf(three));
+          await tester.pumpAndSettle();
+
+          expect(
+            find.byKey(const ValueKey('message-media-image-viewer')),
+            findsOneWidget,
+          );
+          expect(
+            find.byKey(const ValueKey('message-media-image-viewer-image:2')),
+            findsOneWidget,
+          );
+        });
+
+        testWidgets('let a screen reader activate a cell', (tester) async {
+          useWideWindow(tester);
+          final handle = tester.ensureSemantics();
+          await tester.pumpWidget(_testable(gallery(4)));
+          await tester.pumpAndSettle();
+
+          final data = tester.getSemantics(cellOf(one)).getSemanticsData();
+          expect(data.flagsCollection.isButton, isTrue);
+          expect(data.hasAction(SemanticsAction.tap), isTrue);
+          handle.dispose();
+        });
+
+        testWidgets('keep a narrow column on the carousel', (tester) async {
+          // A wide window can still hand a message a slim column — the thread
+          // pane bottoms out at 340pt — and two columns do not fit there.
+          useWideWindow(tester);
+          await tester.pumpWidget(
+            _testable(SizedBox(width: 399, child: gallery(4))),
           );
           await tester.pumpAndSettle();
 
-          final carousel = find.byKey(const ValueKey('message-media-carousel'));
-          // A page is 90% of the carousel, so the card stays near the 320pt
-          // cap a single image preview uses — nowhere near the ~855pt column.
-          expect(tester.getSize(carousel).width, lessThan(420));
+          expect(
+            find.byKey(const ValueKey('message-media-mosaic')),
+            findsNothing,
+          );
+          expect(
+            find.byKey(const ValueKey('message-media-carousel')),
+            findsOneWidget,
+          );
+        });
 
-          BoxFit fitOf(String url) => tester
-              .widget<MediaImage>(
-                find.descendant(
-                  of: find.byKey(ValueKey('message-media-carousel-page:$url')),
-                  matching: find.byType(MediaImage),
-                ),
-              )
-              .fit!;
+        testWidgets('switch to the mosaic at the threshold', (tester) async {
+          useWideWindow(tester);
+          await tester.pumpWidget(
+            _testable(SizedBox(width: 400, child: gallery(4))),
+          );
+          await tester.pumpAndSettle();
 
-          // Taller than the card: show all of it rather than a magnified band.
-          expect(fitOf(tall), BoxFit.contain);
-          // Wider than the card: filling it loses almost nothing, as before.
-          expect(fitOf(wide), BoxFit.cover);
-        },
-      );
+          expect(
+            find.byKey(const ValueKey('message-media-mosaic')),
+            findsOneWidget,
+          );
+        });
+      });
 
       testWidgets(
         'groups uploaded photos into a carousel and opens the full gallery',
         (tester) async {
+          _setSurfaceSize(tester, const Size(390, 844));
+          addTearDown(() {
+            tester.view.resetPhysicalSize();
+            tester.view.resetDevicePixelRatio();
+          });
           const first = 'https://example.com/media/one.png';
           const second = 'https://example.com/media/two.png';
           const third = 'https://example.com/media/three.png';
@@ -1771,6 +1968,11 @@ Photos
       testWidgets(
         'keeps adjacent carousel images active and ends with a gutter',
         (tester) async {
+          _setSurfaceSize(tester, const Size(390, 844));
+          addTearDown(() {
+            tester.view.resetPhysicalSize();
+            tester.view.resetDevicePixelRatio();
+          });
           const first = 'https://example.com/media/gutter-one.png';
           const second = 'https://example.com/media/gutter-two.png';
           await tester.pumpWidget(
@@ -1816,6 +2018,11 @@ Photos
       testWidgets(
         'jumps to a selected gallery thumbnail when motion is disabled',
         (tester) async {
+          _setSurfaceSize(tester, const Size(390, 844));
+          addTearDown(() {
+            tester.view.resetPhysicalSize();
+            tester.view.resetDevicePixelRatio();
+          });
           const first = 'https://example.com/media/reduced-motion-one.png';
           const second = 'https://example.com/media/reduced-motion-two.png';
           await tester.pumpWidget(
@@ -1865,6 +2072,11 @@ Photos
       testWidgets('resets carousel paging when gallery images change', (
         tester,
       ) async {
+        _setSurfaceSize(tester, const Size(390, 844));
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
         const firstGallery = [
           'https://example.com/media/first-a.png',
           'https://example.com/media/first-b.png',
