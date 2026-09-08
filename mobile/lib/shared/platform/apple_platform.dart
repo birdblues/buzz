@@ -28,9 +28,13 @@ bool get hasCamera =>
     defaultTargetPlatform == TargetPlatform.iOS ||
     defaultTargetPlatform == TargetPlatform.android;
 
-/// The native upload pipeline (`buzz/media_upload`: image sanitising, video
-/// transcoding, voice-note packaging) exists only in the iOS and Android
-/// runners. Without it the composer offers no video or voice-note attachment.
+/// Video transcoding, poster extraction and voice-note packaging on
+/// `buzz/media_upload` exist only in the iOS and Android runners. Without them
+/// the composer offers no video or voice-note attachment.
+///
+/// Image encoding is not part of this: the macOS runner answers the two image
+/// methods (`MediaImageCodec`) and nothing else, so do not widen this flag to
+/// macOS — it would offer buttons whose handlers are not there.
 bool get hasNativeMediaPipeline =>
     defaultTargetPlatform == TargetPlatform.iOS ||
     defaultTargetPlatform == TargetPlatform.android;

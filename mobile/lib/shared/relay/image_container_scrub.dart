@@ -18,21 +18,54 @@ const _allowedPngAncillaryChunks = {
 const _allowedWebpChunks = {'VP8 ', 'VP8L', 'VP8X', 'ALPH', 'ANIM', 'ANMF'};
 const _webpMetadataFlags = 0x20 | 0x08 | 0x04;
 
-/// Remove metadata from an animated image without decoding its frames.
+/// Where the bytes handed to [scrubImageContainerForUpload] came from.
 ///
-/// Decoding through UIKit or Android Bitmap would flatten animations. These
-/// structural scrubbers retain only the chunks/extensions accepted by the
-/// relay and preserve animation timing, disposal, looping, and frame data.
-Uint8List sanitizeAnimatedImageForUpload(Uint8List bytes, String mimeType) {
+/// The two differ on one question: may a colour profile or an orientation
+/// record be dropped? Both are metadata the relay refuses, but dropping one
+/// from bytes nobody has decoded changes how the image looks — a portrait
+/// photo lies on its side, a wide-gamut photo shifts. Dropping one from an
+/// encoder's own output changes nothing, because the encoder already drew the
+/// pixels that way.
+enum ImageScrubMode {
+  /// Frames exactly as the sender's camera or editor wrote them.
+  ///
+  /// Animations arrive this way: decoding them to re-encode would flatten the
+  /// animation, so the scrubber refuses rather than silently altering the
+  /// image.
+  original,
+
+  /// Output of a native encoder that has already applied the orientation and
+  /// drawn in sRGB.
+  ///
+  /// Anything left behind merely restates what the pixels say, so it goes.
+  reencoded,
+}
+
+/// Strip every metadata channel the relay refuses, without decoding frames.
+///
+/// The relay accepts a fixed structural allowlist and rejects the rest with a
+/// 422 (`crates/buzz-media/src/validation.rs`, `validate_image_metadata_free`);
+/// this walks the container and keeps only what is on it. Animation timing,
+/// disposal, looping and frame data all survive.
+///
+/// Throws a [FormatException] on a malformed container, on an unsupported
+/// [mimeType], and — in [ImageScrubMode.original] — on a record that cannot be
+/// dropped without changing the picture.
+Uint8List scrubImageContainerForUpload(
+  Uint8List bytes,
+  String mimeType, {
+  required ImageScrubMode mode,
+}) {
   return switch (mimeType) {
     'image/gif' => _scrubGif(bytes),
-    'image/png' => _scrubPng(bytes),
-    'image/webp' => _scrubWebp(bytes),
-    _ => throw FormatException('Unsupported animated image type: $mimeType'),
+    'image/png' => _scrubPng(bytes, mode),
+    'image/webp' => _scrubWebp(bytes, mode),
+    'image/jpeg' => _scrubJpeg(bytes, mode),
+    _ => throw FormatException('Unsupported image type: $mimeType'),
   };
 }
 
-Uint8List _scrubPng(Uint8List bytes) {
+Uint8List _scrubPng(Uint8List bytes, ImageScrubMode mode) {
   if (!_startsWith(bytes, _pngSignature)) {
     throw const FormatException('Invalid PNG signature');
   }
@@ -50,21 +83,21 @@ Uint8List _scrubPng(Uint8List bytes) {
     }
     final typeStart = offset + 4;
     final type = ascii.decode(bytes.sublist(typeStart, typeStart + 4));
-    if (type == 'iCCP') {
-      throw const FormatException(
-        'Animated PNG ICC profile cannot be removed safely',
-      );
-    }
-    if (type == 'eXIf') {
-      final orientation = _readExifOrientation(
-        bytes,
-        offset + 8,
-        payloadLength,
-      );
-      if (orientation != null && orientation >= 2 && orientation <= 8) {
-        throw const FormatException(
-          'Animated PNG EXIF orientation cannot be removed safely',
+    if (mode == ImageScrubMode.original) {
+      if (type == 'iCCP') {
+        throw const FormatException('PNG ICC profile cannot be removed safely');
+      }
+      if (type == 'eXIf') {
+        final orientation = _readExifOrientation(
+          bytes,
+          offset + 8,
+          payloadLength,
         );
+        if (orientation != null && orientation >= 2 && orientation <= 8) {
+          throw const FormatException(
+            'PNG EXIF orientation cannot be removed safely',
+          );
+        }
       }
     }
     final isAncillary = bytes[typeStart] & 0x20 != 0;
@@ -81,7 +114,7 @@ Uint8List _scrubPng(Uint8List bytes) {
   throw const FormatException('PNG is missing IEND');
 }
 
-Uint8List _scrubWebp(Uint8List bytes) {
+Uint8List _scrubWebp(Uint8List bytes, ImageScrubMode mode) {
   if (bytes.length < 12 ||
       !_matchesAscii(bytes, 0, 'RIFF') ||
       !_matchesAscii(bytes, 8, 'WEBP')) {
@@ -109,22 +142,24 @@ Uint8List _scrubWebp(Uint8List bytes) {
       throw const FormatException('Invalid WebP chunk length');
     }
 
-    if (type == 'EXIF') {
-      final orientation = _readExifOrientation(
-        bytes,
-        payloadStart,
-        payloadLength,
-      );
-      if (orientation != null && orientation >= 2 && orientation <= 8) {
+    if (mode == ImageScrubMode.original) {
+      if (type == 'EXIF') {
+        final orientation = _readExifOrientation(
+          bytes,
+          payloadStart,
+          payloadLength,
+        );
+        if (orientation != null && orientation >= 2 && orientation <= 8) {
+          throw const FormatException(
+            'WebP EXIF orientation cannot be removed safely',
+          );
+        }
+      }
+      if (type == 'ICCP') {
         throw const FormatException(
-          'Animated WebP EXIF orientation cannot be removed safely',
+          'WebP ICC profile cannot be removed safely',
         );
       }
-    }
-    if (type == 'ICCP') {
-      throw const FormatException(
-        'Animated WebP ICC profile cannot be removed safely',
-      );
     }
 
     if (_allowedWebpChunks.contains(type)) {
@@ -293,6 +328,124 @@ int? _readExifOrientation(
     }
   }
   return null;
+}
+
+/// Keep only the entropy-coded scan and the two colour headers the relay
+/// treats as canonical, dropping every APP segment and comment.
+///
+/// Mirrors `MediaSanitizer.scrubJpeg` in the iOS runner and
+/// `AndroidMediaSanitizer`; the segment rules come from
+/// `validate_jpeg_metadata_free` on the relay side. Bytes trailing the
+/// end-of-image marker are dropped too — the relay refuses those as a channel
+/// of their own.
+Uint8List _scrubJpeg(Uint8List bytes, ImageScrubMode mode) {
+  if (bytes.length < 2 || bytes[0] != 0xff || bytes[1] != 0xd8) {
+    throw const FormatException('Invalid JPEG signature');
+  }
+
+  final output = BytesBuilder(copy: false)..add(const [0xff, 0xd8]);
+  var offset = 2;
+  var inScan = false;
+  while (offset < bytes.length) {
+    if (inScan && bytes[offset] != 0xff) {
+      var next = offset;
+      while (next < bytes.length && bytes[next] != 0xff) {
+        next += 1;
+      }
+      output.add(Uint8List.sublistView(bytes, offset, next));
+      offset = next;
+      continue;
+    }
+    if (bytes[offset] != 0xff) {
+      throw const FormatException('JPEG marker expected');
+    }
+
+    // A marker may be padded with any number of leading 0xff fill bytes.
+    final markerStart = offset;
+    while (offset < bytes.length && bytes[offset] == 0xff) {
+      offset += 1;
+    }
+    if (offset >= bytes.length) {
+      throw const FormatException('Truncated JPEG marker');
+    }
+
+    final marker = bytes[offset];
+    offset += 1;
+    // A stuffed 0x00, a restart marker, or a TEM: no payload, always kept.
+    if ((inScan && marker == 0x00) ||
+        (marker >= 0xd0 && marker <= 0xd7) ||
+        marker == 0x01) {
+      output.add(Uint8List.sublistView(bytes, markerStart, offset));
+      continue;
+    }
+    if (marker == 0xd9) {
+      output.add(Uint8List.sublistView(bytes, markerStart, offset));
+      return output.takeBytes();
+    }
+    if (marker == 0xd8 || bytes.length - offset < 2) {
+      throw const FormatException('Invalid JPEG segment');
+    }
+
+    final segmentLength = (bytes[offset] << 8) | bytes[offset + 1];
+    if (segmentLength < 2 || segmentLength > bytes.length - offset) {
+      throw const FormatException('Invalid JPEG segment length');
+    }
+    final payloadStart = offset + 2;
+    final segmentEnd = offset + segmentLength;
+
+    if (mode == ImageScrubMode.original && marker == 0xe1) {
+      final orientation = _readExifOrientation(
+        bytes,
+        payloadStart,
+        segmentEnd - payloadStart,
+      );
+      if (orientation != null && orientation >= 2 && orientation <= 8) {
+        throw const FormatException(
+          'JPEG EXIF orientation cannot be removed safely',
+        );
+      }
+    }
+
+    if (_keepJpegSegment(bytes, marker, payloadStart, segmentEnd)) {
+      output.add(Uint8List.sublistView(bytes, markerStart, segmentEnd));
+    }
+
+    offset = segmentEnd;
+    inScan = marker == 0xda;
+  }
+
+  throw const FormatException('JPEG is missing its end-of-image marker');
+}
+
+/// Whether a JPEG segment survives the scrub.
+///
+/// Only the canonical JFIF (APP0) and Adobe (APP14) headers pass, and only at
+/// their fixed lengths — an APP segment of any other shape is a place to hide
+/// bytes, which is exactly what the relay refuses.
+bool _keepJpegSegment(
+  Uint8List bytes,
+  int marker,
+  int payloadStart,
+  int segmentEnd,
+) {
+  final payloadLength = segmentEnd - payloadStart;
+  switch (marker) {
+    case 0xe0:
+      if (payloadLength < 14 || !_matchesAscii(bytes, payloadStart, 'JFIF')) {
+        return false;
+      }
+      if (bytes[payloadStart + 4] != 0) return false;
+      final thumbnailWidth = bytes[payloadStart + 12];
+      final thumbnailHeight = bytes[payloadStart + 13];
+      return payloadLength == 14 + 3 * thumbnailWidth * thumbnailHeight;
+    case 0xee:
+      return payloadLength == 12 && _matchesAscii(bytes, payloadStart, 'Adobe');
+    case 0xfe:
+      return false;
+    default:
+      // APP1..APP13 and APP15: EXIF, XMP, ICC, Photoshop, and friends.
+      return marker < 0xe1 || marker > 0xef;
+  }
 }
 
 Uint8List _scrubGif(Uint8List bytes) {

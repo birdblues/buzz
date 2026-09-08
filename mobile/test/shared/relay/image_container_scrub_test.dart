@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:buzz/shared/relay/animated_image_sanitizer.dart';
+import 'package:buzz/shared/relay/image_container_scrub.dart';
 
 void main() {
   test('strips APNG metadata without changing animation chunks', () {
@@ -10,16 +10,13 @@ void main() {
     final dirty = _animatedPng(metadata: true)
       ..addAll(utf8.encode('trailing metadata'));
 
-    expect(
-      sanitizeAnimatedImageForUpload(Uint8List.fromList(dirty), 'image/png'),
-      clean,
-    );
+    expect(_scrubOriginal(Uint8List.fromList(dirty), 'image/png'), clean);
   });
 
   test('strips identity APNG orientation but rejects display transforms', () {
     final clean = _animatedPng(metadata: false);
     expect(
-      sanitizeAnimatedImageForUpload(
+      _scrubOriginal(
         Uint8List.fromList(_animatedPng(metadata: false, orientation: 1)),
         'image/png',
       ),
@@ -28,7 +25,7 @@ void main() {
 
     for (final endian in [Endian.little, Endian.big]) {
       expect(
-        () => sanitizeAnimatedImageForUpload(
+        () => _scrubOriginal(
           Uint8List.fromList(
             _animatedPng(
               metadata: false,
@@ -51,7 +48,7 @@ void main() {
 
   test('rejects APNG ICC profiles that affect color rendering', () {
     expect(
-      () => sanitizeAnimatedImageForUpload(
+      () => _scrubOriginal(
         Uint8List.fromList(_animatedPng(metadata: false, iccProfile: true)),
         'image/png',
       ),
@@ -70,16 +67,13 @@ void main() {
     final dirty = _animatedWebp(metadata: true)
       ..addAll(utf8.encode('trailing metadata'));
 
-    expect(
-      sanitizeAnimatedImageForUpload(Uint8List.fromList(dirty), 'image/webp'),
-      clean,
-    );
+    expect(_scrubOriginal(Uint8List.fromList(dirty), 'image/webp'), clean);
   });
 
   test('strips identity WebP orientation but rejects display transforms', () {
     final clean = _animatedWebp(metadata: false);
     expect(
-      sanitizeAnimatedImageForUpload(
+      _scrubOriginal(
         Uint8List.fromList(_animatedWebp(metadata: false, orientation: 1)),
         'image/webp',
       ),
@@ -88,7 +82,7 @@ void main() {
 
     for (final endian in [Endian.little, Endian.big]) {
       expect(
-        () => sanitizeAnimatedImageForUpload(
+        () => _scrubOriginal(
           Uint8List.fromList(
             _animatedWebp(
               metadata: false,
@@ -111,7 +105,7 @@ void main() {
 
   test('rejects animated WebP ICC profiles that affect color rendering', () {
     expect(
-      () => sanitizeAnimatedImageForUpload(
+      () => _scrubOriginal(
         Uint8List.fromList(_animatedWebp(metadata: false, iccProfile: true)),
         'image/webp',
       ),
@@ -127,7 +121,7 @@ void main() {
 
   test('removes metadata chunks nested inside animated WebP frames', () {
     expect(
-      sanitizeAnimatedImageForUpload(
+      _scrubOriginal(
         Uint8List.fromList(
           _animatedWebp(metadata: false, nestedMetadata: true),
         ),
@@ -147,10 +141,7 @@ void main() {
       ...utf8.encode('trailing metadata'),
     ];
 
-    expect(
-      sanitizeAnimatedImageForUpload(Uint8List.fromList(dirty), 'image/gif'),
-      clean,
-    );
+    expect(_scrubOriginal(Uint8List.fromList(dirty), 'image/gif'), clean);
   });
 
   test('canonicalizes GIF loop extensions with hidden sub-blocks', () {
@@ -162,10 +153,7 @@ void main() {
       ...clean.sublist(19 + cleanLoop.length),
     ];
 
-    expect(
-      sanitizeAnimatedImageForUpload(Uint8List.fromList(dirty), 'image/gif'),
-      clean,
-    );
+    expect(_scrubOriginal(Uint8List.fromList(dirty), 'image/gif'), clean);
   });
 
   test('drops GIF applications with binary authentication codes', () {
@@ -181,10 +169,7 @@ void main() {
       ...clean.sublist(19),
     ];
 
-    expect(
-      sanitizeAnimatedImageForUpload(Uint8List.fromList(dirty), 'image/gif'),
-      clean,
-    );
+    expect(_scrubOriginal(Uint8List.fromList(dirty), 'image/gif'), clean);
   });
 
   test('removes a GIF graphic control consumed by stripped plain text', () {
@@ -203,10 +188,7 @@ void main() {
       ...clean.sublist(19),
     ];
 
-    expect(
-      sanitizeAnimatedImageForUpload(Uint8List.fromList(dirty), 'image/gif'),
-      clean,
-    );
+    expect(_scrubOriginal(Uint8List.fromList(dirty), 'image/gif'), clean);
   });
 
   test('keeps clean animated containers byte-identical', () {
@@ -215,10 +197,7 @@ void main() {
       ('image/webp', _animatedWebp(metadata: false)),
       ('image/gif', _minimalGif()),
     ]) {
-      expect(
-        sanitizeAnimatedImageForUpload(Uint8List.fromList(bytes), mimeType),
-        bytes,
-      );
+      expect(_scrubOriginal(Uint8List.fromList(bytes), mimeType), bytes);
     }
   });
 
@@ -229,12 +208,250 @@ void main() {
       ('image/gif', ascii.encode('GIF89a')),
     ]) {
       expect(
-        () =>
-            sanitizeAnimatedImageForUpload(Uint8List.fromList(bytes), mimeType),
+        () => _scrubOriginal(Uint8List.fromList(bytes), mimeType),
         throwsFormatException,
       );
     }
   });
+
+  group('still JPEG', () {
+    test('keeps the scan and the two canonical colour headers', () {
+      final clean = _jpeg();
+      final dirty = _jpeg(
+        exifOrientation: 1,
+        comment: 'shot on a phone at 37.77, -122.41',
+        photoshop: true,
+      )..addAll(utf8.encode('trailing metadata'));
+
+      expect(
+        scrubImageContainerForUpload(
+          Uint8List.fromList(dirty),
+          'image/jpeg',
+          mode: ImageScrubMode.reencoded,
+        ),
+        clean,
+      );
+    });
+
+    test('drops an APP0 that is not a canonical JFIF header', () {
+      // The relay pins APP0 to its exact shape, because a longer one is a
+      // place to hide bytes.
+      final scrubbed = scrubImageContainerForUpload(
+        Uint8List.fromList(_jpeg(paddedJfif: true)),
+        'image/jpeg',
+        mode: ImageScrubMode.reencoded,
+      );
+
+      expect(scrubbed, _jpeg(jfif: false));
+    });
+
+    test('keeps a canonical Adobe APP14', () {
+      final withAdobe = _jpeg(adobe: true);
+      expect(
+        scrubImageContainerForUpload(
+          Uint8List.fromList(withAdobe),
+          'image/jpeg',
+          mode: ImageScrubMode.reencoded,
+        ),
+        withAdobe,
+      );
+    });
+
+    test('refuses an orientation it cannot apply on undecoded bytes', () {
+      // Nothing has redrawn these pixels, so dropping the tag would lay the
+      // photo on its side.
+      expect(
+        () => scrubImageContainerForUpload(
+          Uint8List.fromList(_jpeg(exifOrientation: 6)),
+          'image/jpeg',
+          mode: ImageScrubMode.original,
+        ),
+        throwsA(
+          isA<FormatException>().having(
+            (error) => error.message,
+            'message',
+            contains('orientation'),
+          ),
+        ),
+      );
+
+      // The same bytes are fine once an encoder has applied it.
+      expect(
+        scrubImageContainerForUpload(
+          Uint8List.fromList(_jpeg(exifOrientation: 6)),
+          'image/jpeg',
+          mode: ImageScrubMode.reencoded,
+        ),
+        _jpeg(),
+      );
+    });
+
+    test('rejects bytes that are not a JPEG, or that never end', () {
+      expect(
+        () => scrubImageContainerForUpload(
+          Uint8List.fromList([0x89, 0x50, 0x4e, 0x47]),
+          'image/jpeg',
+          mode: ImageScrubMode.reencoded,
+        ),
+        throwsA(isA<FormatException>()),
+      );
+
+      final withoutEoi = _jpeg()
+        ..removeRange(_jpeg().length - 2, _jpeg().length);
+      expect(
+        () => scrubImageContainerForUpload(
+          Uint8List.fromList(withoutEoi),
+          'image/jpeg',
+          mode: ImageScrubMode.reencoded,
+        ),
+        throwsA(isA<FormatException>()),
+      );
+    });
+  });
+
+  test('an ICC profile survives no better in a still than in an animation', () {
+    // Same chunk, two answers: undecoded bytes keep their colours by
+    // refusing, an encoder's output has already been drawn in sRGB.
+    final withProfile = Uint8List.fromList(
+      _animatedPng(metadata: false, iccProfile: true),
+    );
+    expect(
+      () => scrubImageContainerForUpload(
+        withProfile,
+        'image/png',
+        mode: ImageScrubMode.original,
+      ),
+      throwsA(isA<FormatException>()),
+    );
+    expect(
+      scrubImageContainerForUpload(
+        withProfile,
+        'image/png',
+        mode: ImageScrubMode.reencoded,
+      ),
+      _animatedPng(metadata: false),
+    );
+  });
+}
+
+/// Calls the production scrubber the way an animation reaches it.
+///
+/// Animations are never decoded, so they always arrive as
+/// [ImageScrubMode.original]; naming that once keeps it out of every
+/// expectation below.
+Uint8List _scrubOriginal(Uint8List bytes, String mimeType) {
+  return scrubImageContainerForUpload(
+    bytes,
+    mimeType,
+    mode: ImageScrubMode.original,
+  );
+}
+
+/// Builds a JPEG out of the segments a real encoder emits, in encoder order.
+///
+/// Only the markers matter here: the scrubber never decodes a scan, so the
+/// file deliberately has none.
+List<int> _jpeg({
+  bool jfif = true,
+  bool paddedJfif = false,
+  bool adobe = false,
+  int? exifOrientation,
+  String? comment,
+  bool photoshop = false,
+}) {
+  final bytes = <int>[0xff, 0xd8];
+
+  if (paddedJfif) {
+    // Canonical but for four bytes of room at the end — which is the point.
+    bytes.addAll(
+      _jpegSegment(0xe0, [
+        ...ascii.encode('JFIF'),
+        0,
+        1,
+        1,
+        0,
+        0,
+        1,
+        0,
+        1,
+        0,
+        0,
+        9,
+        9,
+        9,
+        9,
+      ]),
+    );
+  } else if (jfif) {
+    bytes.addAll(
+      _jpegSegment(0xe0, [
+        ...ascii.encode('JFIF'),
+        0,
+        1,
+        1,
+        0,
+        0,
+        1,
+        0,
+        1,
+        0,
+        0,
+      ]),
+    );
+  }
+  if (adobe) {
+    bytes.addAll(
+      _jpegSegment(0xee, [...ascii.encode('Adobe'), 0, 100, 0, 0, 0, 0, 0]),
+    );
+  }
+  if (exifOrientation != null) {
+    final ifd = <int>[
+      1, 0, // one entry, little endian
+      0x12, 0x01, // Orientation
+      3, 0, // SHORT
+      1, 0, 0, 0, // one value
+      exifOrientation, 0, 0, 0,
+      0, 0, 0, 0, // no next IFD
+    ];
+    bytes.addAll(
+      _jpegSegment(0xe1, [
+        ...ascii.encode('Exif'),
+        0,
+        0,
+        ...ascii.encode('II'),
+        42,
+        0,
+        8,
+        0,
+        0,
+        0,
+        ...ifd,
+      ]),
+    );
+  }
+  if (photoshop) {
+    bytes.addAll(
+      _jpegSegment(0xed, [
+        ...ascii.encode('Photoshop 3.0'),
+        0,
+        0x38,
+        0x42,
+        0x49,
+        0x4d,
+      ]),
+    );
+  }
+  if (comment != null) {
+    bytes.addAll(_jpegSegment(0xfe, ascii.encode(comment)));
+  }
+
+  bytes.addAll([0xff, 0xd9]);
+  return bytes;
+}
+
+List<int> _jpegSegment(int marker, List<int> payload) {
+  final length = payload.length + 2;
+  return [0xff, marker, (length >> 8) & 0xff, length & 0xff, ...payload];
 }
 
 List<int> _pngChunk(String type, List<int> payload) {

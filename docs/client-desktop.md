@@ -38,7 +38,7 @@ Platform gates live in `lib/shared/platform/apple_platform.dart`:
 |---|---|---|
 | `supportsSandboxApps` | true | `AppWebViewPage` asks the runner for the WebRTC-removal hook (`macos/Runner/SandboxWebViewHardening.swift`, a verbatim copy of the iOS file, installed in `MainFlutterWindow.awakeFromNib` before the Flutter engine starts) |
 | `hasCamera` | false | no Camera entry in the composer, no camera avatar capture, no Animated avatar mode |
-| `hasNativeMediaPipeline` | false | no Video and Voice note entries (transcoding/packaging exist only in the iOS/Android runners) |
+| `hasNativeMediaPipeline` | false | no Video and Voice note entries (transcoding/packaging exist only in the iOS/Android runners). Image encoding is separate and *is* implemented here — see Images below — so do not widen this getter to macOS |
 | `isDesktopHost` | true | Photos opens the system open panel; "Save image" uses a save panel; downloaded files open through `NSWorkspace`; a second Escape after leaving the composer unwinds the shell (nested route → thread pane → main pane) |
 | `isApplePlatform` | true | Composer hardware keys: Enter sends and Shift+Enter inserts a newline; Escape leaves the field. Gated on Apple platforms rather than the Mac because there a key event can only come from a hardware keyboard (the software keyboard's return key arrives as text), so an iPad with a keyboard gets the same and iPhones are untouched; Android soft keyboards can deliver Enter as a key event and keep the newline |
 
@@ -66,11 +66,40 @@ text when the framework clears the composing range
 Japanese conversion's confirming Enter is indistinguishable and sends (or
 completes) the current candidate.
 
+## Images
+
+The relay refuses any image carrying EXIF, XMP, ICC, PNG text or a private
+chunk, and answers with a 422 (`crates/buzz-media/src/validation.rs`). Until
+this was implemented every still picture attached on macOS failed that check,
+because the client left the preparation to a native runner method macOS did
+not have; a screenshot was refused for its `pHYs` chunk alone. Animations were
+never affected — they are scrubbed in Dart, since decoding to re-encode would
+flatten them.
+
+Preparation is split. `macos/Runner/MediaImageCodec.swift` decodes with
+ImageIO, applies the EXIF orientation, redraws in sRGB and re-encodes; the
+container is then scrubbed in Dart, by
+`mobile/lib/shared/relay/image_container_scrub.dart`, so the relay's chunk and
+segment rules live in one place rather than once per platform. The scrub runs
+over the encoder's own output too, which is not a formality: ImageIO writes an
+`eXIf` chunk into every PNG it encodes and an EXIF APP1 plus a Photoshop APP13
+into every JPEG, and the relay accepts none of them. Committed fixtures pin
+both halves — `crates/buzz-media/tests/fixtures/macos/` holds ImageIO's raw
+output, which the relay must refuse, and the scrubbed version, which it must
+accept.
+
+Two consequences worth knowing. A WebP comes back as a PNG, because that is
+what the Apple encoders answer with, so the type is read back off the bytes
+rather than carried over from the picked file. And an `.agent.png` snapshot
+re-uploaded from macOS loses its manifest chunk, which used to survive because
+the file went up untouched; the client never creates those, so only forwarding
+one is affected.
+
 Known gaps, accepted for the first version: no notifications while the app
 is in the background (push is iOS-only and the settings card hides itself);
-images upload without the native EXIF/HEIC sanitising step; no Huddles; no
-Face ID (Touch ID works through `local_auth_darwin`); no drag-and-drop, hover
-states or menu-bar shortcuts beyond the template's.
+no clipboard-image detection in the composer's context menu (keyboard paste
+works); no Huddles; no Face ID (Touch ID works through `local_auth_darwin`);
+no drag-and-drop, hover states or menu-bar shortcuts beyond the template's.
 
 ## Building
 
@@ -177,7 +206,9 @@ sandbox WebView only ever loads `about:blank` from a string.
 6. Sandboxed app: open an app card and run `docs/sandbox-probe.html` — every
    row must fail. A "hardening not installed" refusal means the Swift hook
    did not install before the engine started.
-7. Link previews render and author; images upload; "Save image" shows a
+7. Link previews render and author; images upload (a screenshot, a photo
+   from the Photos library, a `.heic`, and one rotated portrait photo that
+   must arrive upright); "Save image" shows a
    save panel; a file attachment opens in its default app.
 8. `just mobile-build-macos` prints two-slice `lipo` results and `codesign
    OK`; the zip runs on another Mac after `scp`.

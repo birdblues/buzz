@@ -29,6 +29,7 @@
 		33CC11132044BFA00003C045 /* MainFlutterWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33CC11122044BFA00003C045 /* MainFlutterWindow.swift */; };
 		8D881DC2C09793F5105531E4 /* Pods_RunnerTests.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 10208A3A5C7623A257746A43 /* Pods_RunnerTests.framework */; };
 		B0F2A1C1D2E3F4A5B6C7D801 /* SandboxWebViewHardening.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0F2A1C1D2E3F4A5B6C7D802 /* SandboxWebViewHardening.swift */; };
+		B0F2A1C1D2E3F4A5B6C7D811 /* MediaImageCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0F2A1C1D2E3F4A5B6C7D812 /* MediaImageCodec.swift */; };
 		F55E44B9DC9C2C88DEEB2489 /* Pods_Runner.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9F156CEC3F8E1777B59A5C1F /* Pods_Runner.framework */; };
 /* End PBXBuildFile section */
 
@@ -87,6 +88,7 @@
 		9740EEB21CF90195004384FC /* Debug.xcconfig */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
 		9F156CEC3F8E1777B59A5C1F /* Pods_Runner.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_Runner.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		B0F2A1C1D2E3F4A5B6C7D802 /* SandboxWebViewHardening.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SandboxWebViewHardening.swift; sourceTree = "<group>"; };
+		B0F2A1C1D2E3F4A5B6C7D812 /* MediaImageCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaImageCodec.swift; sourceTree = "<group>"; };
 		C582A6608B958F3CDAD4CC96 /* Pods-RunnerTests.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-RunnerTests.debug.xcconfig"; path = "Target Support Files/Pods-RunnerTests/Pods-RunnerTests.debug.xcconfig"; sourceTree = "<group>"; };
 		C9325831D1030DE28D9686FD /* Pods-RunnerTests.profile.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-RunnerTests.profile.xcconfig"; path = "Target Support Files/Pods-RunnerTests/Pods-RunnerTests.profile.xcconfig"; sourceTree = "<group>"; };
 		E223DCC9DD144E5A228BD58E /* Pods-Runner.profile.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.profile.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.profile.xcconfig"; sourceTree = "<group>"; };
@@ -193,6 +195,7 @@
 			children = (
 				33CC10F02044A3C60003C045 /* AppDelegate.swift */,
 				B0F2A1C1D2E3F4A5B6C7D802 /* SandboxWebViewHardening.swift */,
+				B0F2A1C1D2E3F4A5B6C7D812 /* MediaImageCodec.swift */,
 				33CC11122044BFA00003C045 /* MainFlutterWindow.swift */,
 				33E51913231747F40026EE4D /* DebugProfile.entitlements */,
 				33E51914231749380026EE4D /* Release.entitlements */,
@@ -443,6 +446,7 @@
 				33CC11132044BFA00003C045 /* MainFlutterWindow.swift in Sources */,
 				33CC10F12044A3C60003C045 /* AppDelegate.swift in Sources */,
 				B0F2A1C1D2E3F4A5B6C7D801 /* SandboxWebViewHardening.swift in Sources */,
+				B0F2A1C1D2E3F4A5B6C7D811 /* MediaImageCodec.swift in Sources */,
 				335BBD1B22A9A15E00E9071D /* GeneratedPluginRegistrant.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

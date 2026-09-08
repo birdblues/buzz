@@ -12,35 +12,70 @@ import 'package:nostr/nostr.dart' as nostr;
 import 'package:buzz/shared/relay/media_auth.dart';
 import 'package:buzz/shared/relay/media_upload.dart';
 
+/// A 1x1 PNG carrying nothing but IHDR, IDAT and IEND.
+///
+/// Deliberately free of ancillary chunks: the scrub the upload path runs is
+/// then the identity, so a test can still assert that the bytes it injected
+/// are the bytes that went up.
 final _pngBytes = Uint8List.fromList([
-  0x89,
-  0x50,
-  0x4e,
-  0x47,
-  0x0d,
-  0x0a,
-  0x1a,
-  0x0a,
-  0x00,
-  0x00,
-  0x00,
-  0x0d,
-  0x49,
-  0x48,
-  0x44,
-  0x52,
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, //
+  0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+  0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+  0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
+  0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41,
+  0x54, 0x78, 0xda, 0x63, 0xf0, 0x9d, 0x7d, 0x1d,
+  0x00, 0x02, 0xf8, 0x01, 0xc0, 0x3c, 0xff, 0xc5,
+  0x4f, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
+  0x44, 0xae, 0x42, 0x60, 0x82,
 ]);
 
+/// A JPEG holding only a canonical JFIF header and its end-of-image marker.
+///
+/// Canonical because the relay accepts exactly this shape of APP0, which makes
+/// the scrub the identity here too.
 final _jpegBytes = Uint8List.fromList([
-  0xff,
-  0xd8,
-  0xff,
-  0xdb,
-  0x00,
-  0x43,
-  0x00,
-  0x01,
+  0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, //
+  0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01,
+  0x00, 0x01, 0x00, 0x00, 0xff, 0xd9,
 ]);
+
+/// What macOS ImageIO actually answers a PNG with: the same picture plus an
+/// `eXIf` chunk, which the relay refuses.
+final _pngWithExifChunk = <int>[
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, //
+  0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+  0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+  0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
+  0xde, 0x00, 0x00, 0x00, 0x1a, 0x65, 0x58, 0x49,
+  0x66, 0x49, 0x49, 0x2a, 0x00, 0x08, 0x00, 0x00,
+  0x00, 0x01, 0x00, 0x12, 0x01, 0x03, 0x00, 0x01,
+  0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0xbd, 0x8d, 0x18, 0x30, 0x00,
+  0x00, 0x00, 0x0c, 0x49, 0x44, 0x41, 0x54, 0x78,
+  0xda, 0x63, 0xf0, 0x9d, 0x7d, 0x1d, 0x00, 0x02,
+  0xf8, 0x01, 0xc0, 0x3c, 0xff, 0xc5, 0x4f, 0x00,
+  0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
+  0x42, 0x60, 0x82,
+];
+
+/// The same for a JPEG: a canonical JFIF header followed by an EXIF APP1.
+final _jpegWithExifSegment = <int>[
+  0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, //
+  0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01,
+  0x00, 0x01, 0x00, 0x00, 0xff, 0xe1, 0x00, 0x22,
+  0x45, 0x78, 0x69, 0x66, 0x00, 0x00, 0x49, 0x49,
+  0x2a, 0x00, 0x08, 0x00, 0x00, 0x00, 0x01, 0x00,
+  0x12, 0x01, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00,
+  0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0xff, 0xd9,
+];
+
+/// A still WebP: one lossy frame, no animation chunks.
+final _staticWebpBytes = <int>[
+  0x52, 0x49, 0x46, 0x46, 0x10, 0x00, 0x00, 0x00, //
+  0x57, 0x45, 0x42, 0x50, 0x56, 0x50, 0x38, 0x20,
+  0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+];
 
 final _heicBytes = Uint8List.fromList([
   0x00,
@@ -161,47 +196,17 @@ List<int> _testPngChunk(String type, List<int> payload) {
   ];
 }
 
+/// A structurally valid PNG whose only chunk payload happens to spell `acTL`.
+///
+/// The animation probe looks for `acTL` as a chunk *type*; this proves it does
+/// not fire on the same four bytes sitting inside an IDAT. The container is
+/// well formed so the upload path's scrub passes it through untouched.
 final _staticPngWithActlPayloadBytes = Uint8List.fromList([
-  0x89,
-  0x50,
-  0x4e,
-  0x47,
-  0x0d,
-  0x0a,
-  0x1a,
-  0x0a,
-  0x00,
-  0x00,
-  0x00,
-  0x04,
-  0x49,
-  0x44,
-  0x41,
-  0x54,
-  0x61,
-  0x63,
-  0x54,
-  0x4c,
-  0x00,
-  0x00,
-  0x00,
-  0x00,
-  0x00,
-  0x00,
-  0x00,
-  0x00,
-  0x00,
-  0x00,
-  0x00,
-  0x00,
-  0x49,
-  0x45,
-  0x4e,
-  0x44,
-  0x00,
-  0x00,
-  0x00,
-  0x00,
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, //
+  0x00, 0x00, 0x00, 0x04, 0x49, 0x44, 0x41, 0x54,
+  0x61, 0x63, 0x54, 0x4c, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44,
+  0x00, 0x00, 0x00, 0x00,
 ]);
 
 final _animatedWebpBytes = Uint8List.fromList([
@@ -496,7 +501,7 @@ void main() {
               isA<MediaPolicyUploadException>().having(
                 (error) => error.toString(),
                 'message',
-                "We couldn't prepare this image for upload.",
+                'The server rejected this image. Try exporting it again.',
               ),
             ),
           );
@@ -986,6 +991,133 @@ void main() {
       expect(capturedRequest, isNotNull);
       expect(capturedRequest!.headers['Content-Type'], 'image/png');
       expect(capturedRequest!.bodyBytes, _pngBytes);
+    });
+
+    group('macOS', () {
+      setUp(() {
+        final previousPlatform = debugDefaultTargetPlatformOverride;
+        debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+        addTearDown(() {
+          debugDefaultTargetPlatformOverride = previousPlatform;
+        });
+      });
+
+      /// Answers every upload with the same 200 and records the request.
+      MediaUploadService serviceUploading(
+        XFile picked, {
+        required void Function(http.Request) onRequest,
+        SanitizeImageBytes? sanitizeImageBytes,
+        TranscodeImageToJpeg? transcodeImageToJpeg,
+      }) {
+        return MediaUploadService(
+          baseUrl: 'https://relay.example',
+          nsec: nostr.Keys.generate().nsec,
+          httpClient: http_testing.MockClient((request) async {
+            onRequest(request);
+            return http.Response(
+              jsonEncode({
+                'url': 'https://relay.example/media/mac.bin',
+                'sha256':
+                    '5555555555555555555555555555555555555555555555555555555555555555',
+                'size': request.bodyBytes.length,
+                'type': request.headers['Content-Type'],
+                'uploaded': 1,
+              }),
+              200,
+            );
+          }),
+          pickGalleryVideo: () async => null,
+          pickGalleryImage: () async => picked,
+          sanitizeImageBytes: sanitizeImageBytes,
+          transcodeImageToJpeg: transcodeImageToJpeg,
+        );
+      }
+
+      test('scrubs what the native encoder leaves behind', () async {
+        // macOS ImageIO writes an `eXIf` chunk into every PNG it encodes, and
+        // the relay refuses the file for it. Whatever the encoder returns has
+        // to come out of the scrub clean, so this seam hands back exactly the
+        // kind of output the real one does.
+        http.Request? capturedRequest;
+        final service = serviceUploading(
+          XFile.fromData(_pngBytes, name: 'photo.png'),
+          onRequest: (request) => capturedRequest = request,
+          sanitizeImageBytes: (bytes, mimeType) async =>
+              Uint8List.fromList(_pngWithExifChunk),
+        );
+
+        final descriptor = await service.pickAndUploadImage();
+
+        expect(descriptor, isNotNull);
+        expect(capturedRequest!.headers['Content-Type'], 'image/png');
+        expect(capturedRequest!.bodyBytes, _pngBytes);
+      });
+
+      test('scrubs the JPEG a HEIC is transcoded into', () async {
+        // The transcode path used to hand its result straight to the upload,
+        // so a HEIC kept failing after every other picture was fixed.
+        Uint8List? transcodedInput;
+        http.Request? capturedRequest;
+        final service = serviceUploading(
+          XFile.fromData(_heicBytes, name: 'photo.heic'),
+          onRequest: (request) => capturedRequest = request,
+          transcodeImageToJpeg: (bytes) async {
+            transcodedInput = bytes;
+            return Uint8List.fromList(_jpegWithExifSegment);
+          },
+        );
+
+        final descriptor = await service.pickAndUploadImage();
+
+        expect(descriptor, isNotNull);
+        expect(transcodedInput, _heicBytes);
+        expect(capturedRequest!.headers['Content-Type'], 'image/jpeg');
+        expect(capturedRequest!.bodyBytes, _jpegBytes);
+      });
+
+      test('follows the encoder when it answers a WebP with a PNG', () async {
+        // Both Apple encoders do. Scrubbing under the picked type instead of
+        // the returned one fails at the WebP signature check.
+        http.Request? capturedRequest;
+        final service = serviceUploading(
+          XFile.fromData(
+            Uint8List.fromList(_staticWebpBytes),
+            name: 'photo.webp',
+          ),
+          onRequest: (request) => capturedRequest = request,
+          sanitizeImageBytes: (bytes, mimeType) async {
+            expect(mimeType, 'image/webp');
+            return Uint8List.fromList(_pngWithExifChunk);
+          },
+        );
+
+        final descriptor = await service.pickAndUploadImage();
+
+        expect(descriptor, isNotNull);
+        expect(capturedRequest!.headers['Content-Type'], 'image/png');
+        expect(capturedRequest!.bodyBytes, _pngBytes);
+      });
+
+      test('leaves an animation to the Dart scrubber', () async {
+        // Decoding to re-encode would flatten it, so the native encoder is
+        // never asked.
+        var nativeCalls = 0;
+        http.Request? capturedRequest;
+        final service = serviceUploading(
+          XFile.fromData(_gifBytes, name: 'animated.gif'),
+          onRequest: (request) => capturedRequest = request,
+          sanitizeImageBytes: (bytes, mimeType) async {
+            nativeCalls += 1;
+            return bytes;
+          },
+        );
+
+        final descriptor = await service.pickAndUploadImage();
+
+        expect(descriptor, isNotNull);
+        expect(nativeCalls, 0);
+        expect(capturedRequest!.headers['Content-Type'], 'image/gif');
+      });
     });
 
     test('sanitizes and uploads GIF gallery files', () async {

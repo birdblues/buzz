@@ -13,7 +13,7 @@ import 'package:nostr/nostr.dart' as nostr;
 import 'package:pointycastle/digests/sha256.dart';
 
 import '../platform/apple_platform.dart';
-import 'animated_image_sanitizer.dart';
+import 'image_container_scrub.dart';
 import 'media_auth.dart';
 import 'mp4_fast_start.dart';
 import 'relay_provider.dart';
@@ -59,7 +59,15 @@ const _allowedVideoMimeTypes = {'video/mp4'};
 const _allowedAudioMimeTypes = {'audio/mp4', 'audio/m4a', 'audio/aac'};
 const _maxVideoSizeBytes = 100 * 1024 * 1024; // 100MB
 const _maxFileSizeBytes = 100 * 1024 * 1024; // 100MB
-const _mediaPolicyUploadMessage = "We couldn't prepare this image for upload.";
+/// Shown when the relay refuses a picture the client thought was fine.
+///
+/// Deliberately says the server refused it rather than naming a cause: a 415
+/// is a content type the community does not accept, and a 422 is either a
+/// forbidden metadata channel or an image the decoder could not read. The
+/// exact reason comes back in the response body and goes to the log, where it
+/// helps whoever is debugging without misinforming whoever is posting.
+const _mediaPolicyUploadMessage =
+    'The server rejected this image. Try exporting it again.';
 
 typedef PickGalleryImage = Future<XFile?> Function();
 
@@ -561,7 +569,11 @@ class MediaUploadService {
         (mimeType == 'image/png' && _isAnimatedPng(bytes)) ||
         (mimeType == 'image/webp' && _isAnimatedWebp(bytes))) {
       try {
-        bytes = sanitizeAnimatedImageForUpload(bytes, mimeType);
+        bytes = scrubImageContainerForUpload(
+          bytes,
+          mimeType,
+          mode: ImageScrubMode.original,
+        );
       } on FormatException {
         throw Exception('failed to sanitize image for upload');
       }
@@ -612,6 +624,12 @@ class MediaUploadService {
       if (_allowedImageMimeTypes.contains(mimeType) &&
           (response.statusCode == HttpStatus.unsupportedMediaType ||
               response.statusCode == HttpStatus.unprocessableEntity)) {
+        // Nothing else records why: the relay logs the status alone, so
+        // without this line the reason exists only in a response nobody kept.
+        debugPrint(
+          '[MediaUploadService] relay refused $mimeType '
+          'with ${response.statusCode}: ${response.body}',
+        );
         throw const MediaPolicyUploadException();
       }
       throw Exception(
@@ -723,16 +741,15 @@ class MediaUploadService {
   Future<_PreparedUploadImage> _prepareDetectedUploadImage(
     Uint8List bytes,
     String mimeType,
-  ) async {
-    final preparedBytes = await _sanitizeImageBytesIfNeeded(bytes, mimeType);
-    return _buildPreparedUploadImage(preparedBytes);
-  }
+  ) => _prepareSanitizedUploadImage(bytes, mimeType);
 
   Future<_PreparedUploadImage> _prepareTranscodedUploadImage(
     Uint8List bytes,
   ) async {
     final transcodedBytes = await _transcodeImageToJpeg(bytes);
-    return _buildPreparedUploadImage(transcodedBytes);
+    // A transcoder is an encoder like any other: Apple's writes a JFIF header
+    // and can write more besides, none of which the relay accepts.
+    return _scrubReencodedUploadImage(transcodedBytes);
   }
 
   _PreparedUploadImage _buildPreparedUploadImage(Uint8List bytes) {
@@ -742,7 +759,16 @@ class MediaUploadService {
     );
   }
 
-  Future<Uint8List> _sanitizeImageBytesIfNeeded(
+  /// Strip everything the relay refuses from a picked still or animation.
+  ///
+  /// Animations keep their own frames — decoding to re-encode would flatten
+  /// them — so they are scrubbed where they lie. A still goes through the
+  /// platform encoder first, which applies the orientation and draws in sRGB,
+  /// and the scrub then drops the records describing what the pixels already
+  /// say. The encoder's own output is scrubbed as well: Apple's writes an
+  /// `eXIf`, a `pHYs` and an `iDOT` into a PNG, and the relay accepts none of
+  /// them.
+  Future<_PreparedUploadImage> _prepareSanitizedUploadImage(
     Uint8List bytes,
     String mimeType,
   ) async {
@@ -750,21 +776,52 @@ class MediaUploadService {
         (mimeType == 'image/png' && _isAnimatedPng(bytes)) ||
         (mimeType == 'image/webp' && _isAnimatedWebp(bytes))) {
       try {
-        return sanitizeAnimatedImageForUpload(bytes, mimeType);
+        return _PreparedUploadImage(
+          bytes: scrubImageContainerForUpload(
+            bytes,
+            mimeType,
+            mode: ImageScrubMode.original,
+          ),
+          mimeType: mimeType,
+        );
       } on FormatException {
         throw Exception('failed to sanitize image for upload');
       }
     }
 
     if (!_shouldSanitizePickedImage(mimeType)) {
-      return bytes;
+      return _buildPreparedUploadImage(bytes);
     }
 
-    final sanitizedBytes = await _sanitizeImageBytes(bytes, mimeType);
-    if (sanitizedBytes.isEmpty) {
+    final encodedBytes = await _sanitizeImageBytes(bytes, mimeType);
+    if (encodedBytes.isEmpty) {
       throw Exception('failed to sanitize image for upload');
     }
-    return sanitizedBytes;
+    return _scrubReencodedUploadImage(encodedBytes);
+  }
+
+  /// Scrub bytes an encoder just produced, under the type they actually are.
+  ///
+  /// The type has to be read back from the bytes rather than carried over from
+  /// the picked file: the iOS and macOS encoders answer a WebP with a PNG, and
+  /// handing PNG bytes to the WebP scrubber fails at the signature check.
+  _PreparedUploadImage _scrubReencodedUploadImage(Uint8List encodedBytes) {
+    final mimeType = _detectImageMimeType(encodedBytes);
+    try {
+      return _PreparedUploadImage(
+        bytes: scrubImageContainerForUpload(
+          encodedBytes,
+          mimeType,
+          mode: ImageScrubMode.reencoded,
+        ),
+        mimeType: mimeType,
+      );
+    } on FormatException catch (error) {
+      // The reason names a container detail no reader can act on, so it goes
+      // to the log and the composer keeps the short line.
+      debugPrint('[MediaUploadService] scrub rejected $mimeType: $error');
+      throw Exception('failed to sanitize image for upload');
+    }
   }
 }
 
@@ -940,9 +997,18 @@ bool _shouldSanitizePickedImage(String mimeType) {
           mimeType == 'image/webp');
 }
 
+/// Whether this platform's runner answers the two image methods on
+/// `buzz/media_upload`.
+///
+/// Narrower than [hasNativeMediaPipeline], deliberately: the macOS runner
+/// implements image encoding and nothing else, so video transcoding, poster
+/// extraction and voice-note packaging stay hidden there. Widening that flag
+/// instead would offer the composer three buttons whose handlers do not exist.
 bool _supportsNativeUploadImageProcessing() {
   return switch (defaultTargetPlatform) {
-    TargetPlatform.android || TargetPlatform.iOS => true,
+    TargetPlatform.android ||
+    TargetPlatform.iOS ||
+    TargetPlatform.macOS => true,
     _ => false,
   };
 }

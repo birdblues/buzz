@@ -1296,6 +1296,57 @@ mod tests {
     }
 
     #[test]
+    fn test_macos_imageio_sanitizer_outputs_match_relay_contract() {
+        let config = test_config();
+        for (name, bytes, expected_mime) in [
+            (
+                "PNG",
+                include_bytes!("../tests/fixtures/macos/sanitized/imageio-sanitized.png")
+                    .as_slice(),
+                "image/png",
+            ),
+            (
+                "JPEG",
+                include_bytes!("../tests/fixtures/macos/sanitized/imageio-sanitized.jpg")
+                    .as_slice(),
+                "image/jpeg",
+            ),
+        ] {
+            let actual = validate_content(bytes, &config)
+                .unwrap_or_else(|error| panic!("rejected macOS-sanitized {name} fixture: {error}"));
+            assert_eq!(actual, expected_mime);
+        }
+    }
+
+    /// The macOS runner re-encodes but does not scrub, so its raw output must
+    /// still be refused here — the scrub that makes it acceptable lives in the
+    /// client, in `mobile/lib/shared/relay/image_container_scrub.dart`. These
+    /// fixtures are ImageIO's own bytes: the PNG carries an `eXIf` chunk and
+    /// the JPEG an EXIF APP1 and a Photoshop APP13.
+    #[test]
+    fn test_macos_imageio_encoder_outputs_require_sanitization() {
+        let config = test_config();
+        for (name, bytes) in [
+            (
+                "PNG",
+                include_bytes!("../tests/fixtures/macos/imageio-encoded.png").as_slice(),
+            ),
+            (
+                "JPEG",
+                include_bytes!("../tests/fixtures/macos/imageio-encoded.jpg").as_slice(),
+            ),
+        ] {
+            assert!(
+                matches!(
+                    validate_content(bytes, &config),
+                    Err(MediaError::MetadataForbidden)
+                ),
+                "accepted unsanitized macOS ImageIO {name} fixture"
+            );
+        }
+    }
+
+    #[test]
     fn test_rejects_png_metadata_and_trailing_payload() {
         let config = test_config();
         for kind in [
