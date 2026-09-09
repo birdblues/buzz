@@ -141,10 +141,37 @@ The runner answers on both sides, the way Chromium and Electron do:
   the next turn of the run loop, if the engine has not already done so and the
   plugin is still in the view hierarchy.
 
+One consequence is deliberate: under a window manager the semantics tree
+never goes away. The manager reads the flag before each operation, and since
+its own "off" never reached AppKit the stored value stays on, so it keeps
+flipping and the runner keeps absorbing it (on device: 150 holds, 147
+cancelled by an "on", 0 applied over a session). That costs the framework
+its per-frame semantics update, which is far cheaper than the bridge rebuild
+it replaces, and nothing changes for a Mac without a manager. Gating the
+forward on VoiceOver alone would drop the cost but also cut off Voice
+Control, dictation tools and any other assistive client that sets the flag,
+so it stays as it is until the cost shows.
+
 Neither has an automated test: both are responder-chain behaviour of the
 release app under a real assistive client. They are verified on device, with
 the checklist below, and `BuzzApplication` logs each intercepted write at debug
 level (subsystem `xyz.buzz.client`, category `accessibility`).
+
+**A fresh build's first launch may open on a "could not read its saved
+sign-in" screen.** Seen twice on the Intel Mac after installing a new
+release build; quitting and reopening signed in normally, so the keychain
+read fails for that one process. The app used to answer any such failure
+with the pairing page — a keychain error rendered as "not signed in", with a
+"create a new identity" button in reach. It now shows the error and a "Try
+again" button instead, with the keychain's own status line printed on the
+screen so a report can name it (`Code: -34018, …` is the number to look
+for; the reason on macOS is still unconfirmed). Widget test:
+`App shows a retry screen, not pairing, when the sign-in cannot be read`.
+
+**Leaving a sandboxed app after typing in it beeps** on the next key. The
+app's WKWebView was first responder when its page was popped, and nothing
+takes the responder back for Flutter, so keys land on the window. Older than
+the recovery above, which only steps in for the text-input plugin; open.
 
 **Right-click opens no context menu**, in the composer or in any other text
 field — not even cut, copy and paste. Verified on device, and older than the

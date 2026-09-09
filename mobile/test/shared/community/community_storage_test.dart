@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:buzz/shared/community/community.dart';
@@ -98,6 +99,19 @@ void main() {
   });
 
   group('CommunityStorage', () {
+    test(
+      'loadAll surfaces a keychain that keeps failing, never an empty list',
+      () async {
+        final flaky = _FlakySecureStorage(failures: 99);
+
+        await expectLater(
+          CommunityStorage(secure: flaky).loadAll(),
+          throwsA(isA<PlatformException>()),
+        );
+        expect(flaky.reads, 1);
+      },
+    );
+
     test('loadAll returns empty list when no data', () async {
       final result = await storage.loadAll();
       expect(result, isEmpty);
@@ -316,4 +330,35 @@ void main() {
       });
     });
   });
+}
+
+/// Answers the first [failures] reads the way flutter_secure_storage reports
+/// a keychain error; every read after that is the in-memory fake's.
+class _FlakySecureStorage extends FakeSecureStorage {
+  _FlakySecureStorage({required this.failures});
+
+  int failures;
+  int reads = 0;
+
+  @override
+  Future<String?> read({
+    required String key,
+    AppleOptions? iOptions,
+    AndroidOptions? aOptions,
+    LinuxOptions? lOptions,
+    WebOptions? webOptions,
+    AppleOptions? mOptions,
+    WindowsOptions? wOptions,
+  }) async {
+    reads += 1;
+    if (failures > 0) {
+      failures -= 1;
+      throw PlatformException(
+        code: 'Unexpected security result code',
+        message: 'Code: -34018, Message: A required entitlement is missing.',
+        details: -34018,
+      );
+    }
+    return super.read(key: key);
+  }
 }

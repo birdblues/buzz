@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:app_badge_plus/app_badge_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:uuid/uuid.dart';
@@ -300,6 +301,8 @@ class App extends HookConsumerWidget {
     );
     final schemeName = communityTheme.theme;
     final authState = ref.watch(authProvider);
+    // An error with no value yet: the saved sign-in could not be read.
+    final startupError = authState.hasValue ? null : authState.error;
 
     final resolved = resolveSchemes(schemeName, themeMode);
     final lightScheme = applyAccent(resolved.light, accentIndex);
@@ -378,22 +381,36 @@ class App extends HookConsumerWidget {
         navigatorKey: _mobileRootNavigatorKey,
         child: EmojiBurstOverlay(child: child ?? const SizedBox.shrink()),
       ),
-      home: authState.when(
-        loading: () => const _SplashScreen(),
-        error: (_, _) => const PairingPage(),
-        data: (state) => switch (state.status) {
-          AuthStatus.authenticated => DeepLinkDispatcher(
-            child: AdaptiveHome(
-              settingsPageBuilder: _buildSettingsPage,
-              hasUnreadInbox: hasUnreadInbox,
+      // A failed read is not "signed out". The keychain answers a fresh
+      // build's first launch with an error now and then; showing pairing here
+      // invited the user to create a second identity. The error is checked
+      // ahead of `when` because Riverpod retries a failed load on its own and
+      // reports the wait as loading — the failure would otherwise sit behind
+      // the splash for as long as the retries run.
+      home: startupError != null
+          ? _StartupFailureScreen(
+              error: startupError,
+              onRetry: () => ref.invalidate(authProvider),
+            )
+          : authState.when(
+              loading: () => const _SplashScreen(),
+              error: (error, _) => _StartupFailureScreen(
+                error: error,
+                onRetry: () => ref.invalidate(authProvider),
+              ),
+              data: (state) => switch (state.status) {
+                AuthStatus.authenticated => DeepLinkDispatcher(
+                  child: AdaptiveHome(
+                    settingsPageBuilder: _buildSettingsPage,
+                    hasUnreadInbox: hasUnreadInbox,
+                  ),
+                ),
+                _ => const DeepLinkDispatcher(
+                  dispatchMessageLinks: false,
+                  child: PairingPage(),
+                ),
+              },
             ),
-          ),
-          _ => const DeepLinkDispatcher(
-            dispatchMessageLinks: false,
-            child: PairingPage(),
-          ),
-        },
-      ),
     );
   }
 }
@@ -426,6 +443,70 @@ class _SplashScreen extends StatelessWidget {
     return const Scaffold(
       body: Center(
         child: BuzzLoadingIndicator(size: 56, semanticLabel: 'Starting Buzz'),
+      ),
+    );
+  }
+}
+
+/// Shown when the saved sign-in could not be read at all — a keychain error,
+/// not an empty keychain. The error is printed so a report can name it.
+class _StartupFailureScreen extends StatelessWidget {
+  const _StartupFailureScreen({required this.error, required this.onRetry});
+
+  final Object error;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 360),
+          child: Padding(
+            padding: const EdgeInsets.all(Grid.md),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  LucideIcons.triangleAlert,
+                  size: Grid.lg,
+                  color: context.colors.error,
+                ),
+                const SizedBox(height: Grid.xs),
+                Text(
+                  'Buzz could not read its saved sign-in.',
+                  textAlign: TextAlign.center,
+                  style: context.textTheme.titleMedium,
+                ),
+                const SizedBox(height: Grid.xxs),
+                Text(
+                  'Your account is still on this device. Try again, or quit '
+                  'and reopen Buzz.',
+                  textAlign: TextAlign.center,
+                  style: context.textTheme.bodyMedium?.copyWith(
+                    color: context.colors.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: Grid.xxs),
+                Text(
+                  '$error',
+                  key: const ValueKey('startup-failure-detail'),
+                  textAlign: TextAlign.center,
+                  style: context.textTheme.bodySmall?.copyWith(
+                    color: context.colors.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: Grid.sm),
+                FilledButton.icon(
+                  key: const ValueKey('startup-failure-retry'),
+                  onPressed: onRetry,
+                  icon: const Icon(LucideIcons.refreshCcw, size: 16),
+                  label: const Text('Try again'),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
