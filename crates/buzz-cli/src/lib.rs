@@ -2297,6 +2297,7 @@ mod tests {
             "agents",
             "canvas",
             "channels",
+            "community",
             "dms",
             "emoji",
             "feed",
