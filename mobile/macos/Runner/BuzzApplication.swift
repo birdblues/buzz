@@ -41,7 +41,9 @@ final class BuzzApplication: NSApplication {
   private static let enhancedUserInterface = NSAccessibility.Attribute(
     rawValue: "AXEnhancedUserInterface"
   )
-  private static let log = Logger(subsystem: "xyz.buzz.client", category: "accessibility")
+  // `OSLog` + `os_log`, not `Logger`: the deployment target is 10.15 and the
+  // structured API needs 11.0.
+  private static let log = OSLog(subsystem: "xyz.buzz.client", category: "accessibility")
 
   private var pendingDisable: DispatchWorkItem?
 
@@ -57,18 +59,24 @@ final class BuzzApplication: NSApplication {
     if let pending = pendingDisable {
       pending.cancel()
       pendingDisable = nil
-      Self.log.debug("AXEnhancedUserInterface: pending off cancelled by \(enable ? "on" : "another off")")
+      os_log(
+        "AXEnhancedUserInterface: pending off cancelled by %{public}s",
+        log: Self.log, type: .debug, enable ? "on" : "another off"
+      )
     }
     if enable {
-      Self.log.debug("AXEnhancedUserInterface: on, forwarded")
+      os_log("AXEnhancedUserInterface: on, forwarded", log: Self.log, type: .debug)
       super.accessibilitySetValue(value, forAttribute: attribute)
       return
     }
-    Self.log.debug("AXEnhancedUserInterface: off, held for \(Self.settleDelay)s")
+    os_log(
+      "AXEnhancedUserInterface: off, held for %.1fs",
+      log: Self.log, type: .debug, Self.settleDelay
+    )
     let work = DispatchWorkItem { [weak self] in
       guard let self else { return }
       self.pendingDisable = nil
-      Self.log.debug("AXEnhancedUserInterface: off, applied")
+      os_log("AXEnhancedUserInterface: off, applied", log: Self.log, type: .debug)
       self.forwardAccessibilityValue(value, forAttribute: attribute)
     }
     pendingDisable = work
