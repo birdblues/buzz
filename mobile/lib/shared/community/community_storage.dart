@@ -1,6 +1,6 @@
 import 'dart:convert';
-import 'dart:developer' as developer;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -37,12 +37,14 @@ class CommunityStorage {
     for (var attempt = 1; ; attempt++) {
       try {
         return await _secure.read(key: key);
-      } on PlatformException catch (error, stackTrace) {
-        developer.log(
-          'Keychain read of $key failed (attempt $attempt/$readAttempts)',
-          name: 'buzz.community',
-          error: error,
-          stackTrace: stackTrace,
+      } on PlatformException catch (error) {
+        // `debugPrint`, not `dart:developer`'s `log`: the latter only reaches a
+        // VM service stream, so it is invisible in the release builds where this
+        // failure actually happens (a keychain that is briefly unavailable after
+        // a fast relaunch). The error carries the OSStatus we need to read.
+        debugPrint(
+          '[CommunityStorage] keychain read of $key failed '
+          '(attempt $attempt/$readAttempts): $error',
         );
         if (attempt >= readAttempts) rethrow;
         await Future<void>.delayed(readRetryDelay * attempt);
