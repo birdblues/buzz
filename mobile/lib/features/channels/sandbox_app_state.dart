@@ -28,6 +28,8 @@ String? canonicalSandboxAppState(Object? decoded) {
   final collapsed = _stringList(decoded['collapsed']);
   final sel = _stringList(decoded['sel']);
   if (collapsed == null || sel == null) return null;
+  final includeFeedback = decoded['includeFeedback'];
+  if (includeFeedback != null && includeFeedback is! bool) return null;
   final cam = decoded['cam'];
   if (cam is! Map<String, dynamic>) return null;
   final zoom = cam['zoom'];
@@ -58,7 +60,7 @@ String? canonicalSandboxAppState(Object? decoded) {
     't': t.toInt(),
     'collapsed': collapsed,
     'sel': sel,
-    'includeFeedback': decoded['includeFeedback'] == true,
+    'includeFeedback': includeFeedback == true,
     'cam': {
       'zoom': zoom,
       'pan': {'x': panX, 'y': panY},

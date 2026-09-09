@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 import '../../shared/relay/relay.dart';
+import 'channel_event_order.dart';
 import 'channel_messages_provider.dart';
 import 'message_media.dart';
 import 'sandbox_bridge.dart';
@@ -65,6 +66,14 @@ AppRevision? appRevisionFrom(Iterable<NostrEvent> events, String messageId) {
   );
 }
 
+/// What a revision is looked up by: the message, not where its card sits.
+/// A channel bubble and a thread row of the same message share one lookup.
+typedef AppRevisionKey = ({String channelId, String messageId});
+
+/// [AppRevisionKey] for [target].
+AppRevisionKey appRevisionKeyFor(SandboxBridgeTarget target) =>
+    (channelId: target.channelId, messageId: target.messageId);
+
 /// Edits of one message fetched once from the relay.
 ///
 /// The channel's live subscription carries edits made while the client is
@@ -73,15 +82,20 @@ AppRevision? appRevisionFrom(Iterable<NostrEvent> events, String messageId) {
 /// query content kinds only. This one query closes the gap: an app edited
 /// before this device opened it still comes up on its latest blob.
 final _appEditsProvider = FutureProvider.autoDispose
-    .family<List<NostrEvent>, SandboxBridgeTarget>((ref, target) async {
+    .family<List<NostrEvent>, AppRevisionKey>((ref, target) async {
+      // A fetch that failed while the socket was down must not stand as an
+      // authoritative empty history; ask again once the session recovers.
+      ref.listen(relaySessionProvider, (previous, next) {
+        if (previous?.status != SessionStatus.connected &&
+            next.status == SessionStatus.connected) {
+          ref.invalidateSelf();
+        }
+      });
       final session = ref.read(relaySessionProvider.notifier);
-      return session.queryRelay([
+      const deletionKinds = [EventKind.deletion, EventKind.nip29DeleteEvent];
+      final edits = await session.queryRelay([
         NostrFilter(
-          kinds: const [
-            EventKind.streamMessageEdit,
-            EventKind.deletion,
-            EventKind.nip29DeleteEvent,
-          ],
+          kinds: const [EventKind.streamMessageEdit, ...deletionKinds],
           tags: {
             '#e': [target.messageId],
             '#h': [target.channelId],
@@ -89,12 +103,31 @@ final _appEditsProvider = FutureProvider.autoDispose
           limit: 100,
         ),
       ]);
+      // A deletion of an edit references the edit's id, not the message's:
+      // a second query, for the edits found, so a retracted edit does not
+      // stand.
+      final editIds = [
+        for (final event in edits)
+          if (event.kind == EventKind.streamMessageEdit) event.id,
+      ];
+      if (editIds.isEmpty) return edits;
+      final retractions = await session.queryRelay([
+        NostrFilter(
+          kinds: deletionKinds,
+          tags: {
+            '#e': editIds,
+            '#h': [target.channelId],
+          },
+          limit: 100,
+        ),
+      ]);
+      return [...edits, ...retractions];
     });
 
 /// The revision a session keyed to [target] should show, from the channel's
 /// live events merged with a one-shot fetch of the message's edits.
 final appRevisionProvider = Provider.autoDispose
-    .family<AppRevision?, SandboxBridgeTarget>((ref, target) {
+    .family<AppRevision?, AppRevisionKey>((ref, target) {
       final live =
           ref.watch(channelMessagesProvider(target.channelId)).value ??
           const <NostrEvent>[];
@@ -107,5 +140,8 @@ final appRevisionProvider = Provider.autoDispose
         for (final event in fetched)
           if (seen.add(event.id)) event,
       ];
+      // Folding keeps the first of two edits with the same created_at, so
+      // the order must be the timeline's, not the order the sources came in.
+      events.sort(compareChannelTimelineEventsChronologically);
       return appRevisionFrom(events, target.messageId);
     });

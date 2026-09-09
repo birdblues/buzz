@@ -1009,7 +1009,9 @@ pub(crate) fn carried_edit_tags(target: &serde_json::Value) -> Vec<Vec<String>> 
                         .map(|v| v.as_str().unwrap_or("").to_string())
                         .collect::<Vec<_>>()
                 })
-                .filter(|t| t.len() >= 2 && t.iter().all(|s| !s.is_empty()))
+                // Name and value must be present; later positions (relay
+                // hint, marker) may legitimately be empty strings.
+                .filter(|t| t.len() >= 2 && !t[0].is_empty() && !t[1].is_empty())
                 .collect()
         })
         .unwrap_or_default()
@@ -1287,6 +1289,7 @@ mod tests {
                 ["mention", "bb"],
                 ["imeta", "url https://x/media/1.html", "m text/html"],
                 ["p"],
+                ["p", "cc", "", "member"],
                 ["broadcast", "1"]
             ]
         });
@@ -1296,6 +1299,12 @@ mod tests {
             vec![
                 vec!["p".to_string(), "aa".to_string()],
                 vec!["mention".to_string(), "bb".to_string()],
+                vec![
+                    "p".to_string(),
+                    "cc".to_string(),
+                    String::new(),
+                    "member".to_string()
+                ],
             ]
         );
         assert!(super::carried_edit_tags(&serde_json::json!({"id": "x"})).is_empty());

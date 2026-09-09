@@ -93,7 +93,8 @@ void main() {
         'missing text': jsonEncode({'kind': 'edge', 'ref': 'e4'}),
         'blank text': _payload(text: ' \n '),
         'text too long': _payload(text: 't' * 2049),
-        'raw too long': _payload(text: 't' * 2000) + ' ' * (16 * 1024),
+        'raw too long':
+            _payload(text: 't' * 2000) + ' ' * sandboxBridgeMaxRawLength,
         'text not a string': _payload(text: ['x']),
       };
       rejected.forEach((reason, raw) {

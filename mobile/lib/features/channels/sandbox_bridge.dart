@@ -35,7 +35,11 @@ const sandboxBridgeMaxTextLength = 2048;
 /// useless, so an app that would exceed this refuses to send instead.
 const sandboxBridgeMaxLayoutTextLength = 8192;
 const sandboxBridgeMaxRefLength = 200;
-const sandboxBridgeMaxRawLength = 16 * 1024;
+
+/// The raw channel message: the fields above plus JSON escaping, which can
+/// double a text made of quotes and newlines. Sized so a full-length layout
+/// message always fits.
+const sandboxBridgeMaxRawLength = 32 * 1024;
 const sandboxBridgeMinInterval = Duration(milliseconds: 500);
 
 /// Where a selection goes: the composer of the message the app was shared

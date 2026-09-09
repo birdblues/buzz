@@ -53,17 +53,20 @@ void openSandboxApp(
     bridge: target,
   );
 
-  final aux = ref.read(wideShellProvider).aux;
-  final threadShowing = switch (aux) {
+  bool threadShowing() => switch (ref.read(wideShellProvider).aux) {
     WideAuxThread(:final threadHead) =>
       (threadHead.rootId ?? threadHead.id) == root,
     WideAuxForumThread(:final postEventId) => postEventId == root,
     null => false,
   };
-  if (threadShowing || openThread == null) {
+  if (threadShowing() || openThread == null) {
     shell.openAppPane(pane);
     return;
   }
   openThread();
-  WidgetsBinding.instance.addPostFrameCallback((_) => shell.openAppPane(pane));
+  // Mounted only if the thread really is beside it now: had the open been
+  // refused or overtaken, the app would cover a pane that is not its own.
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    if (threadShowing()) shell.openAppPane(pane);
+  });
 }

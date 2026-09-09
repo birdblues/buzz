@@ -314,9 +314,22 @@ class WideShellNotifier extends Notifier<WideShellState> {
         );
       }
     }
+    // The app is bound to its thread: another thread in the pane means the
+    // app beside it is not that thread's app.
+    final pane = state.appPane;
+    final keepApp =
+        pane != null &&
+        switch (content) {
+          WideAuxThread(:final threadHead) =>
+            (threadHead.rootId ?? threadHead.id) ==
+                (pane.bridge.threadRootId ?? pane.messageId),
+          WideAuxForumThread(:final postEventId) =>
+            postEventId == (pane.bridge.threadRootId ?? pane.messageId),
+        };
     state = state.copyWith(
       aux: () => content,
       auxSession: state.auxSession + 1,
+      appPane: keepApp ? null : () => null,
     );
   }
 

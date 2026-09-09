@@ -78,7 +78,7 @@ class AppSandboxBody extends HookConsumerWidget {
             child: _UpdateErrorStrip(
               key: const ValueKey('app-sandbox-update-error'),
               message: updateError,
-              onRetry: () => sessions.retry(sessionKey),
+              onRetry: () => sessions.retryUpdate(sessionKey),
             ),
           ),
       ],

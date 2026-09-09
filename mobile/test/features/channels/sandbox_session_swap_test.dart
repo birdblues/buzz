@@ -10,6 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart' as http_testing;
+import 'package:webview_flutter/webview_flutter.dart';
 
 import 'fake_webview_platform.dart';
 
@@ -50,6 +51,19 @@ class _FakeAuth extends MediaGetAuthService {
   };
 }
 
+class _RecordingPrefill extends ComposerPrefillNotifier {
+  final keys = <String?>[];
+
+  @override
+  void request({
+    required String channelId,
+    String? threadHeadId,
+    required String text,
+  }) {
+    keys.add(threadHeadId);
+  }
+}
+
 /// The revision the message's edits currently point at; tests move it.
 class _RevisionSource extends Notifier<AppRevision?> {
   @override
@@ -73,9 +87,11 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   late FakeWebViewPlatform platform;
+  late _RecordingPrefill prefill;
 
   setUp(() {
     platform = FakeWebViewPlatform.install();
+    prefill = _RecordingPrefill();
   });
 
   ProviderContainer container({Set<String> missing = const {}}) {
@@ -98,6 +114,7 @@ void main() {
         appRevisionProvider.overrideWith(
           (ref, target) => ref.watch(_revisionSource),
         ),
+        composerPrefillProvider.overrideWith(() => prefill),
       ],
     );
     addTearDown(c.dispose);
@@ -346,5 +363,91 @@ void main() {
     expect(view.phase, SandboxSessionPhase.ready);
     expect(view.revisionAt, 1);
     expect(platform.controllers.last.loadedHtml.single, contains('app $_sha2'));
+  });
+
+  test('a main-frame error while the new version loads rolls back', () async {
+    final c = container();
+    final key = await openReady(c);
+    c.read(_revisionSource.notifier).set(_revision(_sha2, 1));
+    await pumpEventQueue();
+    expect(platform.controllers.single.loadedHtml, hasLength(2));
+    platform.controllers.single.delegate!.onWebResourceError!(
+      const WebResourceError(
+        errorCode: 1,
+        description: 'boom',
+        errorType: WebResourceErrorType.unknown,
+        isForMainFrame: true,
+      ),
+    );
+    await pumpEventQueue();
+    // Rolled back to the previous blob instead of failing the session.
+    expect(platform.controllers.single.loadedHtml, hasLength(3));
+    expect(platform.controllers.single.loadedHtml.last, contains('app $_sha1'));
+    platform.controllers.single.finishPage();
+    await pumpEventQueue();
+    final view = c.read(sandboxSessionsProvider)[key]!;
+    expect(view.phase, SandboxSessionPhase.ready);
+    expect(view.updateError, contains('previous one'));
+    expect(c.read(sandboxSessionsProvider).isRunning(key), isTrue);
+  });
+
+  test(
+    'Try again on the update strip re-attempts the failed version',
+    () async {
+      final missing = <String>{_sha2};
+      final c = container(missing: missing);
+      final key = await openReady(c);
+      c.read(_revisionSource.notifier).set(_revision(_sha2, 1));
+      await pumpEventQueue();
+      expect(c.read(sandboxSessionsProvider)[key]!.updateError, isNotNull);
+      expect(platform.controllers.single.loadedHtml, hasLength(1));
+
+      missing.clear(); // the relay caught up
+      c.read(sandboxSessionsProvider.notifier).retryUpdate(key);
+      await pumpEventQueue();
+      expect(platform.controllers.single.loadedHtml, hasLength(2));
+      expect(
+        platform.controllers.single.loadedHtml.last,
+        contains('app $_sha2'),
+      );
+      platform.controllers.single.finishPage();
+      await pumpEventQueue();
+      final view = c.read(sandboxSessionsProvider)[key]!;
+      expect(view.revisionAt, 1);
+      expect(view.updateError, isNull);
+    },
+  );
+
+  test('a new place for the same app refreshes where selections go', () async {
+    final c = container();
+    final notifier = c.read(sandboxSessionsProvider.notifier);
+    final key = await openReady(c);
+    final again = notifier.open(
+      sha256: _sha1,
+      bridge: _bridge.copyWith(threadHeadId: 'root'),
+    );
+    expect(again, key);
+    expect(platform.controllers, hasLength(1));
+    platform.controllers.single.postFromApp(
+      sandboxBridgeChannelName,
+      '{"v":1,"kind":"node","ref":"n1","text":"[인과그래프] 변수 x"}',
+    );
+    expect(prefill.keys, ['root'], reason: 'routed to the thread composer');
+  });
+
+  test('closing the app mid-swap stops the swap cleanly', () async {
+    final c = container();
+    final notifier = c.read(sandboxSessionsProvider.notifier);
+    final key = await openReady(c);
+    c.read(_revisionSource.notifier).set(_revision(_sha2, 1));
+    await pumpEventQueue();
+    expect(platform.controllers.single.loadedHtml, hasLength(2));
+    notifier.terminate(key);
+    await pumpEventQueue();
+    platform.controllers.single.finishPage();
+    await pumpEventQueue();
+    expect(c.read(sandboxSessionsProvider)[key], isNull);
+    expect(platform.controllers.single.loadedHtml.last, sandboxBlankDocument);
+    expect(platform.controllers.single.ranScripts, isEmpty);
   });
 }

@@ -206,13 +206,20 @@ class _Document {
   /// the session ready before the state handoff.
   bool swapping = false;
 
+  /// Set by a main-frame error during a swap's load, so the attempt fails
+  /// into rollback instead of the session failing outright.
+  bool loadFailed = false;
+
   _Document(this.controller);
 }
 
 class _Session {
   /// The blob the document shows; moves forward with every swap.
   String sha256;
-  final SandboxBridgeTarget? bridge;
+
+  /// Where selections go. Routing may be refreshed by a later [open];
+  /// the revision subscription stays on the original message.
+  SandboxBridgeTarget? bridge;
   _Document? document;
   SandboxSessionPhase phase = SandboxSessionPhase.loading;
   String? error;
@@ -227,6 +234,10 @@ class _Session {
 
   /// The newest revision seen that the document does not show yet.
   AppRevision? pending;
+
+  /// The revision the last swap could not show; "Try again" on the update
+  /// strip re-attempts it without touching the working document.
+  AppRevision? failedTarget;
   bool swapping = false;
   ProviderSubscription<AppRevision?>? revisionSub;
 
@@ -296,7 +307,16 @@ class SandboxSessionsNotifier extends Notifier<SandboxSessionsState> {
   String open({required String sha256, SandboxBridgeTarget? bridge}) {
     if (!ref.mounted) return '';
     final key = sandboxSessionKeyFor(sha256, bridge);
-    if (_sessions.containsKey(key)) return key;
+    final existing = _sessions[key];
+    if (existing != null) {
+      // Same app, possibly a new place: a session first opened full-screen
+      // from a channel bubble and now shown beside its thread must route
+      // its selections to the thread composer, not the covered one.
+      if (bridge != null && existing.bridge != bridge) {
+        existing.bridge = bridge;
+      }
+      return key;
+    }
     final session = _Session(sha256: sha256, bridge: bridge);
     _sessions[key] = session;
     if (bridge != null && key.startsWith('msg:')) {
@@ -319,7 +339,7 @@ class SandboxSessionsNotifier extends Notifier<SandboxSessionsState> {
     SandboxBridgeTarget bridge,
   ) {
     session.revisionSub = ref.container.listen<AppRevision?>(
-      appRevisionProvider(bridge),
+      appRevisionProvider(appRevisionKeyFor(bridge)),
       (previous, next) {
         if (next == null || _sessions[key] != session) return;
         if (next.sha256 == session.sha256) {
@@ -389,6 +409,21 @@ class SandboxSessionsNotifier extends Notifier<SandboxSessionsState> {
     session.updateError = null;
     _publish();
     unawaited(_load(key, session));
+  }
+
+  /// "Try again" on the update strip: re-attempts the version the last
+  /// swap could not show, leaving the working document alone.
+  void retryUpdate(String key) {
+    if (!ref.mounted) return;
+    final session = _sessions[key];
+    if (session == null) return;
+    final target = session.failedTarget;
+    if (target == null) return;
+    session.failedTarget = null;
+    session.updateError = null;
+    session.pending ??= target;
+    _publish();
+    unawaited(_swap(key, session));
   }
 
   void _terminate(String key, {bool blank = true}) {
@@ -518,6 +553,9 @@ class SandboxSessionsNotifier extends Notifier<SandboxSessionsState> {
           onNavigationRequest: (request) => _decide(document, request),
           onPageFinished: (_) {
             if (!live() || document.terminating) return;
+            // A finish that lands before our own navigation request was
+            // consumed belongs to a previous load, not to this attempt.
+            if (document.reloadToken != null) return;
             final done = document.loadDone;
             if (done != null && !done.isCompleted) done.complete();
             if (document.swapping) return;
@@ -528,6 +566,14 @@ class SandboxSessionsNotifier extends Notifier<SandboxSessionsState> {
           onWebResourceError: (error) {
             if (error.isForMainFrame == false || document.terminating) return;
             if (!live()) return;
+            if (document.swapping) {
+              // The attempt fails; the swap rolls back to the previous blob
+              // rather than the session failing with nothing to show.
+              document.loadFailed = true;
+              final done = document.loadDone;
+              if (done != null && !done.isCompleted) done.complete();
+              return;
+            }
             if (error.errorType ==
                     WebResourceErrorType.webContentProcessTerminated &&
                 !session.attached) {
@@ -588,6 +634,7 @@ class SandboxSessionsNotifier extends Notifier<SandboxSessionsState> {
         if (html == null) {
           session.phase = SandboxSessionPhase.ready;
           session.updateError = fetched.error;
+          session.failedTarget = target;
           _publish();
           continue;
         }
@@ -608,9 +655,11 @@ class SandboxSessionsNotifier extends Notifier<SandboxSessionsState> {
           session.revisionAt = target.createdAt;
           session.phase = SandboxSessionPhase.ready;
           session.updateError = null;
+          session.failedTarget = null;
           _publish();
           continue;
         }
+        session.failedTarget = target;
 
         // Roll back: the previous blob is still on the relay.
         final previous = await _fetchHtml(previousSha);
@@ -640,6 +689,11 @@ class SandboxSessionsNotifier extends Notifier<SandboxSessionsState> {
     } finally {
       session.swapping = false;
       document.swapping = false;
+    }
+    // A revision that landed between the loop's last look and the flag
+    // reset would otherwise wait for the next edit; nothing re-emits it.
+    if (session.pending != null && _sessions[key] == session) {
+      unawaited(_swap(key, session));
     }
   }
 
@@ -671,18 +725,21 @@ class SandboxSessionsNotifier extends Notifier<SandboxSessionsState> {
   ) async {
     final done = Completer<void>();
     document.loadDone = done;
+    document.loadFailed = false;
     document.reloadToken = generation;
     try {
       await document.controller.loadHtmlString(stampSandboxCsp(html));
     } on PlatformException {
+      document.reloadToken = null;
       return false;
     }
     try {
       await done.future.timeout(sandboxSwapLoadTimeout);
     } on TimeoutException {
+      document.reloadToken = null;
       return false;
     }
-    if (stale()) return false;
+    if (document.loadFailed || stale()) return false;
     final deadline = DateTime.now().add(sandboxSwapReadyTimeout);
     while (true) {
       Object? probe;
