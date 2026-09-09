@@ -29,7 +29,6 @@ import os.log
   )
   private var qrScannerChannel: FlutterMethodChannel?
   private var sandboxWebViewChannel: FlutterMethodChannel?
-  private var deviceChannel: FlutterMethodChannel?
   private var inlinePhotoPickerSupportChannel: FlutterMethodChannel?
   private var concentricSheetSurfaceChannel: FlutterMethodChannel?
   private var nativeAttachmentPopoverCoordinator: NativeAttachmentPopoverCoordinator?
@@ -37,6 +36,23 @@ import os.log
   private var nativeProfileTextEditorCoordinator: NativeProfileTextEditorCoordinator?
   private var nativeMessageActionSurfaceSupportChannel: FlutterMethodChannel?
   private var huddleMediaPlugin: HuddleMediaPlugin?
+
+  // Orientation policy (owner decisions, 2026-09-10): the iPad runs landscape
+  // only — the wide shell is built for it — and the iPhone upright only.
+  // Decided here, where UIKit asks every time it resolves an orientation,
+  // so it cannot race the Dart entrypoint the way a startup lock did: the
+  // Flutter engine builds its own mask from the generic
+  // UISupportedInterfaceOrientations key and ignores the ~ipad variant, and a
+  // Dart-side SystemChrome lock ran before its channel existed and fell
+  // through to a not-yet-laid-out window (found on a real iPad, 2026-09-10).
+  // UIKit intersects this mask with the view controller's, so the plist may
+  // keep listing every orientation the two devices need between them.
+  override func application(
+    _ application: UIApplication,
+    supportedInterfaceOrientationsFor window: UIWindow?
+  ) -> UIInterfaceOrientationMask {
+    UIDevice.current.userInterfaceIdiom == .pad ? .landscape : .portrait
+  }
 
   override func application(
     _ application: UIApplication,
@@ -79,20 +95,6 @@ import os.log
         return
       }
       result(SandboxWebViewHardening.isInstalled)
-    }
-    // The Dart side locks the iPad to landscape at startup; it asks the
-    // idiom here because the window size it could measure is not laid out
-    // yet at that point (Size.zero before the first frame).
-    deviceChannel = FlutterMethodChannel(
-      name: "buzz/device",
-      binaryMessenger: messenger
-    )
-    deviceChannel?.setMethodCallHandler { call, result in
-      guard call.method == "isPad" else {
-        result(FlutterMethodNotImplemented)
-        return
-      }
-      result(UIDevice.current.userInterfaceIdiom == .pad)
     }
     qrScannerChannel = FlutterMethodChannel(
       name: "buzz/qr_scanner",

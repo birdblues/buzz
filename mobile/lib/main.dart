@@ -5,7 +5,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'app.dart';
 import 'features/invites/invite_join_provider.dart';
 import 'shared/push/push_bootstrap.dart';
-import 'shared/platform/ipad_orientation.dart';
 import 'shared/push/push_bridge.dart';
 import 'shared/theme/theme_provider.dart';
 
@@ -13,7 +12,6 @@ void main() => runBuzzApp(const App());
 
 Future<void> runBuzzApp(Widget app) async {
   WidgetsFlutterBinding.ensureInitialized();
-  await lockOrientationForDevice();
   installBuzzPushMethodHandler();
   await syncPendingBuzzPushNotificationResponse();
 
