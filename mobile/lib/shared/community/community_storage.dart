@@ -1,5 +1,7 @@
 import 'dart:convert';
+import 'dart:developer' as developer;
 
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'community.dart';
@@ -16,22 +18,49 @@ class CommunityStorage {
   static const _legacyPubkey = 'buzz_pubkey';
   static const _legacyNsec = 'buzz_nsec';
 
+  /// A keychain read that fails is tried again, three times a beat apart.
+  /// Right after a relaunch the macOS data-protection keychain can answer
+  /// `errSecInteractionNotAllowed` (-25308) for a moment — seen on every
+  /// first launch of a fresh build — and the same read succeeds a second
+  /// later. Only the platform's own error is retried; after the last attempt
+  /// it propagates, because a read that failed must never look like a key
+  /// that is absent — "absent" is what signs the user out.
+  static const readAttempts = 3;
+  static const readRetryDelay = Duration(milliseconds: 250);
+
   final FlutterSecureStorage _secure;
 
   CommunityStorage({FlutterSecureStorage? secure})
     : _secure = secure ?? const FlutterSecureStorage();
 
+  Future<String?> _read(String key) async {
+    for (var attempt = 1; ; attempt++) {
+      try {
+        return await _secure.read(key: key);
+      } on PlatformException catch (error, stackTrace) {
+        developer.log(
+          'Keychain read of $key failed (attempt $attempt/$readAttempts)',
+          name: 'buzz.community',
+          error: error,
+          stackTrace: stackTrace,
+        );
+        if (attempt >= readAttempts) rethrow;
+        await Future<void>.delayed(readRetryDelay * attempt);
+      }
+    }
+  }
+
   /// Load all communities. On first call, migrates legacy single-community
   /// credentials if present.
   Future<List<Community>> loadAll() async {
-    final raw = await _secure.read(key: _keyCommunities);
+    final raw = await _read(_keyCommunities);
     if (raw != null) return _decodeList(raw);
 
-    final legacyCommunities = await _secure.read(key: _legacyCommunities);
+    final legacyCommunities = await _read(_legacyCommunities);
     if (legacyCommunities != null) {
       final communities = _decodeList(legacyCommunities);
       await _saveList(communities);
-      final legacyActiveId = await _secure.read(key: _legacyActiveId);
+      final legacyActiveId = await _read(_legacyActiveId);
       if (legacyActiveId != null) await saveActiveId(legacyActiveId);
       await _secure.delete(key: _legacyCommunities);
       await _secure.delete(key: _legacyActiveId);
@@ -39,11 +68,11 @@ class CommunityStorage {
     }
 
     // Migration: check for legacy single-community keys.
-    final legacyUrl = await _secure.read(key: _legacyRelayUrl);
-    final legacyToken = await _secure.read(key: _legacyToken);
+    final legacyUrl = await _read(_legacyRelayUrl);
+    final legacyToken = await _read(_legacyToken);
     if (legacyUrl != null && legacyToken != null) {
-      final legacyPubkey = await _secure.read(key: _legacyPubkey);
-      final legacyNsec = await _secure.read(key: _legacyNsec);
+      final legacyPubkey = await _read(_legacyPubkey);
+      final legacyNsec = await _read(_legacyNsec);
 
       final name = Community.nameFromUrl(legacyUrl);
       final community = Community.create(
@@ -87,7 +116,7 @@ class CommunityStorage {
   }
 
   Future<String?> loadActiveId() async {
-    return _secure.read(key: _keyActiveId);
+    return _read(_keyActiveId);
   }
 
   Future<void> saveActiveId(String id) async {

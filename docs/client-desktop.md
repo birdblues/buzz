@@ -159,14 +159,21 @@ level (subsystem `xyz.buzz.client`, category `accessibility`).
 
 **A fresh build's first launch may open on a "could not read its saved
 sign-in" screen.** Seen twice on the Intel Mac after installing a new
-release build; quitting and reopening signed in normally, so the keychain
-read fails for that one process. The app used to answer any such failure
-with the pairing page — a keychain error rendered as "not signed in", with a
-"create a new identity" button in reach. It now shows the error and a "Try
-again" button instead, with the keychain's own status line printed on the
-screen so a report can name it (`Code: -34018, …` is the number to look
-for; the reason on macOS is still unconfirmed). Widget test:
-`App shows a retry screen, not pairing, when the sign-in cannot be read`.
+release build, every time the app was relaunched within a few seconds of
+being killed. The keychain answers `errSecInteractionNotAllowed` (-25308)
+for a moment after such a relaunch — the item and the entitlement are fine,
+the data-protection keychain is just not ready — and the app used to answer
+any such failure with the pairing page: a keychain error rendered as "not
+signed in", with a "create a new identity" button in reach. Now every read
+is retried three times a beat apart (`CommunityStorage`), which covers the
+window seen so far, and a read that still fails shows the error and a "Try
+again" button with the keychain's own status line printed on the screen.
+Try again restarts every provider that read the keychain — the sign-in,
+the community list and the active community — because restarting the
+sign-in alone once left the home behind it with a nameless community and
+channels that never arrived. Widget test: `App shows a retry screen, not
+pairing, when the sign-in cannot be read, and Try again recovers the
+community list too`.
 
 **Leaving a sandboxed app after typing in it beeps** on the next key. The
 app's WKWebView was first responder when its page was popped, and nothing

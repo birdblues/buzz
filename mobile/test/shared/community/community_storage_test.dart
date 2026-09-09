@@ -99,6 +99,23 @@ void main() {
   });
 
   group('CommunityStorage', () {
+    test('loadAll retries a keychain read that fails once', () async {
+      final flaky = _FlakySecureStorage(failures: 0);
+      final ws = Community.create(
+        name: 'Test',
+        relayUrl: 'https://relay.example.com',
+        pubkey: 'abc123',
+      );
+      await CommunityStorage(secure: flaky).save(ws);
+      flaky.failures = CommunityStorage.readAttempts - 1;
+      flaky.reads = 0;
+
+      final loaded = await CommunityStorage(secure: flaky).loadAll();
+
+      expect(loaded.map((c) => c.id), [ws.id]);
+      expect(flaky.reads, CommunityStorage.readAttempts);
+    });
+
     test(
       'loadAll surfaces a keychain that keeps failing, never an empty list',
       () async {
@@ -108,7 +125,7 @@ void main() {
           CommunityStorage(secure: flaky).loadAll(),
           throwsA(isA<PlatformException>()),
         );
-        expect(flaky.reads, 1);
+        expect(flaky.reads, CommunityStorage.readAttempts);
       },
     );
 
@@ -355,8 +372,8 @@ class _FlakySecureStorage extends FakeSecureStorage {
       failures -= 1;
       throw PlatformException(
         code: 'Unexpected security result code',
-        message: 'Code: -34018, Message: A required entitlement is missing.',
-        details: -34018,
+        message: 'Code: -25308, Message: User interaction is not allowed.',
+        details: -25308,
       );
     }
     return super.read(key: key);

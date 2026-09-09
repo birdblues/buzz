@@ -301,8 +301,18 @@ class App extends HookConsumerWidget {
     );
     final schemeName = communityTheme.theme;
     final authState = ref.watch(authProvider);
-    // An error with no value yet: the saved sign-in could not be read.
-    final startupError = authState.hasValue ? null : authState.error;
+    // An error with no value yet: the saved sign-in could not be read. The
+    // community list reads the same keychain on its own, so its failure is a
+    // startup failure too — recovering only the sign-in left the home behind
+    // it with a nameless community and channels that never arrived.
+    final startupError = authState.hasValue
+        ? null
+        : authState.error ??
+              ref.watch(
+                communityListProvider.select(
+                  (list) => list.hasValue ? null : list.error,
+                ),
+              );
 
     final resolved = resolveSchemes(schemeName, themeMode);
     final lightScheme = applyAccent(resolved.light, accentIndex);
@@ -390,13 +400,13 @@ class App extends HookConsumerWidget {
       home: startupError != null
           ? _StartupFailureScreen(
               error: startupError,
-              onRetry: () => ref.invalidate(authProvider),
+              onRetry: () => _retryStartup(ref),
             )
           : authState.when(
               loading: () => const _SplashScreen(),
               error: (error, _) => _StartupFailureScreen(
                 error: error,
-                onRetry: () => ref.invalidate(authProvider),
+                onRetry: () => _retryStartup(ref),
               ),
               data: (state) => switch (state.status) {
                 AuthStatus.authenticated => DeepLinkDispatcher(
@@ -433,6 +443,15 @@ class _SettingsPageContent extends ConsumerWidget {
           const PairingPage(addingCommunity: true, identityRecoveryOnly: true),
     );
   }
+}
+
+/// Restarts every provider that read the keychain during the failure: the
+/// sign-in, the community list, and the active community derived from it.
+/// Restarting the sign-in alone leaves the others holding their error.
+void _retryStartup(WidgetRef ref) {
+  ref.invalidate(authProvider);
+  ref.invalidate(communityListProvider);
+  ref.invalidate(activeCommunityProvider);
 }
 
 class _SplashScreen extends StatelessWidget {
