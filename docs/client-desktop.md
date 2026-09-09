@@ -53,6 +53,16 @@ back at the top row. This mirrors the desktop app's `handleMentionKeyDown` /
 `suggestionKeyAction`; tests in the `keyboard suggestion completion` group of
 `compose_bar_test.dart`).
 
+Two composers can be mounted at once — the channel's and, in the thread
+pane, the thread's. A composer only hides the keyboard it owns: `TextInput.hide`
+is app-global, and the thread composer used to send it unconditionally on
+unmount, dropping the channel composer's text-input client whenever that one
+was focused as the pane closed. The symptom was a caret that swallowed every
+key with a system beep, cleared by clicking any other field. The connection a
+closing composer gives up is hidden by the framework itself (`_dismissComposerKeyboard`
+in `compose_bar/helpers.dart`; tests in the `composer keyboard ownership`
+group of `compose_bar_test.dart`).
+
 Enter and Tab act mid-composition too — a Korean draft's last syllable is
 still marked when the user presses Enter, and that Enter sends the draft
 whole (or picks the highlighted row). This is what the desktop app does:
@@ -212,6 +222,10 @@ sandbox WebView only ever loads `about:blank` from a string.
    Escape leaves the field; `@비서` + Tab or Enter mid-composition →
    `@비서실장 ` with no stray syllable on the next keystroke; `#gen` + Tab →
    `#general `.
+   Keyboard ownership: open a thread, click the *channel* composer, close
+   the thread pane — the channel composer still takes text, Backspace removes
+   a completed mention, ↑/↓ move the `@` list, and no key beeps. Repeat with
+   the thread composer focused while closing.
 5. Attachments: Photos and Files open panels; no Camera/Video/Voice note.
 6. Sandboxed app: open an app card and run `docs/sandbox-probe.html` — every
    row must fail. A "hardening not installed" refusal means the Swift hook

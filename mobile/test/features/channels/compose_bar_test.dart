@@ -5682,6 +5682,116 @@ void main() {
     });
   });
 
+  // `TextInput.hide` is app-global. The seam is the real `SystemChannels
+  // .textInput`: `TestTextInput` records every call in `log` and tracks
+  // `isVisible` (`show` → true, `hide`/`clearClient` → false).
+  group('composer keyboard ownership', () {
+    Finder fieldOf(String composerKey) => find.descendant(
+      of: find.byKey(ValueKey(composerKey)),
+      matching: find.byType(TextField),
+    );
+    // The compact composer shows a placeholder; tapping it mounts the field
+    // and focuses it.
+    Future<void> focusComposer(WidgetTester tester, String composerKey) async {
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(ValueKey(composerKey)),
+          matching: find.text('Message\u2026'),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+      expect(fieldOf(composerKey), findsOneWidget);
+    }
+
+    List<String> textInputMethods(WidgetTester tester) =>
+        tester.testTextInput.log.map((call) => call.method).toList();
+
+    for (final platform in [TargetPlatform.macOS, TargetPlatform.iOS]) {
+      testWidgets(
+        'unmounting a composer leaves the surviving composer connected '
+        '($platform)',
+        (tester) async {
+          final previousPlatform = debugDefaultTargetPlatformOverride;
+          debugDefaultTargetPlatformOverride = platform;
+          final uploadService = _testUploadService(nostr.Keys.generate().nsec);
+          try {
+            await tester.pumpWidget(
+              _buildNativePopoverOwnershipHarness(
+                uploadService: uploadService,
+                includeFirstComposer: true,
+              ),
+            );
+            await tester.pumpAndSettle();
+            await focusComposer(tester, 'second-composer');
+            expect(tester.testTextInput.isVisible, isTrue);
+            tester.testTextInput.log.clear();
+
+            // The thread pane closes: its composer unmounts while the channel
+            // composer keeps the keyboard.
+            await tester.pumpWidget(
+              _buildNativePopoverOwnershipHarness(
+                uploadService: uploadService,
+                includeFirstComposer: false,
+              ),
+            );
+            await tester.pumpAndSettle();
+
+            expect(
+              textInputMethods(tester),
+              isNot(
+                anyOf(
+                  contains('TextInput.hide'),
+                  contains('TextInput.clearClient'),
+                ),
+              ),
+            );
+            expect(tester.testTextInput.isVisible, isTrue);
+            await tester.enterText(fieldOf('second-composer'), 'still typing');
+            await tester.pump();
+            expect(find.text('still typing'), findsOneWidget);
+          } finally {
+            debugDefaultTargetPlatformOverride = previousPlatform;
+            await tester.pumpWidget(const SizedBox.shrink());
+          }
+        },
+      );
+    }
+
+    testWidgets('a focused composer still hides the keyboard when it unmounts '
+        'on iOS', (tester) async {
+      final previousPlatform = debugDefaultTargetPlatformOverride;
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      final uploadService = _testUploadService(nostr.Keys.generate().nsec);
+      try {
+        await tester.pumpWidget(
+          _buildNativePopoverOwnershipHarness(
+            uploadService: uploadService,
+            includeFirstComposer: true,
+          ),
+        );
+        await tester.pumpAndSettle();
+        await focusComposer(tester, 'first-composer');
+        expect(tester.testTextInput.isVisible, isTrue);
+        tester.testTextInput.log.clear();
+
+        await tester.pumpWidget(
+          _buildNativePopoverOwnershipHarness(
+            uploadService: uploadService,
+            includeFirstComposer: false,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(textInputMethods(tester), contains('TextInput.hide'));
+        expect(tester.testTextInput.isVisible, isFalse);
+      } finally {
+        debugDefaultTargetPlatformOverride = previousPlatform;
+        await tester.pumpWidget(const SizedBox.shrink());
+      }
+    });
+  });
+
   group('findTrigger', () {
     test('finds @ at start of text', () {
       expect(findTrigger('@alice', 6, '@', stopAtSpace: false), 0);

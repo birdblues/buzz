@@ -85,9 +85,21 @@ void _showComposerEmojiPicker(
   );
 }
 
+// `TextInput.hide` is app-global, not tied to the focus node: it drops the
+// engine's active text-input client whoever owns it. Send it only while this
+// composer's own field holds the connection — a thread composer unmounting
+// while the channel composer was focused used to drop the channel composer's
+// client, leaving a caret that swallows every key (and beeps on macOS). At
+// unmount the field is already detached, so the connection it gives up is
+// hidden by the framework itself (`TextInput._scheduleHide`, skipped when
+// another client attaches in the same cycle); the explicit hide is for a live
+// composer taking its keyboard down, e.g. before a voice note.
 void _dismissComposerKeyboard(FocusNode focusNode) {
+  final ownsInput = focusNode.hasFocus;
   focusNode.unfocus();
-  unawaited(SystemChannels.textInput.invokeMethod<void>('TextInput.hide'));
+  if (ownsInput) {
+    unawaited(SystemChannels.textInput.invokeMethod<void>('TextInput.hide'));
+  }
 }
 
 void _chooseComposerAttachment(
