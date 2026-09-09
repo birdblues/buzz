@@ -3,24 +3,35 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
-/// The iPad runs landscape only (owner decision, 2026-09-10): the wide shell
-/// is built for it, and a portrait iPad would fall back to the phone layout.
+/// Orientation policy on iOS (owner decisions, 2026-09-10): the iPad runs
+/// landscape only — the wide shell is built for it, and a portrait iPad
+/// would fall back to the phone layout — and the iPhone runs portrait only.
+/// Other platforms are left alone.
 ///
-/// `Info.plist` already says so with `UISupportedInterfaceOrientations~ipad`,
-/// but the Flutter engine derives its orientation mask from the generic
-/// `UISupportedInterfaceOrientations` key (which the iPhone needs to keep
-/// portrait), so the plist alone leaves the iPad rotating. The lock is set
-/// from Dart instead.
+/// `Info.plist` cannot express this on its own: the Flutter engine derives
+/// its orientation mask from the generic `UISupportedInterfaceOrientations`
+/// key (ignoring the `~ipad` variant), and one key cannot say landscape for
+/// the iPad and portrait for the iPhone. So the lock is set from Dart.
 ///
 /// The device is identified by asking the runner for its interface idiom
 /// (`buzz/device` `isPad`), not by measuring the window: at startup, before
 /// the first frame, the window can still report `Size.zero`, and a size test
 /// then silently decides "not an iPad" (found on a real iPad, 2026-09-10).
-/// Only if the runner cannot answer does the window size decide, after the
-/// first frame.
+/// Only if the runner cannot answer does the window size decide.
 const MethodChannel deviceChannel = MethodChannel('buzz/device');
 
 const double kTabletShortestSide = 600;
+
+/// The orientations an iPad may take.
+const List<DeviceOrientation> ipadOrientations = [
+  DeviceOrientation.landscapeLeft,
+  DeviceOrientation.landscapeRight,
+];
+
+/// The orientations an iPhone may take (upright only, as phones usually do).
+const List<DeviceOrientation> iphoneOrientations = [
+  DeviceOrientation.portraitUp,
+];
 
 /// Whether an iOS device with [logicalSize] is tablet-sized — the fallback
 /// used only when the runner does not answer.
@@ -43,27 +54,20 @@ Future<bool?> askRunnerIsPad() async {
   }
 }
 
-/// Locks an iPad to landscape; a no-op everywhere else. Returns whether the
-/// lock was applied.
-Future<bool> lockIpadToLandscape() async {
-  final isPad = await askRunnerIsPad();
-  if (isPad == true) {
-    await _lock();
-    return true;
+/// Applies the orientation policy for this device; a no-op off iOS.
+/// Returns the orientations locked, or null when nothing was locked.
+Future<List<DeviceOrientation>?> lockOrientationForDevice() async {
+  if (defaultTargetPlatform != TargetPlatform.iOS) return null;
+  var isPad = await askRunnerIsPad();
+  if (isPad == null) {
+    // The runner did not answer: decide from the window as laid out now.
+    final view = PlatformDispatcher.instance.implicitView;
+    if (view == null) return null;
+    final size = view.physicalSize / view.devicePixelRatio;
+    if (size == Size.zero) return null; // not laid out yet; do not guess
+    isPad = isIpadBySize(platform: defaultTargetPlatform, logicalSize: size);
   }
-  if (isPad == false) return false;
-  // The runner did not answer: decide from the window once it is laid out.
-  final view = PlatformDispatcher.instance.implicitView;
-  if (view == null) return false;
-  final size = view.physicalSize / view.devicePixelRatio;
-  if (isIpadBySize(platform: defaultTargetPlatform, logicalSize: size)) {
-    await _lock();
-    return true;
-  }
-  return false;
+  final orientations = isPad ? ipadOrientations : iphoneOrientations;
+  await SystemChrome.setPreferredOrientations(orientations);
+  return orientations;
 }
-
-Future<void> _lock() => SystemChrome.setPreferredOrientations(const [
-  DeviceOrientation.landscapeLeft,
-  DeviceOrientation.landscapeRight,
-]);

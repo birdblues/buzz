@@ -13,7 +13,7 @@ void main() => runBuzzApp(const App());
 
 Future<void> runBuzzApp(Widget app) async {
   WidgetsFlutterBinding.ensureInitialized();
-  await lockIpadToLandscape();
+  await lockOrientationForDevice();
   installBuzzPushMethodHandler();
   await syncPendingBuzzPushNotificationResponse();
 

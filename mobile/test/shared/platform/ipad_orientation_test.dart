@@ -36,43 +36,39 @@ void main() {
         ...(call.arguments as List).cast<String>(),
   ];
 
-  group('lockIpadToLandscape', () {
+  group('lockOrientationForDevice on iOS', () {
     setUp(() => debugDefaultTargetPlatformOverride = TargetPlatform.iOS);
     tearDown(() => debugDefaultTargetPlatformOverride = null);
 
-    test(
-      'locks when the runner says iPad, whatever the window measures',
-      () async {
-        final calls = captureWith(runnerSaysPad: true);
-        expect(await lockIpadToLandscape(), isTrue);
-        expect(orientationsIn(calls), [
-          'DeviceOrientation.landscapeLeft',
-          'DeviceOrientation.landscapeRight',
-        ]);
-      },
-    );
-
-    test('leaves an iPhone alone', () async {
-      final calls = captureWith(runnerSaysPad: false);
-      expect(await lockIpadToLandscape(), isFalse);
-      expect(orientationsIn(calls), isEmpty);
+    test('an iPad is landscape only, whatever the window measures', () async {
+      final calls = captureWith(runnerSaysPad: true);
+      expect(await lockOrientationForDevice(), ipadOrientations);
+      expect(orientationsIn(calls), [
+        'DeviceOrientation.landscapeLeft',
+        'DeviceOrientation.landscapeRight',
+      ]);
     });
 
-    test('without a runner answer it falls back to the window size', () async {
-      // The test window is phone-sized (800x600 logical at ratio 1 in this
-      // harness reports a short side of 600, so pin it explicitly).
+    test('an iPhone is upright only', () async {
+      final calls = captureWith(runnerSaysPad: false);
+      expect(await lockOrientationForDevice(), iphoneOrientations);
+      expect(orientationsIn(calls), ['DeviceOrientation.portraitUp']);
+    });
+
+    test('without a runner answer the laid-out window decides', () async {
       final calls = captureWith(runnerSaysPad: null);
       final view =
           TestWidgetsFlutterBinding.instance.platformDispatcher.views.first;
       view.physicalSize = const Size(1194, 834);
       view.devicePixelRatio = 1;
       addTearDown(view.reset);
-      expect(await lockIpadToLandscape(), isTrue);
+      expect(await lockOrientationForDevice(), ipadOrientations);
       expect(orientationsIn(calls), isNotEmpty);
     });
   });
 
-  test('the size fallback is iOS-only and tablet-sized', () {
+  test('the size fallback is iOS-only, tablet-sized, and never guesses from '
+      'an unlaid-out window', () {
     expect(
       isIpadBySize(
         platform: TargetPlatform.iOS,
@@ -101,11 +97,11 @@ void main() {
     );
   });
 
-  test('a non-iOS platform never asks the runner', () async {
+  test('a non-iOS platform is left alone and never asks the runner', () async {
     debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
     final calls = captureWith(runnerSaysPad: true);
-    expect(await lockIpadToLandscape(), isFalse);
+    expect(await lockOrientationForDevice(), isNull);
     expect(orientationsIn(calls), isEmpty);
   });
 }
