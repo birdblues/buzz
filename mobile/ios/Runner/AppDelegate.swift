@@ -29,6 +29,7 @@ import os.log
   )
   private var qrScannerChannel: FlutterMethodChannel?
   private var sandboxWebViewChannel: FlutterMethodChannel?
+  private var deviceChannel: FlutterMethodChannel?
   private var inlinePhotoPickerSupportChannel: FlutterMethodChannel?
   private var concentricSheetSurfaceChannel: FlutterMethodChannel?
   private var nativeAttachmentPopoverCoordinator: NativeAttachmentPopoverCoordinator?
@@ -78,6 +79,20 @@ import os.log
         return
       }
       result(SandboxWebViewHardening.isInstalled)
+    }
+    // The Dart side locks the iPad to landscape at startup; it asks the
+    // idiom here because the window size it could measure is not laid out
+    // yet at that point (Size.zero before the first frame).
+    deviceChannel = FlutterMethodChannel(
+      name: "buzz/device",
+      binaryMessenger: messenger
+    )
+    deviceChannel?.setMethodCallHandler { call, result in
+      guard call.method == "isPad" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      result(UIDevice.current.userInterfaceIdiom == .pad)
     }
     qrScannerChannel = FlutterMethodChannel(
       name: "buzz/qr_scanner",
