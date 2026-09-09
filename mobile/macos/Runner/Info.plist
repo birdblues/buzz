@@ -54,6 +54,6 @@
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Buzz uses your photo library to select profile photos and images to attach to messages.</string>
 	<key>NSPrincipalClass</key>
-	<string>NSApplication</string>
+	<string>BuzzApplication</string>
 </dict>
 </plist>

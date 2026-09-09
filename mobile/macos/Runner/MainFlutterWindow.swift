@@ -64,6 +64,52 @@ class MainFlutterWindow: NSWindow {
     super.awakeFromNib()
   }
 
+  /// The engine's text-input view, looked up by name: the class is not
+  /// exported from FlutterMacOS.
+  private static let textInputPluginClass: AnyClass? = NSClassFromString(
+    "FlutterTextInputPlugin"
+  )
+
+  /// Gives the keyboard back to Flutter when the accessibility layer takes it.
+  ///
+  /// With an assistive client attached, the engine backs each text field with
+  /// an `NSTextField` and makes its `FlutterTextInputPlugin` that field's
+  /// editor. Two things then end editing through `endEditingFor:` — the field
+  /// being destroyed while edited (the bridge is rebuilt, see
+  /// `BuzzApplication`) and the engine's own `startEditing` re-selecting it —
+  /// and `endEditingFor:` makes the *window* first responder. The engine has
+  /// no path back from that: the plugin still believes it is shown, the
+  /// framework still believes the field is focused, and every key reaches the
+  /// window, which beeps. Clicking another field and returning was the only
+  /// cure; this does the same thing unprompted.
+  ///
+  /// The tell is the target: only `endEditingFor:` asks for the window itself.
+  /// The plugin's own dismissal (`TextInput.hide` / `clearClient`) hands the
+  /// responder to the Flutter view, and a click hands it to whatever was
+  /// clicked. The hand-back waits a turn of the run loop, because the eviction
+  /// is often followed at once by the engine re-installing the plugin as the
+  /// field's editor; if that already happened there is nothing to do. It is
+  /// also skipped when the plugin has left the view hierarchy, which is how it
+  /// looks when Flutter itself gave the keyboard up.
+  override func makeFirstResponder(_ responder: NSResponder?) -> Bool {
+    let evicted = firstResponder
+    let handled = super.makeFirstResponder(responder)
+    guard
+      handled, responder === self,
+      let evicted, let pluginClass = Self.textInputPluginClass,
+      evicted.isKind(of: pluginClass), let plugin = evicted as? NSView
+    else {
+      return handled
+    }
+    DispatchQueue.main.async { [weak self] in
+      guard let self, self.firstResponder === self, plugin.superview != nil else {
+        return
+      }
+      _ = self.makeFirstResponder(plugin)
+    }
+    return handled
+  }
+
   /// The pasteboard types a copied picture can arrive as, best first.
   ///
   /// TIFF is last and handled apart: it is what Preview, Finder and the

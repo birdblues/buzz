@@ -105,6 +105,47 @@ re-uploaded from macOS loses its manifest chunk, which used to survive because
 the file went up untouched; the client never creates those, so only forwarding
 one is affected.
 
+## Keyboard under window managers and assistive technology
+
+Tiling and snapping window managers — AeroSpace, yabai, Amethyst, Rectangle,
+Phoenix — drive the app through the accessibility API, and around every move
+or resize they switch the app's private `AXEnhancedUserInterface` flag off and
+back on (the flag slows window animations; AeroSpace does it in
+`MacApp.swift`, `disableAnimations`). Flutter's macOS engine reads that flag as
+the one signal for whether an assistive client is present: off destroys the
+accessibility bridge, on rebuilds it. The bridge owns an `NSTextField` behind
+every focused text field, and removing a field that is being edited ends
+editing on the window, which makes the *window* first responder in place of
+the engine's `FlutterTextInputPlugin`. The engine never recovers on its own:
+the caret stays, every key reaches the window and beeps, a completed mention
+will not delete, and the `@` list ignores the arrows — until another field is
+clicked and the composer focused again. The same eviction happens without any
+flapping whenever the engine re-selects the native field (`startEditing`,
+on every value change) and fails to re-install its editor, which is why, once
+the bridge has been rebuilt, the first `@` or Shift+Enter could kill the
+composer. Upstream has no fix (3.41.7 and master alike); the framework side is
+innocent — the composer's semantics node keeps its id and its ancestors
+through every one of those edits.
+
+The runner answers on both sides, the way Chromium and Electron do:
+
+- `BuzzApplication` (the `NSPrincipalClass`) intercepts the attribute write
+  and debounces it: an "off" is held for two seconds and cancelled by an "on"
+  inside that window, so a manager's round trip never reaches AppKit or the
+  engine. VoiceOver turning the flag on is forwarded at once; only turning it
+  off arrives late.
+- `MainFlutterWindow.makeFirstResponder(_:)` notices the window being made
+  first responder in place of the text-input plugin — only `endEditingFor:`
+  asks for the window itself; the plugin's own dismissal targets the Flutter
+  view and a click targets what was clicked — and hands the responder back on
+  the next turn of the run loop, if the engine has not already done so and the
+  plugin is still in the view hierarchy.
+
+Neither has an automated test: both are responder-chain behaviour of the
+release app under a real assistive client. They are verified on device, with
+the checklist below, and `BuzzApplication` logs each intercepted write at debug
+level (subsystem `xyz.buzz.client`, category `accessibility`).
+
 **Right-click opens no context menu**, in the composer or in any other text
 field — not even cut, copy and paste. Verified on device, and older than the
 clipboard work above. The framework is not the reason: Flutter routes a
@@ -226,6 +267,11 @@ sandbox WebView only ever loads `about:blank` from a string.
    the thread pane — the channel composer still takes text, Backspace removes
    a completed mention, ↑/↓ move the `@` list, and no key beeps. Repeat with
    the thread composer focused while closing.
+   Under a window manager (AeroSpace `alt-f`, or any move/resize) and again
+   with VoiceOver on: type in the composer, move the window, then type `@`,
+   Shift+Enter and a Korean syllable — every key still lands, the `@` list
+   follows the arrows, nothing beeps, and Console shows the manager's
+   off-then-on collapsing into "pending off cancelled".
 5. Attachments: Photos and Files open panels; no Camera/Video/Voice note.
 6. Sandboxed app: open an app card and run `docs/sandbox-probe.html` — every
    row must fail. A "hardening not installed" refusal means the Swift hook
