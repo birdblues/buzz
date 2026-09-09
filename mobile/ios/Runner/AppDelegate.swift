@@ -37,21 +37,22 @@ import os.log
   private var nativeMessageActionSurfaceSupportChannel: FlutterMethodChannel?
   private var huddleMediaPlugin: HuddleMediaPlugin?
 
-  // Orientation policy (owner decisions, 2026-09-10): the iPad runs landscape
-  // only — the wide shell is built for it — and the iPhone upright only.
-  // Decided here, where UIKit asks every time it resolves an orientation,
-  // so it cannot race the Dart entrypoint the way a startup lock did: the
-  // Flutter engine builds its own mask from the generic
-  // UISupportedInterfaceOrientations key and ignores the ~ipad variant, and a
-  // Dart-side SystemChrome lock ran before its channel existed and fell
-  // through to a not-yet-laid-out window (found on a real iPad, 2026-09-10).
-  // UIKit intersects this mask with the view controller's, so the plist may
-  // keep listing every orientation the two devices need between them.
+  // Orientation policy (owner decisions, 2026-09-10): the iPhone runs
+  // upright only; the iPad rotates freely. Decided here, where UIKit asks
+  // every time it resolves an orientation, so it cannot race the Dart
+  // entrypoint the way a startup SystemChrome lock did (it ran before its
+  // channel existed and fell through to a not-yet-laid-out window).
+  //
+  // An iPad landscape lock was tried and reverted (docs/mobile-orientation.md):
+  // iPadOS 26 reads an app's orientation mask as a window aspect constraint,
+  // so a portrait-held iPad showed a letterboxed landscape window instead of
+  // refusing to rotate. The plist lists every orientation; UIKit intersects
+  // it with this mask.
   override func application(
     _ application: UIApplication,
     supportedInterfaceOrientationsFor window: UIWindow?
   ) -> UIInterfaceOrientationMask {
-    UIDevice.current.userInterfaceIdiom == .pad ? .landscape : .portrait
+    UIDevice.current.userInterfaceIdiom == .pad ? .allButUpsideDown : .portrait
   }
 
   override func application(
