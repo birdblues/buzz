@@ -1,16 +1,12 @@
-import 'dart:async';
-
 import 'package:flutter/cupertino.dart' show CupertinoPageRoute;
 import 'package:flutter/material.dart';
-import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
-import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../shared/theme/theme.dart';
-import '../../shared/widgets/buzz_loading_indicator.dart';
 import '../../shared/widgets/frosted_app_bar.dart';
 import '../../shared/widgets/frosted_scaffold.dart';
+import 'app_sandbox_body.dart';
 import 'sandbox_bridge.dart';
 import 'sandbox_session.dart';
 
@@ -35,8 +31,13 @@ export 'sandbox_session.dart'
 /// the message the app was shared in. It carries the selection bridge
 /// (`sandbox_bridge.dart`): a validated `{ kind, ref, text }` from the app
 /// becomes a draft in that message's composer, the page pops, and the user
-/// decides what to send. Nothing flows back into the app.
-class AppWebViewPage extends HookConsumerWidget {
+/// decides what to send. A session keyed to that message also follows its
+/// edits: a new version of the app swaps in with the view state carried
+/// over (`sandbox_revision.dart`).
+///
+/// Wide windows show the app beside its thread instead (`sandbox_open.dart`,
+/// `wide_home_shell/app_pane.dart`); this page is the compact layout's.
+class AppWebViewPage extends ConsumerWidget {
   final String sha256;
   final String filename;
   final String? sharedBy;
@@ -72,25 +73,12 @@ class AppWebViewPage extends HookConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final colors = context.colors;
-    final sessionKey = sandboxSessionKey(sha256, bridge?.messageId);
+    final sessionKey = sandboxSessionKeyFor(sha256, bridge);
     final sessions = ref.read(sandboxSessionsProvider.notifier);
 
-    useEffect(() {
-      // Provider writes are refused during build and unmount, so both hops
-      // run one microtask later; microtasks keep their order, so a page
-      // that mounts and unmounts in one frame still attaches first.
-      unawaited(
-        Future<void>.microtask(() {
-          sessions.open(sha256: sha256, bridge: bridge);
-          sessions.attach(sessionKey);
-        }),
-      );
-      return () =>
-          unawaited(Future<void>.microtask(() => sessions.detach(sessionKey)));
-    }, [sessionKey]);
-
     // The bridge turned a selection into a draft: leave the reader on the
-    // composer. The app stays alive behind Back.
+    // composer. The app stays alive behind Back. (The wide shell's app pane
+    // does not pop — the composer is already beside the app there.)
     ref.listen<int?>(
       sandboxSessionsProvider.select((s) => s[sessionKey]?.prefillSeq),
       (previous, next) {
@@ -100,18 +88,12 @@ class AppWebViewPage extends HookConsumerWidget {
       },
     );
 
-    final view = ref.watch(
-      sandboxSessionsProvider.select((s) => s[sessionKey]),
+    final revisionAt = ref.watch(
+      sandboxSessionsProvider.select((s) => s[sessionKey]?.revisionAt),
     );
-    final controller = view?.hasDocument == true
-        ? sessions.controllerOf(sessionKey)
-        : null;
-    final loading = view == null || view.phase == SandboxSessionPhase.loading;
-    final error = view?.phase == SandboxSessionPhase.failed
-        ? view?.error
-        : null;
     final subtitle = [
       if (sharedBy case final sharedBy?) 'Shared by $sharedBy',
+      ?sandboxRevisionLabel(context, revisionAt),
       'Runs in a sandbox · no network · Back keeps it running',
     ].join(' · ');
 
@@ -152,55 +134,7 @@ class AppWebViewPage extends HookConsumerWidget {
         padding: EdgeInsets.only(
           top: frostedAppBarHeight(context, bottomHeight: Grid.gutter),
         ),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            if (controller != null && error == null)
-              WebViewWidget(controller: controller),
-            if (loading && error == null)
-              const Center(
-                child: BuzzLoadingIndicator(semanticLabel: 'Loading app'),
-              ),
-            if (error != null)
-              _AppLoadError(
-                message: error,
-                onRetry: () => sessions.retry(sessionKey),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _AppLoadError extends StatelessWidget {
-  final String message;
-  final VoidCallback onRetry;
-
-  const _AppLoadError({required this.message, required this.onRetry});
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(Grid.sm),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(LucideIcons.shieldAlert, color: colors.onSurfaceVariant),
-            const SizedBox(height: Grid.xxs),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: context.textTheme.bodyMedium?.copyWith(
-                color: colors.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: Grid.xxs),
-            TextButton(onPressed: onRetry, child: const Text('Try again')),
-          ],
-        ),
+        child: AppSandboxBody(sha256: sha256, bridge: bridge),
       ),
     );
   }

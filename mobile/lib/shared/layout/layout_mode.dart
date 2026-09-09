@@ -51,6 +51,15 @@ double wideAuxPaneWidthFor(double contentWidth) {
 /// Smallest width the wide-layout main pane may be given.
 const double kWideMainPaneMinWidth = 360;
 
+/// Share of the content area the thread keeps when a sandboxed app runs
+/// beside it ("app split"); the app takes the rest. At the smallest wide
+/// window (1000, sidebar collapsed) that is a 400 thread and a 600 app.
+const double kWideAppSplitThreadFraction = 0.40;
+
+/// Thread width for an app split of a content area [stackWidth] wide.
+double wideAppSplitThreadWidthFor(double stackWidth) =>
+    (stackWidth * kWideAppSplitThreadFraction).roundToDouble();
+
 /// Maximum width of a modal bottom sheet in the wide layout.
 const double kWideSheetMaxWidth = 560;
 

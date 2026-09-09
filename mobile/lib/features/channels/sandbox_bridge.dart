@@ -14,7 +14,13 @@ import '../activity/compose_drafts_provider.dart';
 /// `buzzHost` JavaScript channel; this file validates the string and turns
 /// it into a composer draft. Nothing is ever sent on the user's behalf: the
 /// host prefills the composer of the message the app was shared in and the
-/// user edits and sends. Nothing flows back into the app.
+/// user edits and sends.
+///
+/// The other direction is deliberately narrow (`sandbox_session.dart`): when
+/// the message carrying the app is edited to a new blob, the host reads the
+/// running app's view state back through one host-owned script, loads the
+/// new document into the same WebView, and hands that state to it. No agent
+/// text is pushed into the app.
 
 /// Name of the JavaScript channel the sandbox page registers. Inside the
 /// document it is `window.buzzHost.postMessage(string)`.
@@ -23,6 +29,11 @@ const sandboxBridgeChannelName = 'buzzHost';
 /// Caps re-applied here whatever the app promised: one message may carry at
 /// most this much text, and no more than one message per interval is read.
 const sandboxBridgeMaxTextLength = 2048;
+
+/// A `layout` message carries every moved node as fenced JSON, so it may be
+/// longer than a selection line. It is never truncated: a cut JSON is
+/// useless, so an app that would exceed this refuses to send instead.
+const sandboxBridgeMaxLayoutTextLength = 8192;
 const sandboxBridgeMaxRefLength = 200;
 const sandboxBridgeMaxRawLength = 16 * 1024;
 const sandboxBridgeMinInterval = Duration(milliseconds: 500);
@@ -42,17 +53,70 @@ class SandboxBridgeTarget {
   /// Set when the message lives in a thread: the thread composer's key.
   final String? threadHeadId;
 
+  /// Root of the thread the message belongs to (the message itself when it
+  /// is a top-level one). The wide shell uses it to tell whether the thread
+  /// beside an app pane is this message's thread.
+  final String? threadRootId;
+
+  /// How many `text/html` attachments the message carries. A session is
+  /// keyed to the message only when there is exactly one, so a new version
+  /// of the app can swap in place; with several, sessions fall back to the
+  /// blob hash and never swap.
+  final int htmlAttachmentCount;
+
   const SandboxBridgeTarget({
     required this.channelId,
     required this.messageId,
     this.threadHeadId,
+    this.threadRootId,
+    this.htmlAttachmentCount = 1,
   });
 
   String get draftKey => composeDraftKey(channelId, threadHeadId: threadHeadId);
+
+  SandboxBridgeTarget copyWith({
+    String? threadHeadId,
+    String? threadRootId,
+    int? htmlAttachmentCount,
+  }) {
+    return SandboxBridgeTarget(
+      channelId: channelId,
+      messageId: messageId,
+      threadHeadId: threadHeadId ?? this.threadHeadId,
+      threadRootId: threadRootId ?? this.threadRootId,
+      htmlAttachmentCount: htmlAttachmentCount ?? this.htmlAttachmentCount,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is SandboxBridgeTarget &&
+      other.channelId == channelId &&
+      other.messageId == messageId &&
+      other.threadHeadId == threadHeadId &&
+      other.threadRootId == threadRootId &&
+      other.htmlAttachmentCount == htmlAttachmentCount;
+
+  @override
+  int get hashCode => Object.hash(
+    channelId,
+    messageId,
+    threadHeadId,
+    threadRootId,
+    htmlAttachmentCount,
+  );
 }
 
-/// What an app may point at. Anything else is dropped.
-enum SandboxSelectKind { node, edge, path }
+/// What an app may point at. Anything else is dropped. `layout` is not a
+/// selection but the app's moved-node positions, sent as fenced JSON in the
+/// text for the agent to pin into the graph's data.
+enum SandboxSelectKind { node, edge, path, layout }
+
+/// Text cap for one [SandboxSelectKind].
+int sandboxBridgeMaxTextFor(SandboxSelectKind kind) => switch (kind) {
+  SandboxSelectKind.layout => sandboxBridgeMaxLayoutTextLength,
+  _ => sandboxBridgeMaxTextLength,
+};
 
 /// One validated selection message.
 @immutable
@@ -73,10 +137,11 @@ class SandboxSelect {
 }
 
 /// Parses one channel message. Returns null for anything that is not a JSON
-/// object with `kind` in {node, edge, path}, a single-line `ref` of at most
-/// [sandboxBridgeMaxRefLength] characters, and a non-empty `text` of at most
-/// [sandboxBridgeMaxTextLength] characters. Control characters other than
-/// newline and tab are stripped from the text; the ref may hold none.
+/// object with `kind` in {node, edge, path, layout}, a single-line `ref` of
+/// at most [sandboxBridgeMaxRefLength] characters, and a non-empty `text` of
+/// at most [sandboxBridgeMaxTextFor] characters for its kind. Control
+/// characters other than newline and tab are stripped from the text; the
+/// ref may hold none.
 SandboxSelect? parseSandboxSelect(String raw) {
   if (raw.isEmpty || raw.length > sandboxBridgeMaxRawLength) return null;
   final Object? decoded;
@@ -102,7 +167,7 @@ SandboxSelect? parseSandboxSelect(String raw) {
   if (ref.isEmpty || _controlChars.hasMatch(ref)) return null;
 
   final textRaw = decoded['text'];
-  if (textRaw is! String || textRaw.length > sandboxBridgeMaxTextLength) {
+  if (textRaw is! String || textRaw.length > sandboxBridgeMaxTextFor(kind)) {
     return null;
   }
   final text = textRaw.replaceAll(_controlCharsExceptBreaks, '').trim();

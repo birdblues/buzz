@@ -38,13 +38,44 @@ void main() {
     });
 
     test('accepts every kind an app may point at', () {
-      for (final kind in ['node', 'edge', 'path']) {
+      for (final kind in ['node', 'edge', 'path', 'layout']) {
         expect(
           parseSandboxSelect(_payload(kind: kind)),
           isNotNull,
           reason: kind,
         );
       }
+    });
+
+    test('a layout carries fenced JSON up to its own, larger cap', () {
+      final fenced =
+          '[인과그래프] 배치 2개 노드 옮김\n```json\n'
+          '{"layout":{"a":[120,40],"b":[300,80]}}\n```';
+      final select = parseSandboxSelect(
+        _payload(kind: 'layout', ref: 'layout', text: fenced),
+      );
+      expect(select, isNotNull);
+      expect(select!.kind, SandboxSelectKind.layout);
+      expect(select.text, fenced, reason: 'newlines survive');
+
+      final long = 'x' * sandboxBridgeMaxLayoutTextLength;
+      expect(
+        parseSandboxSelect(_payload(kind: 'layout', text: long)),
+        isNotNull,
+      );
+      expect(
+        parseSandboxSelect(_payload(kind: 'layout', text: '${long}x')),
+        isNull,
+      );
+      // Other kinds keep the selection cap.
+      expect(
+        parseSandboxSelect(
+          _payload(kind: 'node', text: 'x' * (sandboxBridgeMaxTextLength + 1)),
+        ),
+        isNull,
+      );
+      expect(sandboxBridgeMaxTextFor(SandboxSelectKind.layout), 8192);
+      expect(sandboxBridgeMaxTextFor(SandboxSelectKind.node), 2048);
     });
 
     test('refuses anything that is not the shape', () {
@@ -127,6 +158,22 @@ void main() {
         sandboxBridgePrefillText(select: select('[a] b'), messageId: 'abc'),
         '[a #abc] b',
       );
+    });
+  });
+
+  group('SandboxBridgeTarget', () {
+    test('has value equality and copyWith', () {
+      const a = SandboxBridgeTarget(channelId: 'c', messageId: 'm');
+      const b = SandboxBridgeTarget(channelId: 'c', messageId: 'm');
+      expect(a, b);
+      expect(a.hashCode, b.hashCode);
+      expect(a.htmlAttachmentCount, 1);
+      final c = a.copyWith(threadHeadId: 'root', htmlAttachmentCount: 2);
+      expect(c, isNot(a));
+      expect(c.threadHeadId, 'root');
+      expect(c.htmlAttachmentCount, 2);
+      expect(c.channelId, 'c');
+      expect(c.draftKey, 'c:root');
     });
   });
 

@@ -1,6 +1,7 @@
 import 'package:buzz/features/channels/app_webview_page.dart';
 import 'package:buzz/features/forum/forum_models.dart';
 import 'package:buzz/features/forum/forum_provider.dart';
+import 'package:buzz/features/channels/wide_shell/wide_shell_provider.dart';
 import 'package:buzz/features/forum/forum_thread_page.dart';
 import 'package:buzz/features/profile/profile_provider.dart';
 import 'package:buzz/shared/layout/pane_navigator.dart';
@@ -99,23 +100,36 @@ void main() {
     expect(find.byType(AppWebViewPage), findsOneWidget);
   });
 
-  testWidgets('Run works when the thread lives in a wide-shell pane', (
-    tester,
-  ) async {
-    tester.view.devicePixelRatio = 1.0;
-    tester.view.physicalSize = const Size(1200, 900);
-    addTearDown(tester.view.reset);
+  testWidgets(
+    'Run inside a wide-shell pane asks the shell for an app pane beside '
+    'the thread instead of pushing',
+    (tester) async {
+      tester.view.devicePixelRatio = 1.0;
+      tester.view.physicalSize = const Size(1200, 900);
+      addTearDown(tester.view.reset);
 
-    await tester.pumpWidget(_threadPage(inPane: true));
-    await tester.pumpAndSettle();
+      await tester.pumpWidget(_threadPage(inPane: true));
+      await tester.pumpAndSettle();
 
-    final run = find.byKey(const ValueKey('app-card-run'));
-    expect(run, findsOneWidget);
-    await tester.tap(run);
-    await tester.pumpAndSettle();
+      final run = find.byKey(const ValueKey('app-card-run'));
+      expect(run, findsOneWidget);
+      await tester.tap(run);
+      await tester.pumpAndSettle();
 
-    expect(find.byType(AppWebViewPage), findsOneWidget);
-  });
+      // No push into the pane's nested navigator (that aborted on the
+      // compose bar's overlay portal); the shell mounts the app beside the
+      // forum thread from this request.
+      expect(find.byType(AppWebViewPage), findsNothing);
+      final container = ProviderScope.containerOf(
+        tester.element(find.byKey(const ValueKey('app-card-run'))),
+        listen: false,
+      );
+      final pane = container.read(wideShellProvider).appPane;
+      expect(pane, isNotNull);
+      expect(pane!.messageId, _appPost().eventId);
+      expect(pane.bridge.threadHeadId, _appPost().eventId);
+    },
+  );
 }
 
 class _FakeUserCacheNotifier extends UserCacheNotifier {

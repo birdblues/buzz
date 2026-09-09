@@ -241,7 +241,19 @@ class _MessageBubble extends HookConsumerWidget {
                                 appBridge: SandboxBridgeTarget(
                                   channelId: currentChannelId,
                                   messageId: message.id,
+                                  threadRootId: message.rootId ?? message.id,
                                 ),
+                                onOpenAppThread: allMessages == null
+                                    ? null
+                                    : () => openThreadDetail(
+                                        context,
+                                        threadHead: message,
+                                        allMessages: allMessages!,
+                                        channelId: currentChannelId,
+                                        currentPubkey: currentPubkey,
+                                        isMember: isMember,
+                                        isArchived: isArchived,
+                                      ),
                                 baseStyle: messageBodyTextStyle.copyWith(
                                   color: context.colors.onSurface,
                                 ),

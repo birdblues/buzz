@@ -8,6 +8,9 @@ class _ThreadMessage extends HookConsumerWidget {
   /// Head of the thread this row is shown in — the thread composer's key,
   /// where a sandboxed app's selection bridge lands.
   final String threadHeadId;
+
+  /// Root of the whole thread chain (the head itself for a root thread).
+  final String threadRootId;
   final String? currentPubkey;
   final bool showAuthor;
   final bool isHighlighted;
@@ -26,6 +29,7 @@ class _ThreadMessage extends HookConsumerWidget {
     required this.channelNames,
     required this.channelId,
     required this.threadHeadId,
+    required this.threadRootId,
     required this.currentPubkey,
     required this.showAuthor,
     this.isHighlighted = false,
@@ -260,6 +264,7 @@ class _ThreadMessage extends HookConsumerWidget {
                                     channelId: channelId,
                                     messageId: message.id,
                                     threadHeadId: threadHeadId,
+                                    threadRootId: threadRootId,
                                   ),
                                   baseStyle: messageBodyTextStyle.copyWith(
                                     color: context.colors.onSurface,

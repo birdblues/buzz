@@ -341,18 +341,9 @@ List<List<MainTimelineEntry>> groupMembershipTimelineEntries(
   return result;
 }
 
-/// Process a chronologically-sorted list of [NostrEvent]s into a list of
-/// [TimelineMessage]s, applying deletions, edits, reactions, and system event
-/// parsing.
-///
-/// Mirrors the desktop's `formatTimelineMessages` logic.
-/// [currentPubkey] is used to determine if the current user has reacted.
-List<TimelineMessage> formatTimeline(
-  List<NostrEvent> events, {
-  String? currentPubkey,
-}) {
-  // 1. Collect deletion targets. Both kind:5 (NIP-09) and kind:9005
-  // (Buzz-native) are deletion markers; mirror desktop's behavior.
+/// Ids deleted by any kind:5 (NIP-09) or kind:9005 (Buzz-native) marker in
+/// [events].
+Set<String> deletedEventIds(Iterable<NostrEvent> events) {
   final deletedIds = <String>{};
   for (final event in events) {
     if (event.kind != EventKind.deletion &&
@@ -365,6 +356,41 @@ List<TimelineMessage> formatTimeline(
       }
     }
   }
+  return deletedIds;
+}
+
+/// The edit (kind 40003) that currently stands for [targetId] among
+/// [events], by the same rule [formatTimeline] folds with: the newest by
+/// `createdAt` (strictly newer wins; on a tie the one seen first), skipping
+/// deleted edits and a deleted target. Null when nothing edits it. Callers
+/// that need the folded blob of an attachment (`sandbox_revision.dart`)
+/// read the winner's tags — an edit replaces the original's tags wholesale.
+NostrEvent? latestEditFor(Iterable<NostrEvent> events, String targetId) {
+  final deletedIds = deletedEventIds(events);
+  if (deletedIds.contains(targetId)) return null;
+  NostrEvent? winner;
+  for (final event in events) {
+    if (event.kind != EventKind.streamMessageEdit) continue;
+    if (deletedIds.contains(event.id)) continue;
+    if (_lastETag(event.tags) != targetId) continue;
+    if (winner == null || event.createdAt > winner.createdAt) winner = event;
+  }
+  return winner;
+}
+
+/// Process a chronologically-sorted list of [NostrEvent]s into a list of
+/// [TimelineMessage]s, applying deletions, edits, reactions, and system event
+/// parsing.
+///
+/// Mirrors the desktop's `formatTimelineMessages` logic.
+/// [currentPubkey] is used to determine if the current user has reacted.
+List<TimelineMessage> formatTimeline(
+  List<NostrEvent> events, {
+  String? currentPubkey,
+}) {
+  // 1. Collect deletion targets. Both kind:5 (NIP-09) and kind:9005
+  // (Buzz-native) are deletion markers; mirror desktop's behavior.
+  final deletedIds = deletedEventIds(events);
 
   // 2. Build edit map: targetId → latest edit content.
   final edits = <String, _Edit>{};

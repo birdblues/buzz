@@ -14,6 +14,7 @@ class _AuxDrawer extends ConsumerWidget {
     required this.width,
     required this.contentWidth,
     required this.focused,
+    required this.focusEnabled,
     required this.duration,
     required this.onMotionEnd,
   });
@@ -32,6 +33,10 @@ class _AuxDrawer extends ConsumerWidget {
 
   /// Whether the drawer currently covers the main pane.
   final bool focused;
+
+  /// Whether the focus toggle is offered; off while an app split owns the
+  /// layout.
+  final bool focusEnabled;
 
   /// Motion duration for width, chrome, and scrim changes.
   final Duration duration;
@@ -91,7 +96,7 @@ class _AuxDrawer extends ConsumerWidget {
         height: 48,
         child: IconButton(
           key: const ValueKey('wide-aux-focus'),
-          onPressed: notifier.toggleAuxFocus,
+          onPressed: focusEnabled ? notifier.toggleAuxFocus : null,
           color: context.colors.primary,
           tooltip: focused ? 'Show as side panel' : 'Focus thread',
           icon: Icon(

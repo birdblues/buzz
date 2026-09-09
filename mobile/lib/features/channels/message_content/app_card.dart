@@ -4,6 +4,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../shared/relay/media_image.dart';
 import '../../../shared/theme/theme.dart';
+import '../sandbox_bridge.dart';
 import '../sandbox_session.dart';
 
 /// Which themed preview to show for [brightness]: the matching one, falling
@@ -44,7 +45,9 @@ class AppCard extends ConsumerWidget {
 
   /// Id of the message carrying the attachment — the session key's second
   /// half, so the same blob shared twice shows two independent dots.
-  final String? messageId;
+  /// The message the card sits in, when a composer is in scope; keys the
+  /// running session so a new version of the app swaps into it.
+  final SandboxBridgeTarget? bridge;
   final int? size;
   final String? previewLight;
   final String? previewDark;
@@ -56,7 +59,7 @@ class AppCard extends ConsumerWidget {
     required this.sha256,
     required this.filename,
     required this.onRun,
-    this.messageId,
+    this.bridge,
     this.size,
     this.previewLight,
     this.previewDark,
@@ -71,7 +74,7 @@ class AppCard extends ConsumerWidget {
     final colors = context.colors;
     final running = ref.watch(
       sandboxSessionsProvider.select(
-        (s) => s.isRunning(sandboxSessionKey(sha256, messageId)),
+        (s) => s.isRunning(sandboxSessionKeyFor(sha256, bridge)),
       ),
     );
     final preview = pickThemedPreview(

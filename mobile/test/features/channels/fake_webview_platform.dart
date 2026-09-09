@@ -45,6 +45,20 @@ class FakePlatformWebViewController extends PlatformWebViewController {
   FakePlatformNavigationDelegate? delegate;
   JavaScriptMode? javaScriptMode;
 
+  /// Every `runJavaScript` in order (what the host pushed into the page).
+  final ranScripts = <String>[];
+
+  /// Every `runJavaScriptReturningResult` in order.
+  final evaluatedScripts = <String>[];
+
+  /// Plays the page's side of `runJavaScriptReturningResult`. The default
+  /// answers a readiness probe with "ready, no error" and anything else with
+  /// the JSON string `null` (an app with nothing to export).
+  Object Function(String javaScript) evaluate = defaultEvaluate;
+
+  static Object defaultEvaluate(String javaScript) =>
+      javaScript.contains('__APP_READY__') ? 'true|false' : 'null';
+
   @override
   Future<void> loadHtmlString(String html, {String? baseUrl}) async {
     // The platform asks the delegate first, as WebKit does for
@@ -76,6 +90,17 @@ class FakePlatformWebViewController extends PlatformWebViewController {
     PlatformNavigationDelegate handler,
   ) async {
     delegate = handler as FakePlatformNavigationDelegate;
+  }
+
+  @override
+  Future<void> runJavaScript(String javaScript) async {
+    ranScripts.add(javaScript);
+  }
+
+  @override
+  Future<Object> runJavaScriptReturningResult(String javaScript) async {
+    evaluatedScripts.add(javaScript);
+    return evaluate(javaScript);
   }
 
   /// The app's script finished loading.

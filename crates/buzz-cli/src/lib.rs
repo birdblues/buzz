@@ -449,14 +449,28 @@ pub enum MessagesCmd {
         #[arg(long)]
         reply_to: Option<String>,
     },
-    /// Edit a previously sent message
+    /// Edit a previously sent message. The edit replaces the message's body
+    /// and attachments wholesale: pass `--file` again to republish an app
+    /// (a new version of an HTML app card swaps in place on clients).
+    #[command(
+        after_help = "Examples:\n  buzz messages edit --event <hex> --content \"fixed the typo\"\n  buzz messages edit --event <hex> --content \"v2: added a node\" --file app.html --preview-light light.png --preview-dark dark.png"
+    )]
     Edit {
         /// Event ID of the message to edit (64-char hex)
         #[arg(long)]
         event: String,
-        /// New message content
+        /// New message content (the prose only — attachment links are appended for each --file)
         #[arg(long)]
         content: String,
+        /// Attach file(s) — uploads and includes as imeta tags, replacing the message's previous attachments. An HTML file becomes (or updates) a sandboxed app card.
+        #[arg(long = "file")]
+        files: Vec<String>,
+        /// Light-theme preview image (png/jpeg/webp) shown on the app card for each HTML --file
+        #[arg(long = "preview-light")]
+        preview_light: Option<String>,
+        /// Dark-theme preview image for each HTML --file (defaults to --preview-light when omitted)
+        #[arg(long = "preview-dark")]
+        preview_dark: Option<String>,
     },
     /// Delete a message by event ID
     Delete {

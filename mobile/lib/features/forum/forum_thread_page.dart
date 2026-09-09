@@ -409,6 +409,7 @@ class _OriginalPost extends ConsumerWidget {
             appBridge: SandboxBridgeTarget(
               channelId: post.channelId,
               messageId: post.eventId,
+              threadRootId: post.eventId,
             ),
             baseStyle: messageBodyTextStyle.copyWith(
               color: context.colors.onSurface,
@@ -535,6 +536,7 @@ class _ReplyRow extends ConsumerWidget {
               appBridge: SandboxBridgeTarget(
                 channelId: channelId,
                 messageId: reply.eventId,
+                threadRootId: rootEventId,
               ),
               baseStyle: messageBodyTextStyle.copyWith(
                 color: context.colors.onSurface,

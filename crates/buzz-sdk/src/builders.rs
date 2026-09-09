@@ -409,11 +409,34 @@ pub fn build_edit(
     target_event_id: nostr::EventId,
     new_content: &str,
 ) -> Result<EventBuilder, SdkError> {
+    build_edit_with_media(channel_id, target_event_id, new_content, &[], &[])
+}
+
+/// Build an edit event (kind 40003) that also carries attachments.
+///
+/// Clients fold an edit by replacing the original's tags wholesale, so an
+/// edit that republishes an attachment must restate everything the message
+/// should still carry: the new `imeta` tags (`media_tags`) and any tags the
+/// original had that the edit must not silently drop (`carried_tags` — the
+/// caller passes the target's `p` / `mention` tags so mention highlights
+/// survive). Each entry is a raw tag vector.
+pub fn build_edit_with_media(
+    channel_id: Uuid,
+    target_event_id: nostr::EventId,
+    new_content: &str,
+    media_tags: &[Vec<String>],
+    carried_tags: &[Vec<String>],
+) -> Result<EventBuilder, SdkError> {
     check_content(new_content, 64 * 1024)?;
-    let tags = vec![
+    let mut tags = vec![
         tag(&["h", &channel_id.to_string()])?,
         tag(&["e", &target_event_id.to_hex()])?,
     ];
+    for ct in carried_tags {
+        let parts: Vec<&str> = ct.iter().map(String::as_str).collect();
+        tags.push(Tag::parse(parts).map_err(|e| SdkError::InvalidTag(e.to_string()))?);
+    }
+    imeta_tags(media_tags, &mut tags)?;
     Ok(EventBuilder::new(Kind::Custom(40003), new_content).tags(tags))
 }
 
@@ -2828,6 +2851,34 @@ mod tests {
         let ev = sign(build_edit(cid, eid, "new content").unwrap());
         assert_eq!(ev.kind.as_u16(), 40003);
         assert!(has_tag(&ev, "e", &eid.to_hex()));
+    }
+
+    #[test]
+    fn edit_with_media_restates_imeta_and_carried_mentions() {
+        let cid = uuid();
+        let eid = event_id();
+        let imeta = vec![vec![
+            "imeta".to_string(),
+            "url https://relay.example/media/abc.html".to_string(),
+            "m text/html".to_string(),
+            "x 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
+            "size 42".to_string(),
+        ]];
+        let carried = vec![vec!["p".to_string(), "a".repeat(64)]];
+        let ev = sign(build_edit_with_media(cid, eid, "v2 body", &imeta, &carried).unwrap());
+        assert_eq!(ev.kind.as_u16(), 40003);
+        assert!(has_tag(&ev, "h", &cid.to_string()));
+        assert!(has_tag(&ev, "e", &eid.to_hex()));
+        assert!(has_tag(&ev, "p", &"a".repeat(64)));
+        let imeta_count = ev
+            .tags
+            .iter()
+            .filter(|t| t.kind().to_string() == "imeta")
+            .count();
+        assert_eq!(imeta_count, 1);
+        // The plain edit still emits only h + e.
+        let plain = sign(build_edit(cid, eid, "text only").unwrap());
+        assert_eq!(plain.tags.len(), 2);
     }
 
     #[test]

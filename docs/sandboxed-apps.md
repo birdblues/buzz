@@ -183,18 +183,19 @@ app (the causal-graph template's "ask the agent" button) and the phrase the
 app composed lands in the composer of the message the app was shared in —
 **prefilled, never sent.** The user edits and sends; the agent that built the
 app reads `[인과그래프 #1a2b3c4d] 간선 e4 …` and resolves the app from the
-tag. Nothing flows back into the app (an inbound reply channel is a separate
-decision; nothing in this section enables one).
+tag. Two things flow back into the app, both host-initiated and both
+narrow (*New versions* below): the readiness probe and the view state of
+the version being replaced. No agent text is pushed into an app.
 
 | Piece | Where |
 |---|---|
 | App side: `window.buzzBridge.select({ kind, ref, text })` in the agent skill's shared runtime calls the host-injected `window.__buzzHost.select` when present, else shows a copy box. Apps never touch `parent.postMessage` or `webkit.messageHandlers` themselves | `~/.hermes/skills/software-development/buzz-sandbox-webapp` (`scripts/build-app.mjs`, `references/bridge.md`) |
 | Native shim: a second document-start `WKUserScript` (main frame only) defines `window.__buzzHost` as a **getter** that resolves to `{ select }` only while `window.buzzHost` — the `webview_flutter` channel object — exists, so an app opened with no composer in scope sees no host. `select` copies three string fields explicitly and posts **one JSON string**; it returns nothing useful | `mobile/ios/Runner/SandboxWebViewHardening.swift` (`bridgeScript`), `mobile/macos/Runner/SandboxWebViewHardening.swift` (byte-identical) |
 | Channel: `addJavaScriptChannel('buzzHost')` **before** `loadHtmlString`, and only when the page was given a `SandboxBridgeTarget` (channel id, message id, thread head) by the message row that opened it. The target is host knowledge; the payload cannot name a channel, message or thread. Honoured only while a page shows the app — a backed-out app cannot reach the composer | `sandbox_session.dart` (`_onBridgeMessage`), `message_content.dart` (`appBridge`), wired from the channel bubble, the thread row and both forum rows |
-| Validation, re-applied whatever the app promised: JSON object ≤ 16 KiB; `kind` ∈ {node, edge, path}; `ref` single line ≤ 200 chars; `text` ≤ 2048 chars, control characters stripped, non-empty; one message per 500 ms, extras dropped; generation-fenced so a stale page cannot write | `mobile/lib/features/channels/sandbox_bridge.dart` (`parseSandboxSelect`, `SandboxBridgeRateLimiter`) |
+| Validation, re-applied whatever the app promised: JSON object ≤ 16 KiB; `kind` ∈ {node, edge, path, layout}; `ref` single line ≤ 200 chars; `text` ≤ 2048 chars (`layout`: ≤ 8192, never truncated — it carries the moved nodes as fenced JSON for the agent to pin), control characters stripped, non-empty; one message per 500 ms, extras dropped; generation-fenced so a stale page cannot write | `mobile/lib/features/channels/sandbox_bridge.dart` (`parseSandboxSelect`, `SandboxBridgeRateLimiter`) |
 | App tag: the host stamps the first 8 characters of the app message's event id into the text's leading `[…]` (`[인과그래프] …` → `[인과그래프 #1a2b3c4d] …`), or prefixes `[앱 #…]` when there is none | `sandbox_bridge.dart` (`sandboxBridgePrefillText`) |
-| Delivery: the text is appended to that composer's persisted draft (`composeDraftsProvider`, so a thread composer that is not open yet picks it up when it mounts) and published through `composerPrefillProvider`; a mounted `ComposeBar` with the matching draft key shows the merged draft, expands and takes focus. The sandbox page pops so the reader lands on the composer; the app stays alive behind it (*Sessions*), so returning to the card shows the selection still highlighted | `sandbox_bridge.dart` (`ComposerPrefillNotifier`), `compose_bar/draft_lifecycle.dart` (`_listenForComposerPrefill`) |
-| Draft key = the message's composer: `<channelId>` for a channel bubble or a forum post/reply (forum composers are keyed by channel), `<channelId>:<threadHeadId>` for a row inside a thread | `SandboxBridgeTarget.draftKey` |
+| Delivery: the text is appended to that composer's persisted draft (`composeDraftsProvider`, so a thread composer that is not open yet picks it up when it mounts) and published through `composerPrefillProvider`; a mounted `ComposeBar` with the matching draft key shows the merged draft, expands and takes focus. On a compact layout the sandbox page pops so the reader lands on the composer; the app stays alive behind it (*Sessions*), so returning to the card shows the selection still highlighted. On a wide layout the composer is already beside the app (*Beside the thread*) and nothing pops | `sandbox_bridge.dart` (`ComposerPrefillNotifier`), `compose_bar/draft_lifecycle.dart` (`_listenForComposerPrefill`) |
+| Draft key = the message's composer: `<channelId>` for a channel bubble or a forum post/reply (forum composers are keyed by channel), `<channelId>:<threadHeadId>` for a row inside a thread — and `<channelId>:<threadRootId>` for a channel bubble opened beside its thread on a wide window, so the phrase lands in the thread composer the reader can see, not the covered channel composer | `SandboxBridgeTarget.draftKey`, `sandbox_open.dart` |
 | Not a bridge: search hits, profile sheets and previews render `MessageContent` without `appBridge`, so Run from there registers no channel and the app falls back to its copy box | `message_content.dart` |
 
 ### Intel-Mac session: verify the bridge (iPad and the macOS client)
@@ -226,6 +227,58 @@ decision; nothing in this section enables one).
    the sample app so `buzzBridge.select` is called ten times in a loop with a
    5 KB `text` and `kind: 'window'` — the composer must receive at most one
    line per 500 ms and nothing for the bad kind or the oversized text.
+
+## Beside the thread — the wide layout's app split (2026-09-10, Flutter clients only)
+
+On an iPad or the macOS client (`LayoutMode.wide`) Run no longer pushes a
+full-screen page that shoves the sidebar, the channel and the thread aside.
+The app opens **beside the thread of the message it was shared in**: the
+thread keeps the left 40 % of the content area and the app takes the right
+60 %, sliding in from the right over the sidebar (folded for the duration,
+the preference untouched) and the channel. The reader instructs the agent
+from the thread composer and watches the app change in place (*New
+versions*). Phones keep the full-screen page.
+
+| Piece | Where |
+|---|---|
+| Opening: `openSandboxApp` picks the path. Compact → root-navigator push, as before (a push inside a pane's nested navigator aborts on the compose bar's overlay portal — commit 27eefd003). Wide → the message's thread is opened first when the auxiliary pane does not show it (`onOpenAppThread` from the channel bubble), then the app pane is mounted on the next frame. Forum threads count as the thread being shown | `mobile/lib/features/channels/sandbox_open.dart`, `message_content.dart` (`onOpenAppThread`) |
+| Layout: `WideShellState.appPane` (`WideAppPane`). The auxiliary drawer keeps its stack slot and only its `Positioned` parent data changes (`right: 0` → `left: 0`), so the thread's navigator, composer draft and scroll survive — no `GlobalKey`, no remount. The app column is appended after it as a fixed-width `SlideTransition`; a hidden app stays mounted while it slides out (`retainedApp`). Widths are measured on the stack's own width, so the two columns partition whatever the folding sidebar has released and never overlap | `wide_home_shell.dart`, `wide_home_shell/app_pane.dart`, `layout_mode.dart` (`kWideAppSplitThreadFraction`, `wideAppSplitThreadWidthFor`) |
+| The covered channel takes no pointer, semantics or focus (`IgnorePointer` / `ExcludeSemantics` / `ExcludeFocus`, always present, flags toggled); focus moves to the shell's own node when the split opens so Escape still reaches the shell. Focus mode is unavailable while split | `wide_home_shell.dart`, `aux_pane.dart` (`focusEnabled`) |
+| Bound to the thread: closing the thread hides the app; selecting another channel, Inbox or Search hides it; Escape / system back hide the app **first and alone** (the thread stays); the pane's Hide keeps the session running (green dot), its Close ends it. One `WebViewWidget` per session: the pane and the full-screen page never show the same app at once | `wide_shell_provider.dart` (`openAppPane`, `hideAppPane`, `closeAux`) |
+| Geometry: 1376 (iPad Pro 13") → 550 / 826; 1194 (iPad 11") → 478 / 716; 1280 (macOS default) → 512 / 768; 1000 (macOS minimum) → 400 / 600. Below 700 the app draws its own phone layout | `wide_home_shell_test.dart` (`_appSplitTests`) |
+
+## New versions — an edit swaps the app in place (2026-09-10, Flutter clients only)
+
+An agent republishes an app by **editing the message that carries it**
+(`buzz messages edit --event <id> --content … --file app.html --preview-light …
+--preview-dark …`, kind 40003 with a fresh `text/html` imeta). The relay's
+imeta validation is kind-agnostic and its edit gate is authorship (the
+author must still be a member, or the channel open); the timeline folds the
+edit by replacing the original's tags wholesale, so the card's blob changes
+and the message keeps its id. Nothing new on the relay. Edits are
+deliberately absent from push notifications, search results (which render
+original tags — a card opened from search may be an old version) and forum
+queries (forum apps are republished as new replies instead).
+
+| Piece | Where |
+|---|---|
+| CLI: `messages edit` gained `--file` / `--preview-*`; it restates the target's `p` / `mention` tags (an edit's tags replace the original's, so mention highlights would otherwise vanish) and appends the new attachment line to the body given with `--content`, which stays mandatory | `crates/buzz-cli` (`cmd_edit_message`, `upload_attachments`), `crates/buzz-sdk` (`build_edit_with_media`) |
+| Following: a session keyed to a message (`msg:<id>` — only when the message carries exactly one HTML attachment; otherwise `sha:<blob>` and no swap) subscribes to `appRevisionProvider`: the channel's live events merged with a one-shot fetch of the message's edits and deletions (deep links, the legacy history fallback and thread history query content kinds only). The winner is chosen by the timeline's own rule (`latestEditFor`: strictly newer `createdAt`, first seen on a tie, deletions honoured); a winner without an app means no revision — the session never climbs back to an older blob. Thread history now asks for `include_aux` so a reply carrying an app shows its edited blob on a cold open. Subscribed through the container, not the notifier's `ref`, because Riverpod pauses a provider's own listeners while nothing watches it — exactly the backed-out app that must still follow | `sandbox_revision.dart`, `timeline_message.dart` (`latestEditFor`, `deletedEventIds`), `thread_replies_provider.dart`, `sandbox_session.dart` (`_followRevisions`) |
+| Swap, in this order: fetch the new HTML (a relay failure leaves the old document untouched and shows a strip); read the running app's view state through one host-owned script that stringifies and caps inside the page (the page can redefine its bridge object, so the host caps and validates again — `sandbox_app_state.dart`, 64 KiB, closed schema); navigate the **same** controller with a one-shot reload token (the navigation lock is back on after that single `about:blank` load; the `buzzHost` channel lives on the controller and is never registered twice); wait for page-finished, then poll `__APP_READY__ && !__APP_ERROR__` (≤ 10 s); hand the state over as base64 of canonical JSON (`jsonEncode` does not escape U+2028/2029, which end a JS string literal) — the runtime keeps it until the template registers its import handler; only then mark the session ready. A version that reports a boot error or never becomes ready is rolled back by fetching the previous blob again and loading it with the same state. Revisions arriving mid-swap coalesce to the newest. Runs whether or not a page is attached | `sandbox_session.dart` (`_swap`, `_loadInto`, `_exportState`, `_decide`), `sandbox_app_state.dart` |
+| Shown: the page subtitle and the app pane header say "Updated HH:MM" from the standing edit's `created_at` (data, not a session counter — an app opened after it was edited must say so too); a spinner while updating; a strip with Try again when a version could not be shown | `app_sandbox_body.dart`, `app_webview_page.dart`, `app_pane.dart` |
+| App side: `window.buzzBridge.onExport(fn)` / `onImport(fn)` / `_importB64`, `sanitizeState`, and a `layout` selection kind whose text is fenced JSON of the nodes the reader moved, for the agent to pin into `data.json`; the build refuses a graph template without both hooks. The skill's `scripts/publish.mjs` keeps a receipt (`published.json`) so the agent edits the right message | `~/.hermes/skills/software-development/buzz-sandbox-webapp` (`scripts/build-app.mjs`, `scripts/publish.mjs`, `references/bridge.md`) |
+| Known: a person editing an app-bearing message from the mobile edit sheet drops its imeta (the sheet sends emoji tags only), so the card disappears — unreachable for agent-owned messages (the relay's edit gate is authorship), documented rather than fixed here | `message_actions.dart` |
+
+### Intel-Mac session: verify the split and in-place updates (iPad and the macOS client)
+
+1. **Split.** In a thread with an app card (built with skill 1.11.0), tap Run on the macOS client at its default window and on an iPad: the sidebar folds, the thread docks left at 40 %, the app slides in on the right at 60 %; the thread composer still works; the aux focus button is disabled; Escape (Mac) hides the app only, the thread stays and the sidebar comes back; Hide keeps the card's dot lit; Close ends it. Repeat from a channel bubble whose thread is not open: the thread opens first, then the app. Rotate the iPad both ways with the split open.
+2. **Selection.** "에이전트에게 묻기" from the split lands in the thread composer beside the app with the `#id8` tag; the app does not close.
+3. **In place.** Send `@<agent> 노드 하나 추가해` from that composer. When the agent's edit lands: the card's preview changes, the app updates without closing, camera, view, time and selection are kept, the header reads "Updated HH:MM", the thread has the agent's one-line log, and **no new card appeared**. Note the round-trip time.
+4. **Moved nodes.** Drag two nodes (one inside a group, then collapse the group), tap 배치 반영: the fenced JSON lands in the composer; send it; the next version keeps both where they were and the 배치 반영 button is gone (the positions became build coordinates).
+5. **Cold start.** After an edit, open the card on a device that had never run the app (from the channel, from a deep link, and for an app that was posted as a reply): the newest version comes up.
+6. **Phone.** Full screen as before; a selection pops to the composer; reopening after the agent's edit shows the new version with the state restored.
+7. **Platform view.** With the split open: pinch/scroll inside the app, fold and unfold the sidebar preference, open the keyboard on the thread composer, click inside the app then press Escape (Mac) — the app must not float above the thread's header or composer, and Escape must still reach the shell.
+8. Re-run the *Sessions* checklist: keys changed (`msg:` / `sha:`).
 
 ## Sessions — Back keeps the app, Close ends it (2026-09-07, Flutter clients only)
 

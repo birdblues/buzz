@@ -4,6 +4,7 @@ import '../../../shared/community/community_provider.dart';
 import '../../../shared/relay/relay_provider.dart';
 import '../channel.dart';
 import '../channels_provider.dart';
+import '../sandbox_bridge.dart';
 import '../timeline_message.dart';
 
 /// What the wide shell's main pane shows.
@@ -79,6 +80,42 @@ final class WideAuxForumThread extends WideAuxContent {
   String get key => 'forum-$postEventId';
 }
 
+/// A sandboxed app running beside its thread ("app split",
+/// `docs/sandboxed-apps.md`): the thread takes the left 40% of the content
+/// area and the app the right 60%, over the sidebar and the channel.
+final class WideAppPane {
+  /// Creates an app pane request.
+  const WideAppPane({
+    required this.channelId,
+    required this.messageId,
+    required this.sha256,
+    required this.filename,
+    required this.bridge,
+    this.sharedBy,
+  });
+
+  /// Channel of the message carrying the app.
+  final String channelId;
+
+  /// The message carrying the app; its session follows the message's edits.
+  final String messageId;
+
+  /// Blob the card showed when the app was opened.
+  final String sha256;
+
+  /// Attachment name, for the pane header.
+  final String filename;
+
+  /// Author label, for the pane header.
+  final String? sharedBy;
+
+  /// Where the app's selections go: the thread composer beside it.
+  final SandboxBridgeTarget bridge;
+
+  /// Stable identity; a new key remounts the pane.
+  String get key => 'app-$messageId';
+}
+
 /// Selection state of the wide shell.
 class WideShellState {
   /// Creates a shell state.
@@ -88,6 +125,7 @@ class WideShellState {
     this.initialMessageId,
     this.initialThreadRootId,
     this.aux,
+    this.appPane,
     this.mainSession = 0,
     this.auxSession = 0,
     this.auxFocused = false,
@@ -109,6 +147,10 @@ class WideShellState {
   /// Content of the auxiliary pane, or null when it is closed.
   final WideAuxContent? aux;
 
+  /// The app beside the auxiliary pane, or null when none is shown. Bound
+  /// to the pane: closing the thread hides the app too.
+  final WideAppPane? appPane;
+
   /// Bumped whenever the main pane must be remounted with fresh content.
   final int mainSession;
 
@@ -116,8 +158,12 @@ class WideShellState {
   final int auxSession;
 
   /// Whether the auxiliary pane takes the whole content area, hiding the main
-  /// pane, instead of sharing the row with it. Sticky across threads.
+  /// pane, instead of sharing the row with it. Sticky across threads; never
+  /// true while an app pane is shown.
   final bool auxFocused;
+
+  /// Whether the content area is split between the thread and an app.
+  bool get appSplit => appPane != null;
 
   /// Id of [selectedChannel].
   String? get selectedChannelId => selectedChannel?.id;
@@ -136,6 +182,7 @@ class WideShellState {
     String? Function()? initialMessageId,
     String? Function()? initialThreadRootId,
     WideAuxContent? Function()? aux,
+    WideAppPane? Function()? appPane,
     int? mainSession,
     int? auxSession,
     bool? auxFocused,
@@ -152,6 +199,7 @@ class WideShellState {
           ? this.initialThreadRootId
           : initialThreadRootId(),
       aux: aux == null ? this.aux : aux(),
+      appPane: appPane == null ? this.appPane : appPane(),
       mainSession: mainSession ?? this.mainSession,
       auxSession: auxSession ?? this.auxSession,
       auxFocused: auxFocused ?? this.auxFocused,
@@ -230,6 +278,7 @@ class WideShellNotifier extends Notifier<WideShellState> {
       initialMessageId: () => initialMessageId,
       initialThreadRootId: () => initialThreadRootId,
       aux: () => null,
+      appPane: () => null,
       mainSession: state.mainSession + 1,
     );
   }
@@ -242,7 +291,11 @@ class WideShellNotifier extends Notifier<WideShellState> {
 
   void _showSurface(WideSurface surface) {
     if (state.surface == surface) return;
-    state = state.copyWith(surface: surface, aux: () => null);
+    state = state.copyWith(
+      surface: surface,
+      aux: () => null,
+      appPane: () => null,
+    );
   }
 
   /// Opens [content] in the auxiliary pane, selecting its channel first when
@@ -267,15 +320,29 @@ class WideShellNotifier extends Notifier<WideShellState> {
     );
   }
 
-  /// Toggles whether the auxiliary pane fills the content area.
+  /// Toggles whether the auxiliary pane fills the content area. A no-op
+  /// while an app pane is shown: the split owns the layout then.
   void toggleAuxFocus() {
+    if (state.appSplit) return;
     state = state.copyWith(auxFocused: !state.auxFocused);
   }
 
-  /// Closes the auxiliary pane.
+  /// Closes the auxiliary pane, and the app beside it.
   void closeAux() {
-    if (state.aux == null) return;
-    state = state.copyWith(aux: () => null);
+    if (state.aux == null && state.appPane == null) return;
+    state = state.copyWith(aux: () => null, appPane: () => null);
+  }
+
+  /// Shows [pane] beside the auxiliary pane, replacing any app already
+  /// there. The app's session keeps running when the pane is hidden.
+  void openAppPane(WideAppPane pane) {
+    state = state.copyWith(appPane: () => pane, auxFocused: false);
+  }
+
+  /// Hides the app pane; the thread stays and the layout returns to normal.
+  void hideAppPane() {
+    if (state.appPane == null) return;
+    state = state.copyWith(appPane: () => null);
   }
 
   /// Clears the channel selection, showing the empty main pane.
@@ -286,6 +353,7 @@ class WideShellNotifier extends Notifier<WideShellState> {
       initialMessageId: () => null,
       initialThreadRootId: () => null,
       aux: () => null,
+      appPane: () => null,
     );
   }
 

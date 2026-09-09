@@ -6,14 +6,19 @@ class _SidebarColumn extends ConsumerWidget {
   const _SidebarColumn({
     required this.settingsPageBuilder,
     required this.hasUnreadInbox,
+    required this.collapsed,
   });
 
   final WidgetBuilder settingsPageBuilder;
   final bool hasUnreadInbox;
 
+  /// Whether the column is folded away: the persisted preference, or the
+  /// shell's override while an app split needs the width. Computed once by
+  /// the shell so this column and its width arithmetic never disagree.
+  final bool collapsed;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final collapsed = ref.watch(wideSidebarCollapsedProvider);
     final surface = ref.watch(wideShellProvider.select((s) => s.surface));
     final shell = ref.read(wideShellProvider.notifier);
     final reducedMotion = MediaQuery.disableAnimationsOf(context);

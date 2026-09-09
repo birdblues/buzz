@@ -27,7 +27,6 @@ import '../../shared/custom_emoji/custom_emoji_provider.dart';
 import '../../shared/custom_emoji/custom_emoji_render.dart';
 import '../../shared/emoji/emoji_data_provider.dart';
 import '../../shared/emoji/emoji_only.dart';
-import 'app_webview_page.dart';
 import 'channels_provider.dart';
 import 'media_viewer_page.dart';
 import 'message_gesture_region.dart';
@@ -37,6 +36,7 @@ import 'message_content/link_preview_card.dart';
 import 'message_content/link_preview_snapshot.dart';
 import 'message_media.dart';
 import 'sandbox_bridge.dart';
+import 'sandbox_open.dart';
 import 'voice_note_attachment.dart';
 
 part 'message_content/media_carousel.dart';
@@ -135,6 +135,11 @@ class MessageContent extends HookConsumerWidget {
   /// falls back to a copy-and-paste box.
   final SandboxBridgeTarget? appBridge;
 
+  /// Opens this message's thread (`sandbox_open.dart`): on a wide window an
+  /// app runs beside that thread, so the host opens it first when it is not
+  /// already showing. Null when the thread is already on screen.
+  final VoidCallback? onOpenAppThread;
+
   /// Called when a #channel link is tapped.
   final void Function(String channelId)? onChannelTap;
 
@@ -180,6 +185,7 @@ class MessageContent extends HookConsumerWidget {
     this.authorLabel,
     this.allowAppCards = true,
     this.appBridge,
+    this.onOpenAppThread,
     this.onChannelTap,
     this.onMentionTap,
     this.onMediaReply,
@@ -521,6 +527,10 @@ class MessageContent extends HookConsumerWidget {
   ) {
     final sha256 = imeta.sha256!;
     final filename = _appFilename(imeta, url, label);
+    final htmlCount = parseImetaTags(
+      tags,
+    ).values.where((entry) => entry.isApp).length;
+    final bridge = appBridge?.copyWith(htmlAttachmentCount: htmlCount);
     return _MessageMediaShell(
       child: AppCard(
         sha256: sha256,
@@ -529,18 +539,15 @@ class MessageContent extends HookConsumerWidget {
         previewLight: imeta.previewLight,
         previewDark: imeta.previewDark,
         sharedBy: authorLabel,
-        messageId: appBridge?.messageId,
-        // The root navigator: the app takes the whole screen on every
-        // layout, and a push inside a wide-shell pane's nested navigator
-        // aborts (its compose bar's overlay portal is re-activated during the
-        // pane's layout pass), leaving Run silently dead in forum threads.
-        onRun: () => Navigator.of(context, rootNavigator: true).push(
-          AppWebViewPage.route(
-            sha256: sha256,
-            filename: filename,
-            sharedBy: authorLabel,
-            bridge: appBridge,
-          ),
+        bridge: bridge,
+        onRun: () => openSandboxApp(
+          context,
+          ref,
+          sha256: sha256,
+          filename: filename,
+          sharedBy: authorLabel,
+          bridge: bridge,
+          openThread: onOpenAppThread,
         ),
       ),
     );

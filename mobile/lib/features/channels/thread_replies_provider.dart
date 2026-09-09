@@ -69,6 +69,10 @@ NostrFilter _threadRepliesFilter(
     limit: 200,
     extensions: {
       'depth_limit': 64,
+      // Edits and deletions of the thread's rows ride along as aux events,
+      // so a reply carrying an app attachment shows its edited blob on a
+      // cold open (the live subscription only covers what arrives later).
+      'include_aux': true,
       if (cursor != null) 'thread_cursor': cursor.createdAt,
       if (cursor != null) 'thread_cursor_id': cursor.eventId,
     },

@@ -642,9 +642,10 @@ fn attachment_markdown(desc: &crate::client::BlobDescriptor) -> String {
 async fn upload_previews(
     client: &BuzzClient,
     descriptors: &[crate::client::BlobDescriptor],
-    p: &SendMessageParams,
+    preview_light: Option<&str>,
+    preview_dark: Option<&str>,
 ) -> Result<Option<(String, String)>, CliError> {
-    if p.preview_light.is_none() && p.preview_dark.is_none() {
+    if preview_light.is_none() && preview_dark.is_none() {
         return Ok(None);
     }
     if !descriptors.iter().any(|d| d.mime_type == "text/html") {
@@ -668,17 +669,56 @@ async fn upload_previews(
             Ok::<String, CliError>(desc.url)
         }
     };
-    let light = match &p.preview_light {
+    let light = match preview_light {
         Some(path) => Some(upload_preview(path).await?),
         None => None,
     };
-    let dark = match &p.preview_dark {
+    let dark = match preview_dark {
         Some(path) => Some(upload_preview(path).await?),
         None => None,
     };
     let light_url = light.clone().or_else(|| dark.clone());
     let dark_url = dark.or(light);
     Ok(light_url.zip(dark_url))
+}
+
+/// Upload every `--file`, stamp the theme previews on each HTML attachment and
+/// return the imeta tags plus the markdown lines to append to the body. Shared
+/// by `send` and `edit` so an edited app carries exactly what a sent one does.
+async fn upload_attachments(
+    client: &BuzzClient,
+    files: &[String],
+    preview_light: Option<&str>,
+    preview_dark: Option<&str>,
+) -> Result<(Vec<Vec<String>>, String), CliError> {
+    let mut media_tags: Vec<Vec<String>> = Vec::new();
+    let mut media_content = String::new();
+    let mut descriptors = Vec::with_capacity(files.len());
+    for file_path in files {
+        let desc = client
+            .upload_file(file_path)
+            .await
+            .map_err(|e| CliError::Other(format!("upload failed for {file_path}: {e}")))?;
+        descriptors.push(desc);
+    }
+
+    // Theme-aware previews attach to every HTML app in this message. Upload
+    // them once, then stamp their URLs on each HTML imeta as our fork-local
+    // `preview-light` / `preview-dark` keys. One provided preview serves both.
+    let previews = upload_previews(client, &descriptors, preview_light, preview_dark).await?;
+
+    for desc in &descriptors {
+        let mut tag = crate::client::build_imeta_tag(desc);
+        if desc.mime_type == "text/html" {
+            if let Some((light, dark)) = &previews {
+                tag.push(format!("preview-light {light}"));
+                tag.push(format!("preview-dark {dark}"));
+            }
+        }
+        media_tags.push(tag);
+        media_content.push_str(&attachment_markdown(desc));
+    }
+    Ok((media_tags, media_content))
 }
 
 pub async fn cmd_send_message(
@@ -721,33 +761,13 @@ pub async fn cmd_send_message(
     }
 
     // Upload files and build imeta tags
-    let mut media_tags: Vec<Vec<String>> = Vec::new();
-    let mut media_content = String::new();
-    let mut descriptors = Vec::with_capacity(p.files.len());
-    for file_path in &p.files {
-        let desc = client
-            .upload_file(file_path)
-            .await
-            .map_err(|e| CliError::Other(format!("upload failed for {file_path}: {e}")))?;
-        descriptors.push(desc);
-    }
-
-    // Theme-aware previews attach to every HTML app in this message. Upload
-    // them once, then stamp their URLs on each HTML imeta as our fork-local
-    // `preview-light` / `preview-dark` keys. One provided preview serves both.
-    let previews = upload_previews(client, &descriptors, &p).await?;
-
-    for desc in &descriptors {
-        let mut tag = crate::client::build_imeta_tag(desc);
-        if desc.mime_type == "text/html" {
-            if let Some((light, dark)) = &previews {
-                tag.push(format!("preview-light {light}"));
-                tag.push(format!("preview-dark {dark}"));
-            }
-        }
-        media_tags.push(tag);
-        media_content.push_str(&attachment_markdown(desc));
-    }
+    let (media_tags, media_content) = upload_attachments(
+        client,
+        &p.files,
+        p.preview_light.as_deref(),
+        p.preview_dark.as_deref(),
+    )
+    .await?;
     let final_content = if media_content.is_empty() {
         p.content.clone()
     } else {
@@ -960,21 +980,80 @@ pub async fn cmd_delete_message(
     Ok(())
 }
 
-/// Edit a message you previously sent.
+pub struct EditMessageParams {
+    pub event_id: String,
+    pub content: String,
+    pub files: Vec<String>,
+    pub preview_light: Option<String>,
+    pub preview_dark: Option<String>,
+}
+
+/// Tags an edit must restate because clients replace the original's tags
+/// wholesale when they fold the edit: mentions (`p`, `mention`). Everything
+/// else (`h`, `e`, thread markers, `imeta`) is rebuilt by the edit itself.
+pub(crate) fn carried_edit_tags(target: &serde_json::Value) -> Vec<Vec<String>> {
+    target
+        .get("tags")
+        .and_then(|t| t.as_array())
+        .map(|tags| {
+            tags.iter()
+                .filter_map(|t| t.as_array())
+                .filter(|t| {
+                    matches!(
+                        t.first().and_then(|v| v.as_str()),
+                        Some("p") | Some("mention")
+                    )
+                })
+                .map(|t| {
+                    t.iter()
+                        .map(|v| v.as_str().unwrap_or("").to_string())
+                        .collect::<Vec<_>>()
+                })
+                .filter(|t| t.len() >= 2 && t.iter().all(|s| !s.is_empty()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Edit a message you previously sent. With `--file` the edit republishes the
+/// attachments too: the message keeps its event id, so a client that shows an
+/// HTML app card swaps the app in place instead of growing a new card.
 pub async fn cmd_edit_message(
     client: &BuzzClient,
-    event_id: &str,
-    content: &str,
+    mut p: EditMessageParams,
 ) -> Result<(), CliError> {
-    validate_hex64(event_id)?;
-    validate_content_size(content)?;
+    validate_hex64(&p.event_id)?;
+    p.content = read_or_stdin(&p.content)?;
+    validate_content_size(&p.content)?;
 
-    // Resolve channel_id from the event's h-tag
-    let channel_uuid = resolve_channel_id(client, event_id).await?;
-    let target_eid = parse_event_id(event_id)?;
+    // The target event gives us the channel (h-tag) and the tags an edit must
+    // carry forward.
+    let target = fetch_event(client, &p.event_id).await?;
+    let channel_uuid = channel_id_from_event(&p.event_id, &target)?;
+    let target_eid = parse_event_id(&p.event_id)?;
+    let carried = carried_edit_tags(&target);
 
-    let builder = buzz_sdk::build_edit(channel_uuid, target_eid, content)
-        .map_err(|e| CliError::Other(format!("build_edit failed: {e}")))?;
+    let (media_tags, media_content) = upload_attachments(
+        client,
+        &p.files,
+        p.preview_light.as_deref(),
+        p.preview_dark.as_deref(),
+    )
+    .await?;
+    let final_content = if media_content.is_empty() {
+        p.content.clone()
+    } else {
+        format!("{}{media_content}", p.content)
+    };
+
+    let builder = buzz_sdk::build_edit_with_media(
+        channel_uuid,
+        target_eid,
+        &final_content,
+        &media_tags,
+        &carried,
+    )
+    .map_err(|e| CliError::Other(format!("build_edit failed: {e}")))?;
 
     let event = client.sign_event(builder)?;
 
@@ -1081,7 +1160,25 @@ pub async fn dispatch(
             )
             .await
         }
-        MessagesCmd::Edit { event, content } => cmd_edit_message(client, &event, &content).await,
+        MessagesCmd::Edit {
+            event,
+            content,
+            files,
+            preview_light,
+            preview_dark,
+        } => {
+            cmd_edit_message(
+                client,
+                EditMessageParams {
+                    event_id: event,
+                    content,
+                    files,
+                    preview_light,
+                    preview_dark,
+                },
+            )
+            .await
+        }
         MessagesCmd::Delete {
             event,
             action_id,
@@ -1178,6 +1275,31 @@ mod tests {
         resolve_names_to_pubkeys, resolve_thread_target, thread_ref_from_event,
         thread_ref_from_parent_tags, BuzzClient, CliError, Uuid,
     };
+
+    #[test]
+    fn carried_edit_tags_keeps_only_mentions() {
+        let target = serde_json::json!({
+            "id": "abc",
+            "tags": [
+                ["h", "chan"],
+                ["e", "root", "", "root"],
+                ["p", "aa"],
+                ["mention", "bb"],
+                ["imeta", "url https://x/media/1.html", "m text/html"],
+                ["p"],
+                ["broadcast", "1"]
+            ]
+        });
+        let carried = super::carried_edit_tags(&target);
+        assert_eq!(
+            carried,
+            vec![
+                vec!["p".to_string(), "aa".to_string()],
+                vec!["mention".to_string(), "bb".to_string()],
+            ]
+        );
+        assert!(super::carried_edit_tags(&serde_json::json!({"id": "x"})).is_empty());
+    }
     use buzz_sdk::mentions::{
         extract_at_mentions_with_known, extract_at_names, match_names_to_profiles, MentionProfile,
     };

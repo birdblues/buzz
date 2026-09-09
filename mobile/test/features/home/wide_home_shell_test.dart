@@ -46,6 +46,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:hooks_riverpod/misc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:buzz/features/channels/sandbox_bridge.dart';
+import 'package:buzz/features/channels/sandbox_revision.dart';
+import 'package:buzz/features/channels/sandbox_session.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart' as http_testing;
+
+import '../channels/fake_webview_platform.dart';
 
 const _generalId = '11111111-2222-4333-8444-555555555555';
 const _randomId = '22222222-2222-4333-8444-555555555555';
@@ -287,8 +294,274 @@ void _useIpadWindow(WidgetTester tester) {
   addTearDown(tester.view.reset);
 }
 
+const _appSha =
+    '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+
+class _FakeAppAuth extends MediaGetAuthService {
+  _FakeAppAuth() : super(baseUrl: 'https://relay.example', nsec: null);
+
+  @override
+  Map<String, String>? signAppContentAuth(String sha256) => const {
+    'Authorization': 'Nostr test',
+  };
+}
+
+/// Enough of the sandbox for an app to load in the shell: a door, a token,
+/// hardening, one HTML blob, and a message that was never edited.
+List<Override> _sandboxOverrides() => [
+  appContentUrlProvider.overrideWithValue('http://relay.example.com:3001'),
+  mediaGetAuthServiceProvider.overrideWithValue(_FakeAppAuth()),
+  sandboxHardeningProbeProvider.overrideWithValue(() async => true),
+  mediaHttpClientProvider.overrideWithValue(
+    http_testing.MockClient(
+      (_) async => http.Response(
+        '<!doctype html><html><body>app</body></html>',
+        200,
+        headers: const {'content-type': 'text/html'},
+      ),
+    ),
+  ),
+  appRevisionProvider.overrideWith((ref, target) => null),
+];
+
+WideAppPane _appPane() => const WideAppPane(
+  channelId: _generalId,
+  messageId: 'thread-head',
+  sha256: _appSha,
+  filename: 'app.html',
+  sharedBy: 'Bot',
+  bridge: SandboxBridgeTarget(
+    channelId: _generalId,
+    messageId: 'thread-head',
+    threadHeadId: 'thread-head',
+    threadRootId: 'thread-head',
+  ),
+);
+
+/// Lets the session's real-async load (probe, mock HTTP) create the fake
+/// WebView, then reports the page finished so the loading spinner stops and
+/// the shell can settle.
+Future<void> _finishAppLoad(
+  WidgetTester tester,
+  FakeWebViewPlatform platform,
+  int before,
+) async {
+  await tester.runAsync(() async {
+    for (var i = 0; i < 80 && platform.controllers.length <= before; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+    }
+  });
+  await tester.pump();
+  platform.controllers.last.finishPage();
+}
+
+/// Opens general, its thread, and an app beside it on an iPad window.
+Future<ProviderContainer> _pumpSplit(WidgetTester tester) async {
+  final platform = FakeWebViewPlatform.install();
+  _useIpadWindow(tester);
+  await tester.pumpWidget(await _buildApp(overrides: _sandboxOverrides()));
+  await tester.pumpAndSettle();
+  final shell = tester.element(find.byType(WideHomeShell));
+  final container = ProviderScope.containerOf(shell, listen: false);
+  final notifier = container.read(wideShellProvider.notifier);
+  notifier.selectChannel(_channels.first);
+  await tester.pumpAndSettle();
+  notifier.openAux(
+    const WideAuxThread(
+      threadHead: _threadHead,
+      allMessages: [_threadHead],
+      channelId: _generalId,
+    ),
+  );
+  await tester.pumpAndSettle();
+  notifier.openAppPane(_appPane());
+  await tester.pump();
+  await _finishAppLoad(tester, platform, 0);
+  await tester.pumpAndSettle();
+  return container;
+}
+
+void _appSplitTests() {
+  final drawer = find.byKey(const ValueKey('wide-aux-drawer'));
+  final appColumn = find.byKey(const ValueKey('wide-app-app-thread-head'));
+
+  testWidgets(
+    'an app opens beside its thread as a 40:60 split over the sidebar and '
+    'the channel, and Escape hides the app alone',
+    (tester) async {
+      final platform = FakeWebViewPlatform.install();
+      _useIpadWindow(tester);
+      await tester.pumpWidget(await _buildApp(overrides: _sandboxOverrides()));
+      await tester.pumpAndSettle();
+      final shell = tester.element(find.byType(WideHomeShell));
+      final container = ProviderScope.containerOf(shell, listen: false);
+      final notifier = container.read(wideShellProvider.notifier);
+      notifier.selectChannel(_channels.first);
+      await tester.pumpAndSettle();
+      notifier.openAux(
+        const WideAuxThread(
+          threadHead: _threadHead,
+          allMessages: [_threadHead],
+          channelId: _generalId,
+        ),
+      );
+      await tester.pumpAndSettle();
+      final threadElement = tester.element(find.byType(ThreadDetailPage));
+      final composerBefore = find.byType(ThreadDetailPage);
+      expect(composerBefore, findsOneWidget);
+
+      notifier.openAppPane(_appPane());
+      await tester.pump();
+      // Mid-motion the sidebar still holds some of the row, so the split is
+      // measured on what is left: the two columns meet without a gap or an
+      // overlap, and the app column's width is not animated on its own.
+      await tester.pump(const Duration(milliseconds: 80));
+      final midDrawer = tester.getRect(drawer);
+      final midApp = tester.getRect(appColumn);
+      expect(midDrawer.left, greaterThan(0), reason: 'sidebar still folding');
+      // The two columns partition whatever the sidebar has released so far;
+      // the app is still sliding in from the right, never over the thread.
+      expect(midDrawer.width + midApp.width, closeTo(1194 - midDrawer.left, 1));
+      expect(midApp.left, greaterThanOrEqualTo(midDrawer.right - 1));
+      final threadWidth = wideAppSplitThreadWidthFor(1194);
+      await _finishAppLoad(tester, platform, 0);
+      await tester.pumpAndSettle();
+
+      // Sidebar folded, thread pinned left at 40%, app on the right at 60%.
+      expect(tester.getTopLeft(drawer).dx, 0);
+      expect(tester.getSize(drawer).width, threadWidth);
+      expect(tester.getTopLeft(appColumn).dx, threadWidth);
+      expect(tester.getSize(appColumn).width, 1194 - threadWidth);
+      expect(threadWidth, 478);
+      // The thread inside is laid out at the split width, not the old one.
+      final threadMedia = MediaQuery.sizeOf(
+        tester.element(find.byType(ThreadDetailPage)),
+      );
+      expect(threadMedia.width, threadWidth);
+      // One WebView, in the app column.
+      expect(find.byKey(const ValueKey('fake-webview')), findsOneWidget);
+      expect(find.byKey(const ValueKey('wide-app-hide')), findsOneWidget);
+      // The thread was not remounted: same element, same state.
+      expect(
+        identical(tester.element(find.byType(ThreadDetailPage)), threadElement),
+        isTrue,
+      );
+      // Focus mode is off the table while split.
+      expect(
+        tester
+            .widget<IconButton>(find.byKey(const ValueKey('wide-aux-focus')))
+            .onPressed,
+        isNull,
+      );
+      expect(container.read(wideShellProvider).auxFocused, isFalse);
+      // The covered channel takes no pointer, semantics or focus.
+      expect(
+        find.byWidgetPredicate((w) => w is ExcludeFocus && w.excluding),
+        findsOneWidget,
+      );
+      // The preference itself is untouched.
+      expect(container.read(wideSidebarCollapsedProvider), isFalse);
+
+      // Escape hides the app only; the thread stays and docks right again.
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 80));
+      // Sliding out, the app is still mounted.
+      expect(appColumn, findsOneWidget);
+      await tester.pumpAndSettle();
+      expect(container.read(wideShellProvider).appPane, isNull);
+      expect(container.read(wideShellProvider).aux, isNotNull);
+      expect(appColumn, findsNothing);
+      expect(find.byType(ThreadDetailPage), findsOneWidget);
+      final sideWidth = wideAuxPaneWidthFor(1194 - kWideSidebarWidth);
+      expect(tester.getTopLeft(drawer).dx, 1194 - sideWidth);
+      expect(tester.getSize(drawer).width, sideWidth);
+      // Hidden, not closed: the app keeps running.
+      expect(
+        container.read(sandboxSessionsProvider).isRunning('msg:thread-head'),
+        isTrue,
+      );
+    },
+  );
+
+  testWidgets(
+    'closing the thread, or leaving the channel, hides the app but keeps it '
+    'running; Close in the app pane ends it',
+    (tester) async {
+      final container = await _pumpSplit(tester);
+      final notifier = container.read(wideShellProvider.notifier);
+      bool running() =>
+          container.read(sandboxSessionsProvider).isRunning('msg:thread-head');
+
+      await tester.tap(find.byKey(const ValueKey('wide-aux-close')));
+      await tester.pumpAndSettle();
+      expect(container.read(wideShellProvider).appPane, isNull);
+      expect(container.read(wideShellProvider).aux, isNull);
+      expect(appColumn, findsNothing);
+      expect(running(), isTrue);
+
+      notifier.openAux(
+        const WideAuxThread(
+          threadHead: _threadHead,
+          allMessages: [_threadHead],
+          channelId: _generalId,
+        ),
+      );
+      await tester.pumpAndSettle();
+      notifier.openAppPane(_appPane());
+      await tester.pumpAndSettle();
+      expect(appColumn, findsOneWidget);
+      notifier.selectChannel(_channels[1]);
+      await tester.pumpAndSettle();
+      expect(container.read(wideShellProvider).appPane, isNull);
+      expect(running(), isTrue);
+
+      notifier.selectChannel(_channels.first);
+      await tester.pumpAndSettle();
+      notifier.openAux(
+        const WideAuxThread(
+          threadHead: _threadHead,
+          allMessages: [_threadHead],
+          channelId: _generalId,
+        ),
+      );
+      await tester.pumpAndSettle();
+      notifier.openAppPane(_appPane());
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('wide-app-close')));
+      await tester.pumpAndSettle();
+      expect(container.read(wideShellProvider).appPane, isNull);
+      expect(running(), isFalse);
+    },
+  );
+
+  testWidgets('a focused channel composer does not swallow the first Escape '
+      'once an app covers it', (tester) async {
+    final container = await _pumpSplit(tester);
+    // Whatever held focus under the app lost it when the split opened; only
+    // the thread beside the app may still hold a field (it keeps Escape for
+    // itself once, as any focused composer does).
+    final focused = FocusManager.instance.primaryFocus?.context;
+    final field = focused?.findAncestorWidgetOfExactType<EditableText>();
+    if (field != null) {
+      expect(
+        focused!.findAncestorWidgetOfExactType<ChannelDetailPage>(),
+        isNull,
+        reason: 'the covered channel must not keep focus',
+      );
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+    }
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(container.read(wideShellProvider).appPane, isNull);
+    expect(container.read(wideShellProvider).aux, isNotNull);
+  });
+}
+
 void main() {
   _focusTests();
+  _appSplitTests();
   testWidgets('a failure is reported once, in the pane that raised it', (
     tester,
   ) async {
