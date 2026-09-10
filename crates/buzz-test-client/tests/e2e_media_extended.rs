@@ -882,11 +882,7 @@ async fn test_app_content_served_sandboxed_on_separate_origin() {
         "Get buzz-media",
         vec![
             Tag::parse(["t", "get"]).unwrap(),
-            Tag::parse([
-                "server",
-                &app_content_url().trim_start_matches("http://").to_string(),
-            ])
-            .unwrap(),
+            Tag::parse(["server", app_content_url().trim_start_matches("http://")]).unwrap(),
             Tag::parse(["expiration", &(now + 300).to_string()]).unwrap(),
         ],
     );
