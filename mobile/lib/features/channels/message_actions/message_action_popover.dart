@@ -499,17 +499,6 @@ class _IosNativeMessageActionSurface extends HookWidget {
         'rowHeight': rowHeight,
       },
       creationParamsCodec: const StandardMessageCodec(),
-      // Claim the touch at pointer-down. Without a recognizer of its own a
-      // UiKitView only wins the gesture arena when it is swept — at pointer-up
-      // — and until then the embedder can cancel the touches it already handed
-      // to UIKit. The rows are `UIControl`s that highlight on tracking and fire
-      // on `.touchUpInside`, so a cancelled touch leaves exactly what the owner
-      // reported: the row lights up and nothing runs. Unlike the other native
-      // surfaces (the jump-to-latest and glass navigation buttons) this menu has
-      // no Flutter `onTap` behind it to catch the tap the platform view lost.
-      gestureRecognizers: const <Factory<OneSequenceGestureRecognizer>>{
-        Factory<OneSequenceGestureRecognizer>(EagerGestureRecognizer.new),
-      },
       onPlatformViewCreated: (id) => viewId.value = id,
     );
   }
