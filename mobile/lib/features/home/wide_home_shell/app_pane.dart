@@ -20,6 +20,12 @@ class _AppPaneColumn extends ConsumerWidget {
     );
     final updated = sandboxRevisionLabel(context, view?.revisionAt);
     final divider = context.colors.outlineVariant.withValues(alpha: 0.5);
+    // The column is pinned to the top of the window, so it insets the status
+    // bar itself, the way the thread's app bar and the sidebar's list page do
+    // for theirs: the header sits below the bar on the same surface, which
+    // also paints the strip behind the bar, and the app below keeps its full
+    // height. The inset is spent here, so the body must not pad for it again.
+    final topInset = MediaQuery.paddingOf(context).top;
     return DecoratedBox(
       decoration: BoxDecoration(
         color: context.colors.surface,
@@ -29,70 +35,78 @@ class _AppPaneColumn extends ConsumerWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           SizedBox(
-            height: 48,
-            child: Row(
-              children: [
-                const SizedBox(width: Grid.sm),
-                Expanded(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        pane.filename,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: context.textTheme.titleSmall,
-                      ),
-                      Text(
-                        [
-                          if (pane.sharedBy case final by?) 'Shared by $by',
-                          ?updated,
-                          'Sandbox · no network',
-                        ].join(' · '),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: context.textTheme.labelSmall?.copyWith(
-                          color: context.colors.onSurfaceVariant,
+            key: const ValueKey('wide-app-header'),
+            height: topInset + 48,
+            child: Padding(
+              padding: EdgeInsets.only(top: topInset),
+              child: Row(
+                children: [
+                  const SizedBox(width: Grid.sm),
+                  Expanded(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          pane.filename,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: context.textTheme.titleSmall,
                         ),
-                      ),
-                    ],
-                  ),
-                ),
-                if (view?.isUpdating == true)
-                  const Padding(
-                    key: ValueKey('wide-app-updating'),
-                    padding: EdgeInsets.symmetric(horizontal: Grid.xxs),
-                    child: SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
+                        Text(
+                          [
+                            if (pane.sharedBy case final by?) 'Shared by $by',
+                            ?updated,
+                            'Sandbox · no network',
+                          ].join(' · '),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: context.textTheme.labelSmall?.copyWith(
+                            color: context.colors.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                IconButton(
-                  key: const ValueKey('wide-app-hide'),
-                  onPressed: notifier.hideAppPane,
-                  color: context.colors.primary,
-                  tooltip: 'Hide app (keeps running)',
-                  icon: const Icon(LucideIcons.panelRightClose, size: 22),
-                ),
-                IconButton(
-                  key: const ValueKey('wide-app-close'),
-                  onPressed: () {
-                    sessions.terminate(sessionKey);
-                    notifier.hideAppPane();
-                  },
-                  color: context.colors.primary,
-                  tooltip: 'Close app',
-                  icon: const Icon(LucideIcons.x, size: 22),
-                ),
-                const SizedBox(width: Grid.xxs),
-              ],
+                  if (view?.isUpdating == true)
+                    const Padding(
+                      key: ValueKey('wide-app-updating'),
+                      padding: EdgeInsets.symmetric(horizontal: Grid.xxs),
+                      child: SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    ),
+                  IconButton(
+                    key: const ValueKey('wide-app-hide'),
+                    onPressed: notifier.hideAppPane,
+                    color: context.colors.primary,
+                    tooltip: 'Hide app (keeps running)',
+                    icon: const Icon(LucideIcons.panelRightClose, size: 22),
+                  ),
+                  IconButton(
+                    key: const ValueKey('wide-app-close'),
+                    onPressed: () {
+                      sessions.terminate(sessionKey);
+                      notifier.hideAppPane();
+                    },
+                    color: context.colors.primary,
+                    tooltip: 'Close app',
+                    icon: const Icon(LucideIcons.x, size: 22),
+                  ),
+                  const SizedBox(width: Grid.xxs),
+                ],
+              ),
             ),
           ),
           Divider(height: 1, thickness: 1, color: divider),
           Expanded(
-            child: AppSandboxBody(sha256: pane.sha256, bridge: pane.bridge),
+            child: MediaQuery.removePadding(
+              context: context,
+              removeTop: true,
+              child: AppSandboxBody(sha256: pane.sha256, bridge: pane.bridge),
+            ),
           ),
         ],
       ),

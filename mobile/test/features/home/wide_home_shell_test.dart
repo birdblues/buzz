@@ -3,6 +3,7 @@ import 'package:buzz/features/activity/activity_provider.dart';
 import 'package:buzz/features/activity/compose_drafts_provider.dart';
 import 'package:buzz/features/activity/feed_item.dart';
 import 'package:buzz/features/activity/reminders_provider.dart';
+import 'package:buzz/features/channels/app_sandbox_body.dart';
 import 'package:buzz/features/channels/channel.dart';
 import 'package:buzz/features/channels/channel_detail_page.dart';
 import 'package:buzz/features/channels/channel_management_provider.dart';
@@ -532,6 +533,40 @@ void _appSplitTests() {
       await tester.pumpAndSettle();
       expect(container.read(wideShellProvider).appPane, isNull);
       expect(running(), isFalse);
+    },
+  );
+
+  testWidgets(
+    'the app pane insets the status bar: the header sits below it on the '
+    'same surface and the app keeps the rest of the height',
+    (tester) async {
+      // An iPad reports the status bar as top view padding. The other columns
+      // inset it through their app bars; the app pane is pinned to the top of
+      // the window with no app bar of its own.
+      tester.view.padding = const FakeViewPadding(top: 24);
+      await _pumpSplit(tester);
+      final header = tester.getRect(
+        find.byKey(const ValueKey('wide-app-header')),
+      );
+      expect(header.top, 0, reason: 'the surface paints behind the bar');
+      expect(header.height, 24 + 48);
+      for (final key in const ['wide-app-hide', 'wide-app-close']) {
+        expect(
+          tester.getTopLeft(find.byKey(ValueKey(key))).dy,
+          greaterThanOrEqualTo(24),
+          reason: '$key is clear of the status bar',
+        );
+      }
+      final webView = tester.getRect(
+        find.byKey(const ValueKey('fake-webview')),
+      );
+      expect(webView.top, 24 + 48 + 1);
+      expect(webView.bottom, 834);
+      // The inset is spent on the header; nothing below pads for it again.
+      expect(
+        MediaQuery.paddingOf(tester.element(find.byType(AppSandboxBody))).top,
+        0,
+      );
     },
   );
 
