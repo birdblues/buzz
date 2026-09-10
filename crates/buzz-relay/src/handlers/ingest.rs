@@ -65,6 +65,30 @@ fn huddle_backing_channel_id(event: &Event) -> Result<Uuid, IngestError> {
     })
 }
 
+/// Whether an event of this kind may still be written to an archived channel.
+///
+/// The archive gate exists to stop an archived channel from taking on new
+/// content. Two operations are not new content:
+///
+/// * unarchiving it (kind:9002 carrying `archived=false`), and
+/// * deleting it (kind:9008), which is administration rather than activity.
+///
+/// Refusing the second one strands the channel: a client that never learned the
+/// channel was archived — the huddle auto-end archives in the database without
+/// announcing it — offers Delete, and the owner gets a rejection with nothing to
+/// act on. Authorization is unaffected; the kind:9008 branch in `side_effects`
+/// still admits only the channel owner.
+fn archived_channel_admits(kind_u32: u32, event: &Event) -> bool {
+    match kind_u32 {
+        KIND_NIP29_DELETE_GROUP => true,
+        KIND_NIP29_EDIT_METADATA => event.tags.iter().any(|tag| {
+            let parts = tag.as_slice();
+            parts.len() >= 2 && parts[0] == "archived" && parts[1] == "false"
+        }),
+        _ => false,
+    }
+}
+
 fn map_huddle_backing_channel_error(error: buzz_db::DbError) -> IngestError {
     match error {
         buzz_db::DbError::ChannelNotFound(_) => {
@@ -2690,19 +2714,10 @@ async fn ingest_event_inner(
             .map_err(|e| IngestError::Rejected(format!("invalid: {e}")))?;
     }
 
-    if channel_id.is_some() {
-        // Allow kind:9002 with archived=false (unarchive operation)
-        let is_unarchive = kind_u32 == KIND_NIP29_EDIT_METADATA
-            && event.tags.iter().any(|t| {
-                let parts = t.as_slice();
-                parts.len() >= 2 && parts[0] == "archived" && parts[1] == "false"
-            });
-
-        if !is_unarchive {
-            if let Some(channel) = &channel_row {
-                if channel.archived_at.is_some() {
-                    return Err(IngestError::Rejected("invalid: channel is archived".into()));
-                }
+    if channel_id.is_some() && !archived_channel_admits(kind_u32, &event) {
+        if let Some(channel) = &channel_row {
+            if channel.archived_at.is_some() {
+                return Err(IngestError::Rejected("invalid: channel is archived".into()));
             }
         }
     }
@@ -3323,6 +3338,52 @@ mod postgres_tests {
     fn huddle_backing_ttl_honors_the_ephemeral_override() {
         assert_eq!(expected_huddle_backing_ttl(None), 3600);
         assert_eq!(expected_huddle_backing_ttl(Some(60)), 60);
+    }
+
+    fn tagged_event(kind: u32, tags: Vec<Vec<String>>) -> Event {
+        let mut builder = EventBuilder::new(Kind::Custom(kind as u16), "");
+        for tag in tags {
+            builder = builder.tag(nostr::Tag::parse(tag).expect("parse tag"));
+        }
+        builder
+            .sign_with_keys(&nostr::Keys::generate())
+            .expect("sign event")
+    }
+
+    #[test]
+    fn an_archived_channel_still_admits_its_own_deletion() {
+        let event = tagged_event(KIND_NIP29_DELETE_GROUP, vec![]);
+        assert!(archived_channel_admits(KIND_NIP29_DELETE_GROUP, &event));
+    }
+
+    #[test]
+    fn an_archived_channel_admits_being_unarchived() {
+        let event = tagged_event(
+            KIND_NIP29_EDIT_METADATA,
+            vec![vec!["archived".into(), "false".into()]],
+        );
+        assert!(archived_channel_admits(KIND_NIP29_EDIT_METADATA, &event));
+    }
+
+    #[test]
+    fn an_archived_channel_refuses_further_metadata_edits() {
+        let event = tagged_event(
+            KIND_NIP29_EDIT_METADATA,
+            vec![vec!["archived".into(), "true".into()]],
+        );
+        assert!(!archived_channel_admits(KIND_NIP29_EDIT_METADATA, &event));
+
+        let renamed = tagged_event(
+            KIND_NIP29_EDIT_METADATA,
+            vec![vec!["name".into(), "renamed".into()]],
+        );
+        assert!(!archived_channel_admits(KIND_NIP29_EDIT_METADATA, &renamed));
+    }
+
+    #[test]
+    fn an_archived_channel_refuses_new_content() {
+        let event = tagged_event(KIND_STREAM_MESSAGE, vec![]);
+        assert!(!archived_channel_admits(KIND_STREAM_MESSAGE, &event));
     }
 
     #[test]
