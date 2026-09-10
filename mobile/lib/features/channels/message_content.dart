@@ -7,7 +7,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:gpt_markdown/gpt_markdown.dart';
-import 'package:gpt_markdown/custom_widgets/markdown_config.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
@@ -331,6 +330,9 @@ class MessageContent extends HookConsumerWidget {
         finalContent,
         style: style,
         followLinkColor: false,
+        // normalizeBareLinks() already turns bare URLs into Markdown links;
+        // gpt_markdown 1.2.0 autolinks by default, so both would run.
+        autolink: false,
         codeBuilder: (context, name, code, closed) =>
             _MessageCodeBlock(name: name, code: code),
         linkBuilder: (context, linkText, url, linkStyle) => _buildLink(
@@ -345,7 +347,9 @@ class MessageContent extends HookConsumerWidget {
           resolvedChannelNames,
           appContentAvailable,
         ),
-        imageBuilder: (context, imageUrl) => _buildMedia(
+        // gpt_markdown 1.1.7+ also passes the `=WxH` size hint; media here is
+        // sized from imeta and the gallery layout, so the hint is ignored.
+        imageBuilder: (context, imageUrl, _, _) => _buildMedia(
           context,
           ref,
           imageUrl,
@@ -926,9 +930,9 @@ class _MessageCodeBlock extends HookWidget {
     }
 
     final codeBaseStyle = TextStyle(
-      fontFamily: 'GeistMono',
-      fontSize: 13,
-      height: 1.5,
+      fontFamily: CodeStyle.fontFamily,
+      fontSize: CodeStyle.fontSize,
+      height: CodeStyle.lineHeight,
       color: context.colors.onSurface,
     );
     final isDark = context.theme.brightness == Brightness.dark;
@@ -943,11 +947,9 @@ class _MessageCodeBlock extends HookWidget {
       child: Container(
         margin: const EdgeInsets.only(top: Grid.half),
         decoration: BoxDecoration(
-          color: context.colors.surfaceContainerHighest.withValues(alpha: 0.6),
+          color: CodeStyle.background(context.colors),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: context.colors.outline.withValues(alpha: 0.7),
-          ),
+          border: Border.all(color: CodeStyle.border(context.colors)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,

@@ -387,9 +387,11 @@ class App extends HookConsumerWidget {
       // Above the navigator, so a burst keeps playing over a pushed thread page
       // or a modal sheet — the same reason desktop pins its canvas to the
       // viewport rather than to the message row.
-      builder: (context, child) => MobileHuddleShell(
-        navigatorKey: _mobileRootNavigatorKey,
-        child: EmojiBurstOverlay(child: child ?? const SizedBox.shrink()),
+      builder: (context, child) => AppMarkdownTheme(
+        child: MobileHuddleShell(
+          navigatorKey: _mobileRootNavigatorKey,
+          child: EmojiBurstOverlay(child: child ?? const SizedBox.shrink()),
+        ),
       ),
       // A failed read is not "signed out". The keychain answers a fresh
       // build's first launch with an error now and then; showing pairing here

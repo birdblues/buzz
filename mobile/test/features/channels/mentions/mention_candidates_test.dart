@@ -21,8 +21,9 @@ ChannelMember member(String pubkey, {String role = 'member'}) {
 }
 
 void main() {
-  test('role-only agent mentions fall back to a pubkey prefix label', () {
-    const pubkey = 'deadbeef0123456789';
+  test('role-only agent mentions fall back to a compact npub label', () {
+    const pubkey =
+        'deadbeef00000000000000000000000000000000000000000000000000000000';
 
     expect(
       mentionNamesWithDirectoryLabels(
@@ -31,7 +32,7 @@ void main() {
         directoryDisplayNames: const {},
         agentMentionPubkeys: const {pubkey},
       ),
-      const {pubkey: 'deadbeef'},
+      const {pubkey: 'npub1m6k\u20263kf3'},
     );
   });
 
@@ -63,14 +64,14 @@ void main() {
       expect(formatOwnerLabel(userPubkey, userPubkey, const {}), 'you');
     });
 
-    test('prefers display name, then handle, then pubkey prefix', () {
+    test('prefers display name, then handle, then compact npub', () {
       final profiles = {
         ownerPubkey: UserProfile(pubkey: ownerPubkey, displayName: 'Wes'),
       };
       expect(formatOwnerLabel(ownerPubkey, userPubkey, profiles), 'Wes');
       expect(
         formatOwnerLabel(ownerPubkey, userPubkey, const {}),
-        '${'d' * 8}\u2026',
+        'npub1mhw\u2026dmpv',
       );
     });
 
