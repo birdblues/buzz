@@ -18,7 +18,17 @@ const _iosNativeMessageActionSurfaceChannel = MethodChannel(
 bool _messageActionPresentationInFlight = false;
 bool? _iosNativeMessageActionSurfaceSupported;
 
+/// Forces the answer below so a test can reach the native surface. The real
+/// check needs `Platform.isIOS`, which no test override steers, and swapping it
+/// for `defaultTargetPlatform` would put a channel round-trip in front of the
+/// route push that eighteen existing tests are timed against. This short-
+/// circuits ahead of that call, so tests that leave it null are untouched.
+@visibleForTesting
+bool? debugIosNativeMessageActionSurfaceSupport;
+
 Future<bool> _supportsIosNativeMessageActionSurface() async {
+  final forced = debugIosNativeMessageActionSurfaceSupport;
+  if (forced != null) return forced;
   if (!Platform.isIOS) return false;
   final cached = _iosNativeMessageActionSurfaceSupported;
   if (cached != null) return cached;
@@ -474,6 +484,22 @@ class _IosNativeMessageActionSurface extends HookWidget {
   @override
   Widget build(BuildContext context) {
     final viewId = useState<int?>(null);
+    // Hold the callback in a ref and key the effect on the view alone, the way
+    // the other native surfaces here do. `onSelected` is declared inside the
+    // popover's build, so it is a new closure whenever the popover rebuilds —
+    // and this popover rebuilds on every frame it is open (what dirties it is
+    // not yet known; it is not the entrance animation, whose `AnimatedBuilder`
+    // caches this child). Keying on it replaced the hook each time, and the
+    // replacement is not a teardown followed by a fresh install: flutter_hooks
+    // creates the new state during the build — `initHook` runs the effect and
+    // installs the handler — then disposes the displaced one in `build`'s
+    // `finally`, so the old disposer clears the handler the new effect just
+    // installed, same channel name. The frame ends with none at all. Measured
+    // on an iPad at 120Hz: 567 installs over ~4.7s, thirteen `selected` calls
+    // from UIKit, none delivered. `ChannelBuffers` holds one message, lost when
+    // its drain microtask finds no listener; the rest overflow that one slot.
+    // Nothing raises, so the row lit up and nothing ran.
+    final onSelectedRef = useRef(onSelected)..value = onSelected;
     useEffect(() {
       final id = viewId.value;
       if (id == null) return null;
@@ -481,10 +507,10 @@ class _IosNativeMessageActionSurface extends HookWidget {
       channel.setMethodCallHandler((call) async {
         if (call.method != 'selected' || call.arguments is! Map) return;
         final actionId = (call.arguments as Map)['id'];
-        if (actionId is String) onSelected(actionId);
+        if (actionId is String) onSelectedRef.value(actionId);
       });
       return () => channel.setMethodCallHandler(null);
-    }, [viewId.value, onSelected]);
+    }, [viewId.value]);
 
     return UiKitView(
       key: const ValueKey('ios-native-message-action-surface'),

@@ -13,6 +13,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:nostr/nostr.dart' as nostr;
@@ -884,6 +885,52 @@ void main() {
   });
 
   group('showMessageActions', () {
+    testWidgets('keeps the native surface reachable after the popover rebuilds', (
+      tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      debugIosNativeMessageActionSurfaceSupport = true;
+      final prefs = await _mockPrefs();
+      // Reset inside the body, not in `addTearDown`: the framework checks that
+      // no foundation debug variable outlived the test before tear-downs run.
+      try {
+        await _pumpMessageActionsPopover(
+          tester,
+          message: _message(),
+          prefs: prefs,
+        );
+
+        final nativeView = tester.widget<UiKitView>(find.byType(UiKitView));
+        expect(nativeView.viewType, 'buzz/native_message_action_surface');
+        nativeView.onPlatformViewCreated!(77);
+        await tester.pump();
+
+        // Rebuild the popover, which is what its entrance animation does every
+        // frame. `selectAction` is a new closure each build, so keying the
+        // handler's effect on it left the frame with no handler installed.
+        tester.view.physicalSize = const Size(2400, 1900);
+        await tester.pumpAndSettle();
+
+        await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+          'buzz/native_message_action_surface/77',
+          const StandardMethodCodec().encodeMethodCall(
+            const MethodCall('selected', <String, Object>{
+              'id': '__delivery_probe__',
+            }),
+          ),
+          (_) {},
+        );
+        await tester.pumpAndSettle();
+
+        // The selection reached Dart, so the popover closed. Dropped on the
+        // floor it stays open and the tap does nothing at all.
+        expect(find.byType(UiKitView), findsNothing);
+      } finally {
+        tester.view.reset();
+        debugIosNativeMessageActionSurfaceSupport = null;
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
     testWidgets('composes the tray, lifted preview, and compact actions', (
       tester,
     ) async {
