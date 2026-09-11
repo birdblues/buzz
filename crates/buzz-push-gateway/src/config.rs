@@ -109,6 +109,9 @@ fn parse_profile(e: &HashMap<String, String>) -> Result<AppProfileConfig, Config
     })
 }
 
+/// Host of the canonical public gateway; `BUZZ_PUSH_PUBLIC_HOST` overrides it.
+const DEFAULT_PUBLIC_HOST: &str = "push.buzz.xyz";
+
 impl Config {
     pub fn from_env() -> Result<Self, ConfigError> {
         Self::from_map(&std::env::vars().collect())
@@ -132,11 +135,19 @@ impl Config {
         }) {
             return Err(ConfigError::Invalid("BUZZ_PUSH_TOKEN_KEYS"));
         }
+        // The public host is the canonical `push.buzz.xyz` unless a self-hosted
+        // deployment names its own; the URL must still be the exact HTTPS
+        // delivery path on that host, since relays sign it byte-for-byte.
+        let public_host = e
+            .get("BUZZ_PUSH_PUBLIC_HOST")
+            .map(String::as_str)
+            .filter(|v| !v.is_empty())
+            .unwrap_or(DEFAULT_PUBLIC_HOST);
         let public_delivery_url = req(e, "BUZZ_PUSH_PUBLIC_DELIVERY_URL")?
             .parse::<url::Url>()
             .map_err(|_| ConfigError::Invalid("BUZZ_PUSH_PUBLIC_DELIVERY_URL"))?;
         if public_delivery_url.scheme() != "https"
-            || public_delivery_url.host_str() != Some("push.buzz.xyz")
+            || public_delivery_url.host_str() != Some(public_host)
             || public_delivery_url.port().is_some()
             || public_delivery_url.path() != "/v1/deliveries/apns"
             || public_delivery_url.query().is_some()
@@ -316,6 +327,38 @@ mod tests {
             env.insert(key.into(), value.into());
             assert!(Config::from_map(&env).is_err(), "accepted {key}={value}");
         }
+    }
+
+    #[test]
+    fn public_host_override_admits_only_that_host() {
+        let mut env = base();
+        env.insert("BUZZ_PUSH_PUBLIC_HOST".into(), "mini.tail.ts.net".into());
+        env.insert(
+            "BUZZ_PUSH_PUBLIC_DELIVERY_URL".into(),
+            "https://mini.tail.ts.net/v1/deliveries/apns".into(),
+        );
+        let config = Config::from_map(&env).unwrap();
+        assert_eq!(
+            config.public_delivery_url.host_str(),
+            Some("mini.tail.ts.net")
+        );
+
+        // The override replaces the canonical host rather than adding to it,
+        // and the other exactness rules still apply.
+        for url in [
+            "https://push.buzz.xyz/v1/deliveries/apns",
+            "https://mini.tail.ts.net:8443/v1/deliveries/apns",
+            "http://mini.tail.ts.net/v1/deliveries/apns",
+        ] {
+            let mut env = env.clone();
+            env.insert("BUZZ_PUSH_PUBLIC_DELIVERY_URL".into(), url.into());
+            assert!(Config::from_map(&env).is_err(), "accepted {url}");
+        }
+
+        // An empty override means the canonical host.
+        let mut env = base();
+        env.insert("BUZZ_PUSH_PUBLIC_HOST".into(), String::new());
+        assert!(Config::from_map(&env).is_ok());
     }
 
     #[test]
