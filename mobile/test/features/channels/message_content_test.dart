@@ -21,6 +21,7 @@ import 'package:buzz/features/channels/voice_note_recording.dart';
 import 'package:buzz/shared/deeplink/deep_link.dart';
 import 'package:buzz/shared/deeplink/pending_deep_link_provider.dart';
 import 'package:buzz/shared/emoji/emoji_only.dart';
+import 'package:buzz/shared/mentions/nostr_uri_mentions.dart';
 import 'package:buzz/shared/profile/user_cache_provider.dart';
 import 'package:buzz/shared/profile/user_profile.dart';
 import 'package:buzz/shared/relay/relay.dart';
@@ -3256,6 +3257,27 @@ Photos
         );
 
         expect(find.text('npub1x6q…dr3f'), findsOneWidget);
+      });
+
+      testWidgets('a label across two lines draws no chip and tags nobody', (
+        tester,
+      ) async {
+        // The guard on `_markdownLinkPattern`'s `dotAll`. Reading `ATagMd.exp`
+        // alone says a multi-line label is not a link, so excluding it from
+        // tagging looks like an over-reach — but gpt_markdown compiles every
+        // inline component into one regex with `dotAll: true`, swallows the
+        // whole thing as one element, and renders it as source text when no
+        // component claims it. Chip and tag agree only while both sides span
+        // newlines; drop either and they part.
+        const body = '[oops\nnostr:$npub](https://example.com)';
+        await tester.pumpWidget(
+          _testable(
+            const MessageContent(content: body, mentionNames: {hex: 'Alice'}),
+          ),
+        );
+
+        expect(find.text('Alice'), findsNothing);
+        expect(nostrUriMentionPubkeys(body), isEmpty);
       });
 
       testWidgets('an uppercase scheme is not a mention at all', (

@@ -67,6 +67,16 @@ List<String> nostrUriMentionPubkeys(String content) {
 /// key inside one never becomes a chip: the label renders inside the link's own
 /// widget (where a nested one does not paint on iOS) and the destination
 /// renders as a URL.
+///
+/// `dotAll` looks wrong next to `ATagMd.exp`, which does not set it — and
+/// removing it to match would be the bug. gpt_markdown compiles every inline
+/// component into one combined regex **with `dotAll: true`**
+/// (`markdown_component.dart`, `_combinedRegexFor`), so a label spanning a
+/// newline is still swallowed whole as one element; the dispatch loop then
+/// re-anchors each component with its own flags, `ATagMd` fails to claim it,
+/// and the element renders as its own source text. No chip — so no tag either.
+/// Checked by rendering it, not by reading the patterns: see the
+/// `a label across two lines` test.
 final RegExp _markdownLinkPattern = RegExp(
   r'!?\[.*?\]\([^\s]*\)',
   dotAll: true,
