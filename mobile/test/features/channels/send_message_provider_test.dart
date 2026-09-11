@@ -88,6 +88,80 @@ void main() {
     await result;
   });
 
+  test('a reply addresses the people it answers', () async {
+    // A reply used to carry only `e` tags and the author's own `p` tag, so a
+    // message in your own thread reached you nowhere: no push, no agent, and
+    // nothing until you opened the app. Whose thread it is and whoever spoke
+    // last are the two people a reply answers.
+    final session = _PendingPublishRelaySession();
+    final signingKey = nostr.Keys.generate().nsec;
+    final threadStarter = 'a' * 64;
+    final lastReplier = 'b' * 64;
+    final chipped = 'c' * 64;
+    final send = SendMessage(
+      signedEventRelay: SignedEventRelay(session: session, nsec: signingKey),
+      fetchMembers: (_) async => const [],
+      readUserCache: () => const {},
+      addLocalMessage: (_, _) {},
+      completeLocalMessage: (_, _) {},
+      removeLocalMessage: (_, _) {},
+    );
+
+    final result = send(
+      channelId: _channelId,
+      content: 'on it',
+      parentEventId: 'thread-head',
+      mentionPubkeys: [chipped],
+      replyAudiencePubkeys: [threadStarter, lastReplier],
+    );
+    await session.published;
+
+    expect(session.event.tags.where((tag) => tag.first == 'p').toList(), [
+      ['p', chipped],
+      ['p', threadStarter],
+      ['p', lastReplier],
+    ]);
+
+    session.accept();
+    await result;
+  });
+
+  test('a reply never addresses its own author twice, or at all', () async {
+    // The thread starter replying in their own thread is the common case:
+    // the audience is themselves, and a message must not notify its sender.
+    final session = _PendingPublishRelaySession();
+    final signingKey = nostr.Keys.generate().nsec;
+    final sender = nostr.Keys(
+      nostr.Nip19.decode(payload: signingKey).data,
+    ).public;
+    final other = 'd' * 64;
+    final send = SendMessage(
+      signedEventRelay: SignedEventRelay(session: session, nsec: signingKey),
+      fetchMembers: (_) async => const [],
+      readUserCache: () => const {},
+      addLocalMessage: (_, _) {},
+      completeLocalMessage: (_, _) {},
+      removeLocalMessage: (_, _) {},
+    );
+
+    final result = send(
+      channelId: _channelId,
+      content: 'following up',
+      parentEventId: 'thread-head',
+      mentionPubkeys: const [],
+      // Their own thread head, and the agent that answered it.
+      replyAudiencePubkeys: [sender, other, other],
+    );
+    await session.published;
+
+    expect(session.event.tags.where((tag) => tag.first == 'p').toList(), [
+      ['p', other],
+    ]);
+
+    session.accept();
+    await result;
+  });
+
   test('a keyed mention no reader sees as one addresses nobody', () async {
     // Code, a link label, a double-backtick span: the renderer draws no chip
     // for any of them, so none of them may tag anyone. The relay's extractor

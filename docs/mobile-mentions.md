@@ -42,6 +42,20 @@ never tagged for mentioning themselves (`messageMentionPubkeys` seeds its seen
 set with the sender). The owner hit exactly that — his own key, pasted into a
 message, drew a compact npub while the same key from an agent drew his name.
 
+## Replying addresses the people you answer
+
+A reply used to carry only `e` tags and the author's own `p` tag, so a message
+in your own thread reached you nowhere — no push, no agent, nothing until you
+opened the app and looked. A reply now addresses two people: whose thread it is
+(replies here are flat, so the parent is always the head) and whoever spoke
+last. The page decides, because only it knows the thread's shape
+(`thread_detail_page.dart` → `SendMessage.replyAudiencePubkeys`); the sender
+drops itself and duplicates as it does for every other mention.
+
+The second of those is what makes a conversation work: in your own thread the
+head is you, so without it, answering an agent that replied to you would
+address nobody and the agent would never see it.
+
 ## Writing one addresses its owner
 
 A `nostr:npub…` in the body is a mention, so sending one tags the person

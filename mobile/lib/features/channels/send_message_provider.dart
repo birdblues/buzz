@@ -60,6 +60,7 @@ class SendMessage {
     List<String>? mentionPubkeys,
     Channel? channel,
     List<List<String>> mediaTags = const [],
+    Iterable<String> replyAudiencePubkeys = const [],
   }) async {
     _ensureDeliveryValid();
     // Use explicitly passed pubkeys, or resolve @mentions against
@@ -73,6 +74,12 @@ class SendMessage {
     final explicitMentions = [
       ...mentionPubkeys ?? await _resolveMentions(content, channelId),
       ...nostrUriMentionPubkeys(content),
+      // Replying to someone addresses them. Nothing else said so: a reply
+      // carried only `e` tags and the author's own `p` tag, so a message in
+      // your thread never reached you — no push, no agent, nothing until you
+      // opened the app and looked. The caller decides who that is, because
+      // only it knows the shape of the thread it is replying into.
+      ...replyAudiencePubkeys,
     ];
     final authorPubkey = _signedEventRelay.pubkey;
     final dmRecipientPubkeys = channel?.isDm == true

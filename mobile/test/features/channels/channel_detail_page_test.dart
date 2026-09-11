@@ -18,6 +18,7 @@ import 'package:nostr/nostr.dart' as nostr;
 import 'package:pointycastle/digests/sha256.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import 'package:buzz/features/channels/channel.dart';
+import 'package:buzz/features/channels/send_message_provider.dart';
 import 'package:buzz/features/channels/channel_detail_page.dart';
 import 'package:buzz/features/channels/channel_management_provider.dart';
 import 'package:buzz/features/channels/channel_messages_provider.dart';
@@ -10572,6 +10573,74 @@ void main() {
       expect(visibleDecoration.color!.a, closeTo(0.12, 0.001));
     });
 
+    testWidgets('a thread reply addresses the head author and the last voice', (
+      tester,
+    ) async {
+      // The page is the only thing that knows the shape of the thread it is
+      // replying into: replies here are flat, so the parent is always the head
+      // and the person actually being answered is whoever spoke last.
+      final head = _textMsg(id: 'head', pubkey: 'alice', content: 'starting');
+      final reply = _textMsg(
+        id: 'reply',
+        pubkey: 'bob',
+        content: 'answering',
+        createdAt: 1100,
+        extraTags: const [
+          ['e', 'head', '', 'reply'],
+        ],
+      );
+      final timeline = formatTimeline([head, reply]);
+      final captured = <List<String>>[];
+
+      await tester.pumpWidget(
+        _buildTestable(
+          messages: [head, reply],
+          extraOverrides: [
+            sendMessageProvider.overrideWithValue(
+              _CapturingSendMessage(
+                (audience) => captured.add(audience.toList()),
+              ),
+            ),
+          ],
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: TextButton(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => ThreadDetailPage(
+                        threadHead: timeline.first,
+                        allMessages: timeline,
+                        channelId: _testChannel.id,
+                        currentPubkey: null,
+                        isMember: true,
+                        isArchived: false,
+                      ),
+                    ),
+                  ),
+                  child: const Text('Open reply thread'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Open reply thread'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Reply in thread\u2026'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).last, 'on it');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(LucideIcons.arrowUp).last);
+      await tester.pumpAndSettle();
+
+      expect(captured, [
+        ['alice', 'bob'],
+      ]);
+    });
+
     testWidgets('waits for a delayed target jump before highlighting', (
       tester,
     ) async {
@@ -15496,4 +15565,42 @@ String _previewRowAvatarInitial(WidgetTester tester, String pubkey) {
     find.descendant(of: avatar, matching: find.byType(Text)),
   );
   return initial.data!;
+}
+
+/// Captures the audience a page says a reply answers, so the rule that builds
+/// it is bound to the page rather than only to the provider that consumes it.
+class _CapturingSendMessage extends SendMessage {
+  _CapturingSendMessage(this.onAudience)
+    : super(
+        signedEventRelay: SignedEventRelay(
+          session: _NeverPublishingRelaySession(),
+          nsec: null,
+        ),
+        fetchMembers: (_) async => const [],
+        readUserCache: () => const {},
+        addLocalMessage: (_, _) {},
+        completeLocalMessage: (_, _) {},
+        removeLocalMessage: (_, _) {},
+      );
+
+  final void Function(Iterable<String>) onAudience;
+
+  @override
+  Future<void> call({
+    required String channelId,
+    required String content,
+    String? parentEventId,
+    String? rootEventId,
+    List<String>? mentionPubkeys,
+    Channel? channel,
+    List<List<String>> mediaTags = const [],
+    Iterable<String> replyAudiencePubkeys = const [],
+  }) async {
+    onAudience(replyAudiencePubkeys);
+  }
+}
+
+class _NeverPublishingRelaySession extends RelaySessionNotifier {
+  @override
+  SessionState build() => const SessionState(status: SessionStatus.connected);
 }

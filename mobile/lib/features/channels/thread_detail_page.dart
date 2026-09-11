@@ -958,6 +958,15 @@ class ThreadDetailPage extends HookConsumerWidget {
                               channel: channel,
                               parentEventId: threadHead.id,
                               rootEventId: effectiveRootId,
+                              // Whose thread this is, and whoever spoke last —
+                              // the two people a reply is answering. Replies
+                              // here are flat, so the parent is always the
+                              // head; without the tail, answering an agent in
+                              // your own thread would address nobody.
+                              replyAudiencePubkeys: [
+                                liveHead.pubkey,
+                                if (replies.isNotEmpty) replies.last.pubkey,
+                              ],
                               mediaTags: mediaTags,
                             ),
                       ),
