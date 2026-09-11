@@ -113,6 +113,60 @@ final class BuzzPushNotificationResolverTests: XCTestCase {
     )
   }
 
+  func testPreviewBodyFlattensMarkdownIntoReadableText() {
+    // A banner is plain text: iOS renders no markup in it, so a heading left
+    // as `## …` is read out as hashes. Headings keep their labelling role as a
+    // colon and list items keep a bullet; everything else is unwrapped.
+    let content = """
+      ## 9월 11일 아침 브리핑
+      *실제 조회 기준: 18:20 KST*
+
+      ### 오늘 일정
+      - **오늘 일정 없음**
+      1. 등록된 일정이 없습니다.
+
+      > 인용문
+      >> 중첩된 인용
+
+      ---
+
+      | 항목 | 값 |
+      |---|----|
+      | 회의 | 3건 |
+      """
+
+    XCTAssertEqual(
+      BuzzPushNotificationResolver.previewBody(content),
+      "9월 11일 아침 브리핑: 실제 조회 기준: 18:20 KST 오늘 일정: · 오늘 일정 없음 "
+        + "· 등록된 일정이 없습니다. 인용문 중첩된 인용 항목 · 값 회의 · 3건"
+    )
+  }
+
+  func testPreviewBodyLeavesProseThatOnlyLooksLikeMarkup() {
+    // Every rule above is a chance to eat ordinary text. An identifier that
+    // arrived as prose is not emphasis, a pipe between two words is not a
+    // table, and a `#` inside a word is not a heading.
+    XCTAssertEqual(
+      BuzzPushNotificationResolver.previewBody("some_var_name either|or C#은 언어"),
+      "some_var_name either|or C#은 언어"
+    )
+  }
+
+  func testPreviewBodyCompactsKeyedMentions() {
+    // A NIP-27 reference is 63 characters of bech32 — the whole banner. The
+    // app draws the compact npub when it has no profile; so does this.
+    let npub = "npub1x6q8zruqrdfzqv05c4vkaray859e75z44fjful0qs6vqxfk2lffs0jdr3f"
+
+    XCTAssertEqual(
+      BuzzPushNotificationResolver.previewBody("안녕 nostr:\(npub) 님"),
+      "안녕 @npub1x6q…dr3f 님"
+    )
+    // A payload that does not decode is not a key, and is left alone rather
+    // than rendered as somebody.
+    let bogus = "nostr:npub1" + String(repeating: "q", count: 58)
+    XCTAssertEqual(BuzzPushNotificationResolver.previewBody(bogus), bogus)
+  }
+
   func testPreviewBodyTruncatesTo178CharactersIncludingEllipsis() {
     let preview = BuzzPushNotificationResolver.previewBody(String(repeating: "x", count: 200))
 

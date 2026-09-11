@@ -597,6 +597,12 @@ public final class BuzzPushNotificationResolver: BuzzPushNotificationResolving {
     return TimeInterval(max(0, now - cachedAt)) > lifetime
   }
 
+  /// One line of readable text for a notification body.
+  ///
+  /// A banner is plain text — iOS renders no markup in it — so every marker
+  /// the author wrote has to go, or the reader sees `## heading` and `**bold**`
+  /// spelled out. Structure that carries meaning is kept as punctuation: a
+  /// heading becomes a label ending in a colon, a list item keeps a bullet.
   static func previewBody(_ content: String) -> String {
     var result = content.replacingOccurrences(
       of: #"```[\s\S]*?```"#, with: "[code]", options: .regularExpression)
@@ -605,10 +611,83 @@ public final class BuzzPushNotificationResolver: BuzzPushNotificationResolving {
       of: #"!?\[([^\]]*)\]\([^)]*\)"#, with: "$1", options: .regularExpression)
     result = result.replacingOccurrences(
       of: #"https?://\S+"#, with: "[link]", options: .regularExpression)
+    result = compactProfileURIs(result)
+    result = stripBlockMarkers(result)
+    result = stripEmphasis(result)
     result = result.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
       .trimmingCharacters(in: .whitespacesAndNewlines)
     return result.count > 180
       ? String(result.prefix(177)).trimmingCharacters(in: .whitespacesAndNewlines) + "…" : result
+  }
+
+  /// NIP-27 profile references as the compact npub the app draws when it has
+  /// no profile — 63 characters of bech32 is the whole banner otherwise.
+  ///
+  /// The scheme is matched lowercase, as the relay's extractor does, so this
+  /// names exactly who the message addressed.
+  private static func compactProfileURIs(_ text: String) -> String {
+    guard text.contains("nostr:") else { return text }
+    var result = text
+    var searchFrom = result.startIndex
+    while let found = result.range(
+      of: #"nostr:npub1[a-z0-9]{58}"#,
+      options: .regularExpression,
+      range: searchFrom..<result.endIndex
+    ) {
+      let bech32 = String(result[found].dropFirst("nostr:".count))
+      guard Bech32.canonicalNpub(from: bech32) != nil else {
+        searchFrom = found.upperBound
+        continue
+      }
+      let label = "@" + shortPubkey(bech32)
+      result.replaceSubrange(found, with: label)
+      searchFrom = result.index(found.lowerBound, offsetBy: label.count)
+    }
+    return result
+  }
+
+  /// Line-level markup: headings, quotes, list markers, rules, table rows.
+  private static func stripBlockMarkers(_ text: String) -> String {
+    var result = text
+    for (pattern, replacement) in [
+      // A heading labels what follows, so it keeps that role as a colon.
+      (#"(?m)^[ \t]{0,3}#{1,6}[ \t]+(.*?)[ \t]*#*[ \t]*$"#, "$1:"),
+      (#"(?m)^[ \t]{0,3}(?:>[ \t]?)+"#, ""),
+      // A horizontal rule carries nothing a banner can show. Before the list
+      // marker rule, which would otherwise read `---` as a bullet.
+      (#"(?m)^[ \t]{0,3}([-*_])[ \t]*(?:\1[ \t]*){2,}$"#, ""),
+      // A table's separator row is scaffolding; its cells are content.
+      (#"(?m)^[ \t]{0,3}\|?[ \t]*:?-{2,}:?[ \t]*(?:\|[ \t]*:?-{2,}:?[ \t]*)+\|?[ \t]*$"#, ""),
+      (#"(?m)^[ \t]{0,3}[-*+][ \t]+"#, "· "),
+      (#"(?m)^[ \t]{0,3}\d{1,9}[.)][ \t]+"#, "· "),
+      (#"(?m)^[ \t]*\|[ \t]*"#, ""),
+      (#"(?m)[ \t]*\|[ \t]*$"#, ""),
+      (#"[ \t]+\|[ \t]*|[ \t]*\|[ \t]+"#, " · "),
+    ] {
+      result = result.replacingOccurrences(
+        of: pattern, with: replacement, options: .regularExpression)
+    }
+    return result
+  }
+
+  /// Emphasis runs, unwrapped to the text they emphasise.
+  ///
+  /// `_` needs word boundaries on both sides: an identifier that arrived as
+  /// prose rather than as code (`some_name_here`) is not emphasis.
+  private static func stripEmphasis(_ text: String) -> String {
+    var result = text
+    for pattern in [
+      #"\*\*\*([^*\n]+)\*\*\*"#,
+      #"\*\*([^*\n]+)\*\*"#,
+      #"(?<!\*)\*([^*\n]+)\*(?!\*)"#,
+      #"~~([^~\n]+)~~"#,
+      #"(?<![\w_])__([^_\n]+)__(?![\w_])"#,
+      #"(?<![\w_])_([^_\n]+)_(?![\w_])"#,
+    ] {
+      result = result.replacingOccurrences(
+        of: pattern, with: "$1", options: .regularExpression)
+    }
+    return result
   }
 
   /// Compact sender label for unnamed senders: the first 8 and last 4

@@ -159,7 +159,9 @@ relay tags; agents address people with `npub`.
    notification either.
 
 Surfaces to check: a channel bubble, a thread reply and a forum post — they
-all render through `MessageContent`. A push banner does not: `previewBody` in
-`BuzzPushNotificationResolver.swift` strips Markdown but not `nostr:` URIs, so
-a keyed mention still reads as bech32 in the banner — which is where the owner
-first saw it. Reminder previews store the raw body and are unchanged too.
+all render through `MessageContent`. A push banner draws none of this: iOS
+renders a notification body as plain text, so `previewBody`
+(`BuzzPushNotificationResolver.swift`) flattens the message instead — markup
+removed, and a keyed mention shown as the same compact npub the app falls back
+to, rather than 63 characters of bech32. Reminder previews store the raw body
+and are unchanged.
