@@ -50,3 +50,28 @@ String shortPubkey(String identity) {
       ? npub
       : '${npub.substring(0, 8)}…${npub.substring(npub.length - 4)}';
 }
+
+/// The lowercase hex public key a NIP-27 profile reference names, or null when
+/// [uri] is not one.
+///
+/// Accepts the two profile forms of a `nostr:` URI — `npub1…` (the key alone)
+/// and `nprofile1…` (the key plus relay hints, whose hints are dropped).
+/// Event references (`note`, `nevent`, `naddr`) name something other than a
+/// person and return null, as does anything that fails to decode to a
+/// 64-character hex key. `nsec` never resolves: a secret key is not an
+/// identity to render.
+String? nostrProfileUriPubkey(String uri) {
+  final trimmed = uri.trim();
+  if (!trimmed.toLowerCase().startsWith('nostr:')) return null;
+  try {
+    final decoded = nostr.Nip19.decodeAny(payload: trimmed.substring(6));
+    if (decoded.prefix != nostr.Nip19Prefix.npub &&
+        decoded.prefix != nostr.Nip19Prefix.nprofile) {
+      return null;
+    }
+    final pubkey = decoded.data.toLowerCase();
+    return _hexPubkeyPattern.hasMatch(pubkey) ? pubkey : null;
+  } catch (_) {
+    return null;
+  }
+}

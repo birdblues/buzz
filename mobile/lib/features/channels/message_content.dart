@@ -21,6 +21,7 @@ import '../../shared/platform/apple_platform.dart';
 import '../../shared/relay/relay.dart';
 import '../../shared/syntax_highlight.dart';
 import '../../shared/theme/theme.dart';
+import '../../shared/utils/string_utils.dart';
 import '../../shared/custom_emoji/custom_emoji.dart';
 import '../../shared/custom_emoji/custom_emoji_provider.dart';
 import '../../shared/custom_emoji/custom_emoji_render.dart';
@@ -40,6 +41,7 @@ import 'voice_note_attachment.dart';
 
 part 'message_content/media_carousel.dart';
 part 'message_content/media_mosaic.dart';
+part 'message_content/nostr_mention.dart';
 part 'message_content/token_pill.dart';
 part 'message_content/video_preview.dart';
 
@@ -360,6 +362,11 @@ class MessageContent extends HookConsumerWidget {
         maxLines: maxLines,
         inlineComponents: [
           _MentionMd(
+            mentionNames: resolvedMentionNames,
+            agentMentionPubkeys: resolvedAgentMentionPubkeys,
+            onMentionTap: onMentionTap,
+          ),
+          _NostrMentionMd(
             mentionNames: resolvedMentionNames,
             agentMentionPubkeys: resolvedAgentMentionPubkeys,
             onMentionTap: onMentionTap,

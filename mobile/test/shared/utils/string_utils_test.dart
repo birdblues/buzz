@@ -77,6 +77,67 @@ void main() {
     });
   });
 
+  group('nostrProfileUriPubkey', () {
+    // The NIP-19 specification's own nprofile vector, which carries two relay
+    // hints alongside the canonical key.
+    const canonicalNprofile =
+        'nprofile1qqsrhuxx8l9ex335q7he0f09aej04zpazpl0ne2cgukyawd24mayt8gpp4'
+        'mhxue69uhhytnc9e3k7mgpz4mhxue69uhkg6nzv9ejuumpv34kytnrdaksjlyr9p';
+
+    test('reads the key out of both profile forms', () {
+      // The key alone and the key with relay hints name the same person; the
+      // hints are not part of the identity and are dropped.
+      expect(nostrProfileUriPubkey('nostr:$canonicalNpub'), canonicalHex);
+      expect(nostrProfileUriPubkey('nostr:$canonicalNprofile'), canonicalHex);
+      expect(nostrProfileUriPubkey('  nostr:$canonicalNpub  '), canonicalHex);
+      expect(nostrProfileUriPubkey('NOSTR:$canonicalNpub'), canonicalHex);
+    });
+
+    test('refuses everything that is not a person', () {
+      // The envelopes come from the codec; the expectation does not — a
+      // reference to an event, or a secret key, must never resolve to an
+      // identity the UI would render as someone being addressed. The nsec
+      // here wraps a dummy scalar, so no usable secret enters the repository.
+      final note = nostr.Nip19.encode(
+        prefix: nostr.Nip19Prefix.note,
+        data: canonicalHex,
+      );
+      final dummyNsec = nostr.Nip19.encode(
+        prefix: nostr.Nip19Prefix.nsec,
+        data: '11' * 32,
+      );
+      final nevent = nostr.Nip19.encodeShareableIdentifiers(
+        prefix: nostr.Nip19Prefix.nevent,
+        data: canonicalHex,
+      );
+      // An naddr's primary value is a UTF-8 `d` tag, not a key, and a `d` tag
+      // is free text — one that happens to read as 64 hex characters would
+      // pass a shape check. Only the prefix keeps it out.
+      final naddr = nostr.Nip19.encodeShareableIdentifiers(
+        prefix: nostr.Nip19Prefix.naddr,
+        data: canonicalHex,
+        author: canonicalHex,
+        kind: 30023,
+      );
+      for (final input in [note, dummyNsec, nevent, naddr]) {
+        expect(nostrProfileUriPubkey('nostr:$input'), isNull, reason: input);
+      }
+    });
+
+    test('refuses malformed and unwrapped input', () {
+      final cases = <String>[
+        canonicalNpub, // no `nostr:` scheme
+        canonicalHex, // a bare key is not a URI
+        'nostr:npub1notarealkey', // fails the checksum
+        'nostr:', // nothing to decode
+        '',
+      ];
+      for (final input in cases) {
+        expect(nostrProfileUriPubkey(input), isNull, reason: input);
+      }
+    });
+  });
+
   group('copy to paste roundtrip', () {
     test('a copied npub parses back to the original hex key', () {
       final copied = fullNpub(canonicalHex);

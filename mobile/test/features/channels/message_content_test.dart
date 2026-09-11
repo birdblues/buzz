@@ -23,6 +23,7 @@ import 'package:buzz/shared/deeplink/pending_deep_link_provider.dart';
 import 'package:buzz/shared/emoji/emoji_only.dart';
 import 'package:buzz/shared/relay/relay.dart';
 import 'package:buzz/shared/theme/theme.dart';
+import 'package:buzz/shared/utils/string_utils.dart';
 import 'package:buzz/shared/widgets/buzz_loading_indicator.dart';
 
 Widget _testable(
@@ -266,6 +267,16 @@ bool _isImageViewerHeroEnabled(WidgetTester tester) {
 String _allRichText(WidgetTester tester) {
   final richTexts = tester.widgetList<RichText>(find.byType(RichText));
   return richTexts.map((rt) => rt.text.toPlainText()).join('\n');
+}
+
+/// Every paragraph's plain text, including the `BidiRichText` subclass that
+/// gpt_markdown renders inline code through. [_allRichText] matches the exact
+/// type and so never sees a paragraph that carries inline code.
+String _allParagraphText(WidgetTester tester) {
+  final paragraphs = tester.widgetList<RichText>(
+    find.byWidgetPredicate((widget) => widget is RichText),
+  );
+  return paragraphs.map((rt) => rt.text.toPlainText()).join('\n');
 }
 
 /// Finds a RichText widget whose plain text contains [text].
@@ -3131,6 +3142,240 @@ Photos
 
         expect(_allRichText(tester), contains('https://example.com/docs#frag'));
         expect(find.text('#frag'), findsNothing);
+      });
+    });
+
+    group('NIP-27 nostr: mentions', () {
+      // The key and its two written forms, derived from each other so the
+      // fixtures cannot drift apart: `_npub` and `_nprofile` both name `_hex`.
+      const hex =
+          '3680710f801b522031f4c5596e8fa43d0b9f5055aa649e7de086980326cafa53';
+      const npub =
+          'npub1x6q8zruqrdfzqv05c4vkaray859e75z44fjful0qs6vqxfk2lffs0jdr3f';
+      const nprofile =
+          'nprofile1qqsrdqr3p7qpk53qx86v2ktw37jr6zul2p265ey70hsgdxqrym9055c'
+          'pzdmhxue69uhhyetvv9ujuetcv9khqmr9je8mr3';
+
+      testWidgets('renders a keyed mention as the named person', (
+        tester,
+      ) async {
+        await tester.pumpWidget(
+          _testable(
+            const MessageContent(
+              content: 'Hey nostr:$npub check this out',
+              mentionNames: {hex: 'Alice'},
+            ),
+          ),
+        );
+
+        expect(find.text('@'), findsOneWidget);
+        expect(find.text('Alice'), findsOneWidget);
+        expect(_allParagraphText(tester), isNot(contains('npub1x6q8zruq')));
+      });
+
+      testWidgets('nprofile resolves to the same person', (tester) async {
+        await tester.pumpWidget(
+          _testable(
+            const MessageContent(
+              content: 'Hey nostr:$nprofile check this out',
+              mentionNames: {hex: 'Alice'},
+            ),
+          ),
+        );
+
+        expect(find.text('Alice'), findsOneWidget);
+        expect(_allParagraphText(tester), isNot(contains('nprofile1')));
+      });
+
+      testWidgets('falls back to the compact npub without a profile', (
+        tester,
+      ) async {
+        await tester.pumpWidget(
+          _testable(
+            const MessageContent(content: 'Hey nostr:$npub', mentionNames: {}),
+          ),
+        );
+
+        expect(find.text('npub1x6q…dr3f'), findsOneWidget);
+      });
+
+      testWidgets('a known agent keeps the bot chip', (tester) async {
+        await tester.pumpWidget(
+          _testable(
+            const MessageContent(
+              content: 'Ask nostr:$npub to investigate',
+              mentionNames: {hex: 'Helper Bot'},
+              agentMentionPubkeys: {hex},
+            ),
+          ),
+        );
+
+        expect(find.byIcon(LucideIcons.bot), findsOneWidget);
+        expect(find.text('Helper Bot'), findsOneWidget);
+      });
+
+      testWidgets('tap opens the mentioned key, profile or not', (
+        tester,
+      ) async {
+        String? tappedPubkey;
+        await tester.pumpWidget(
+          _testable(
+            MessageContent(
+              content: 'Hey nostr:$npub',
+              mentionNames: const {},
+              onMentionTap: (pubkey) => tappedPubkey = pubkey,
+            ),
+          ),
+        );
+
+        await tester.tap(find.text('npub1x6q…dr3f'));
+        expect(tappedPubkey, hex);
+      });
+
+      testWidgets('inline code keeps the URI as written', (tester) async {
+        await tester.pumpWidget(
+          _testable(
+            const MessageContent(
+              content: 'Send `nostr:$npub` to the relay',
+              mentionNames: {hex: 'Alice'},
+            ),
+          ),
+        );
+
+        expect(_allParagraphText(tester), contains('nostr:$npub'));
+        expect(find.text('Alice'), findsNothing);
+      });
+
+      testWidgets('a double-backtick code span keeps the URI as written', (
+        tester,
+      ) async {
+        // gpt_markdown reads only single-backtick spans as inline code, so
+        // this one reaches the inline pass and nothing earlier claims it.
+        // Without the backtick guards the key became a chip sitting between
+        // two visible backticks.
+        await tester.pumpWidget(
+          _testable(
+            const MessageContent(
+              content: 'Send ``see nostr:$npub`` to the relay',
+              mentionNames: {hex: 'Alice'},
+            ),
+          ),
+        );
+
+        expect(_allParagraphText(tester), contains('nostr:$npub'));
+        expect(find.text('Alice'), findsNothing);
+      });
+
+      testWidgets('a key used as a link label stays source text', (
+        tester,
+      ) async {
+        // A link renders its label inside the link's own WidgetSpan, and a
+        // second one nested in it does not paint on iOS — the chip would be
+        // an invisible gap where the label should be.
+        await tester.pumpWidget(
+          _testable(
+            const MessageContent(
+              content: '[nostr:$npub](https://example.com)',
+              mentionNames: {hex: 'Alice'},
+            ),
+          ),
+        );
+
+        expect(_allParagraphText(tester), contains('nostr:$npub'));
+        expect(find.text('Alice'), findsNothing);
+      });
+
+      testWidgets('a key running into other text still names its person', (
+        tester,
+      ) async {
+        // The relay tags whoever the fixed 58-character window decodes to and
+        // ignores what follows (`extract_nostr_uris`). Reading the same window
+        // keeps the chip and the p tag describing the same message.
+        await tester.pumpWidget(
+          _testable(
+            const MessageContent(
+              content: 'ping nostr:${npub}abc now',
+              mentionNames: {hex: 'Alice'},
+            ),
+          ),
+        );
+
+        expect(find.text('Alice'), findsOneWidget);
+        expect(_allParagraphText(tester), contains('abc'));
+      });
+
+      testWidgets('the tappable chip owns one actionable label', (
+        tester,
+      ) async {
+        final handle = tester.ensureSemantics();
+        await tester.pumpWidget(
+          _testable(
+            MessageContent(
+              content: 'Hey nostr:$npub',
+              mentionNames: const {hex: 'Alice'},
+              onMentionTap: (_) {},
+            ),
+          ),
+        );
+
+        // A WidgetSpan's semantics merge into the paragraph that carries it,
+        // so the label lands on that merged node along with the tap action.
+        final finder = find.bySemanticsLabel(RegExp('Open profile of Alice'));
+        expect(finder, findsOneWidget);
+        expect(
+          tester
+              .getSemantics(finder)
+              .getSemanticsData()
+              .hasAction(SemanticsAction.tap),
+          isTrue,
+        );
+        // And it is the only stop that names the person: without the chip's
+        // own children being excluded, the pill announces '@ Alice' a second
+        // time with a tap of its own.
+        expect(find.bySemanticsLabel(RegExp('Alice')), findsOneWidget);
+        handle.dispose();
+      });
+
+      testWidgets('a fenced block keeps the URI as written', (tester) async {
+        await tester.pumpWidget(
+          _testable(
+            const MessageContent(
+              content: '```\nnostr:$npub\n```',
+              mentionNames: {hex: 'Alice'},
+            ),
+          ),
+        );
+
+        expect(_allParagraphText(tester), contains('nostr:$npub'));
+        expect(find.text('Alice'), findsNothing);
+      });
+
+      testWidgets('event references stay plain text', (tester) async {
+        // `note`/`nevent`/`naddr` name an event, not a person; rendering one
+        // as a person would be a lie, so they keep their source text.
+        const note =
+            'note1x6q8zruqrdfzqv05c4vkaray859e75z44fjful0qs6vqxfk2lffs7cw7gp';
+        await tester.pumpWidget(
+          _testable(
+            const MessageContent(content: 'See nostr:$note', mentionNames: {}),
+          ),
+        );
+
+        expect(_allParagraphText(tester), contains('nostr:$note'));
+      });
+
+      testWidgets('an undecodable payload stays plain text', (tester) async {
+        await tester.pumpWidget(
+          _testable(
+            const MessageContent(
+              content: 'Hey nostr:npub1notarealkey',
+              mentionNames: {},
+            ),
+          ),
+        );
+
+        expect(_allParagraphText(tester), contains('nostr:npub1notarealkey'));
+        expect(find.text(unknownIdentityLabel), findsNothing);
       });
     });
 
