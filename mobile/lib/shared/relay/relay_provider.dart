@@ -57,6 +57,22 @@ class RelayConfig {
     final scheme = uri.scheme == 'https' ? 'wss' : 'ws';
     return uri.replace(scheme: scheme).toString();
   }
+
+  // Value equality, because this is what the relay session and everything
+  // above it watch. The notifier rebuilds whenever the active community
+  // re-emits — any community write does that: a renamed community, a push
+  // subscription change, a lease generation — and without this every such
+  // write produced a fresh instance, which Riverpod's `!=` treats as a
+  // change, so the session closed its socket and reconnected. With push on
+  // that fed itself: the reconnect reloaded channels, the push sync wrote the
+  // desired lease again, and the client hammered the relay several times a
+  // second until it was rate-limited.
+  @override
+  bool operator ==(Object other) =>
+      other is RelayConfig && other._baseUrl == _baseUrl && other.nsec == nsec;
+
+  @override
+  int get hashCode => Object.hash(_baseUrl, nsec);
 }
 
 /// Compile-time environment config via --dart-define.

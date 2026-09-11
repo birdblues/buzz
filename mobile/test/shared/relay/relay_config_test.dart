@@ -1,6 +1,12 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:buzz/shared/relay/relay_provider.dart';
+import 'package:buzz/shared/community/community.dart';
+import 'package:buzz/shared/community/community_provider.dart';
+import 'package:buzz/shared/community/community_storage.dart';
+import 'package:hooks_riverpod/hooks_riverpod.dart';
+
+import '../community/community_storage_test.dart';
 
 void main() {
   group('RelayConfig.baseUrl normalization', () {
@@ -63,5 +69,62 @@ void main() {
       final config = RelayConfig(baseUrl: 'wss://relay.example.com:8443');
       expect(config.wsUrl, 'wss://relay.example.com:8443');
     });
+  });
+
+  group('RelayConfig equality', () {
+    test('two configs for the same relay and key are equal', () {
+      const a = RelayConfig(baseUrl: 'wss://relay.example.com', nsec: 'nsec1a');
+      const b = RelayConfig(baseUrl: 'wss://relay.example.com', nsec: 'nsec1a');
+      expect(a, equals(b));
+      expect(a.hashCode, b.hashCode);
+      expect(
+        a,
+        isNot(const RelayConfig(baseUrl: 'wss://relay.example.com', nsec: 'x')),
+      );
+      expect(
+        a,
+        isNot(const RelayConfig(baseUrl: 'wss://other', nsec: 'nsec1a')),
+      );
+    });
+
+    test(
+      'a community write that keeps the relay and key does not re-emit the config',
+      () async {
+        // Binds the production chain: community list → active community →
+        // relay config. The relay session watches the config, so a re-emit
+        // here is a socket reconnect. With push on, the desired-lease sync
+        // writes the community after every channel reload, which turned one
+        // reconnect into a self-sustaining storm.
+        final storage = CommunityStorage(secure: FakeSecureStorage());
+        final community = Community(
+          id: 'c1',
+          name: 'Before',
+          relayUrl: 'wss://relay.example.com',
+          pubkey: 'pk',
+          nsec: 'nsec1a',
+          addedAt: DateTime.utc(2026),
+        );
+        await storage.save(community);
+        await storage.saveActiveId(community.id);
+        final container = ProviderContainer(
+          overrides: [communityStorageProvider.overrideWithValue(storage)],
+        );
+        addTearDown(container.dispose);
+
+        await container.read(activeCommunityProvider.future);
+        final first = container.read(relayConfigProvider);
+        expect(first.baseUrl, 'https://relay.example.com');
+        var configEmits = 0;
+        container.listen(relayConfigProvider, (_, _) => configEmits++);
+
+        await container
+            .read(communityListProvider.notifier)
+            .adoptRelayName(community.id, 'After');
+        final active = await container.read(activeCommunityProvider.future);
+        expect(active?.name, 'After', reason: 'the write itself landed');
+        expect(configEmits, 0, reason: 'same relay, same key: no reconnect');
+        expect(container.read(relayConfigProvider), equals(first));
+      },
+    );
   });
 }
