@@ -13,7 +13,10 @@ part of '../message_content.dart';
 /// The marker itself is handed straight back to the package's own `SourceTag`,
 /// so it keeps the superscript it has always had.
 class _CitationMarkerMd extends InlineMd {
-  static final RegExp _pattern = RegExp(r'\[\d{1,4}\]');
+  /// A marker, and never a link's own label: `[1](url)` is an ordinary link
+  /// with a numeric label, and claiming its `[1]` would leave the destination
+  /// behind as text — trading this defect for its mirror image.
+  static final RegExp _pattern = RegExp(r'\[\d{1,4}\](?!\()');
   static final SourceTag _sourceTag = SourceTag();
 
   @override

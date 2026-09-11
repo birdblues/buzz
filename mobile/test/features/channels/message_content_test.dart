@@ -3174,6 +3174,24 @@ Photos
         expect(rendered, contains('https://example.com/b'));
       });
 
+      testWidgets('a numeric label is still a link label', (tester) async {
+        // `[1](url)` is an ordinary link that happens to be labelled with a
+        // digit. Claiming its `[1]` as a marker would leave the destination
+        // behind as text — the same defect this component fixes, mirrored.
+        await tester.pumpWidget(
+          _testable(
+            const MessageContent(content: '보기 [3](https://example.com) 참고'),
+          ),
+        );
+        await tester.pump();
+
+        final rendered = _allParagraphText(tester);
+        expect(rendered, isNot(contains('https://example.com')));
+        expect(rendered, contains('보기'));
+        expect(rendered, contains('참고'));
+        expect(find.text('3'), findsOneWidget);
+      });
+
       testWidgets('a marker keeps its superscript', (tester) async {
         // Splitting the run must not change how the marker itself is drawn.
         await tester.pumpWidget(
