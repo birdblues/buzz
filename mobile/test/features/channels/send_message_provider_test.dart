@@ -47,6 +47,76 @@ void main() {
     },
   );
 
+  test('addresses the people a keyed mention names', () async {
+    // The composer only turns its own @name chips into p tags, so a
+    // `nostr:npub…` typed into the body used to reach nobody — while the same
+    // mention from an agent did, because the SDK extracts it. A chip that
+    // looks like a delivered mention has to be one.
+    const npub =
+        'npub1x6q8zruqrdfzqv05c4vkaray859e75z44fjful0qs6vqxfk2lffs0jdr3f';
+    const hex =
+        '3680710f801b522031f4c5596e8fa43d0b9f5055aa649e7de086980326cafa53';
+    final session = _PendingPublishRelaySession();
+    final chipped = 'b' * 64;
+    final send = SendMessage(
+      signedEventRelay: SignedEventRelay(
+        session: session,
+        nsec: nostr.Keys.generate().nsec,
+      ),
+      fetchMembers: (_) async => const [],
+      readUserCache: () => const {},
+      addLocalMessage: (_, _) {},
+      completeLocalMessage: (_, _) {},
+      removeLocalMessage: (_, _) {},
+    );
+
+    final result = send(
+      channelId: _channelId,
+      content: 'ping nostr:$npub and `nostr:$npub` in code',
+      // The composer's own chip still addresses its person: the body cannot
+      // express what the chip map knows, and the chip map does not read text.
+      mentionPubkeys: [chipped],
+    );
+    await session.published;
+
+    expect(session.event.tags.where((tag) => tag.first == 'p').toList(), [
+      ['p', chipped],
+      ['p', hex],
+    ]);
+
+    session.accept();
+    await result;
+  });
+
+  test('a keyed mention written as code addresses nobody', () async {
+    const npub =
+        'npub1x6q8zruqrdfzqv05c4vkaray859e75z44fjful0qs6vqxfk2lffs0jdr3f';
+    final session = _PendingPublishRelaySession();
+    final send = SendMessage(
+      signedEventRelay: SignedEventRelay(
+        session: session,
+        nsec: nostr.Keys.generate().nsec,
+      ),
+      fetchMembers: (_) async => const [],
+      readUserCache: () => const {},
+      addLocalMessage: (_, _) {},
+      completeLocalMessage: (_, _) {},
+      removeLocalMessage: (_, _) {},
+    );
+
+    final result = send(
+      channelId: _channelId,
+      content: 'look at this\n\n```\nnostr:$npub\n```',
+      mentionPubkeys: const [],
+    );
+    await session.published;
+
+    expect(session.event.tags.where((tag) => tag.first == 'p'), isEmpty);
+
+    session.accept();
+    await result;
+  });
+
   test('rolls back the signed local message when publish fails', () async {
     final session = _PendingPublishRelaySession();
     final localMessages = <NostrEvent>[];

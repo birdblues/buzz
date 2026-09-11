@@ -1,3 +1,4 @@
+import '../../shared/mentions/nostr_uri_mentions.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 import '../../shared/relay/relay.dart';
@@ -152,8 +153,10 @@ class ForumEventDelivery {
 
     final selfPubkey = _relay.pubkey?.toLowerCase();
     final seen = <String>{?selfPubkey};
+    // A `nostr:npub…` in the body addresses its owner the same way an `@name`
+    // chip does, and the relay's extractor tags it — see `send_message_provider`.
     final normalizedMentions = [
-      for (final pk in mentionPubkeys)
+      for (final pk in [...mentionPubkeys, ...nostrUriMentionPubkeys(content)])
         if (seen.add(pk.toLowerCase())) pk,
     ];
 

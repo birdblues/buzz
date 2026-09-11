@@ -29,31 +29,10 @@ class _NostrMentionMd extends InlineMd {
   @override
   Set<MarkdownScope> get scopes => MarkdownComponent.allScopesExceptLinkLabel;
 
-  /// `npub` is fixed width — `npub1` plus exactly 58 bech32 characters — and
-  /// that window is what the relay's own extractor tags
-  /// (`extract_nostr_uris`, which reads the same 58 characters and ignores
-  /// what follows). Matching the same window means the chip names whoever the
-  /// message actually tagged, even when the key runs straight into other text.
-  /// `nprofile` carries relay hints and has no fixed length, so it is matched
-  /// loosely and validated by decoding.
-  ///
-  /// The bech32 body is matched case-insensitively because the combined
-  /// pattern gpt_markdown compiles is case-insensitive as soon as one
-  /// component is (`_buildPrefixPattern` builds every pill that way). The
-  /// guarantee comes from decoding, not from the character class.
-  ///
-  /// Backticks on either side keep a URI out of the chip: gpt_markdown reads
-  /// only single-backtick spans as inline code, so without this a key inside
-  /// a CommonMark ``double-backtick`` span would render as a chip between two
-  /// visible backticks.
-  static final RegExp _pattern = RegExp(
-    r'(?<![\w./`-])nostr:(?:npub1[a-z0-9]{58}|nprofile1[a-z0-9]+)(?!`)',
-    caseSensitive: false,
-    multiLine: true,
-  );
-
+  /// The one scan both sides share, so a chip and a `p` tag never disagree
+  /// about who a message addresses (`nostr_uri_mentions.dart`).
   @override
-  RegExp get exp => _pattern;
+  RegExp get exp => nostrProfileUriPattern;
 
   @override
   InlineSpan span(
@@ -97,26 +76,6 @@ class _NostrMentionMd extends InlineMd {
     );
   }
 }
-
-/// Every profile key a body addresses by NIP-27 URI, first-seen order, no
-/// duplicates, at most [_keyedMentionLookupCap] of them.
-///
-/// The scan is deliberately case-blind, like the pattern it uses: `NOSTR:` with
-/// a lowercase payload renders a chip, so it has to resolve a name too.
-List<String> nostrProfileUriPubkeys(String content) {
-  final pubkeys = <String>{};
-  for (final match in _NostrMentionMd._pattern.allMatches(content)) {
-    final pubkey = nostrProfileUriPubkey(match.group(0)!);
-    if (pubkey != null) pubkeys.add(pubkey);
-    if (pubkeys.length == _keyedMentionLookupCap) break;
-  }
-  return pubkeys.toList(growable: false);
-}
-
-/// Mirrors the SDK's `MENTION_CAP`: a message may not address more people than
-/// this, so a body carrying more keys than this is not a wall of mentions —
-/// it is a key dump, and the extra ones are not worth a cache lookup each.
-const int _keyedMentionLookupCap = 50;
 
 /// How a keyed mention should be drawn for each of [pubkeys] that [known] does
 /// not already name: the display name, and whether the key belongs to an agent

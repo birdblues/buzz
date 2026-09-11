@@ -18,6 +18,7 @@ import '../../shared/deeplink/deep_link.dart';
 import '../../shared/deeplink/pending_deep_link_provider.dart';
 import '../../shared/layout/layout_mode.dart';
 import '../../shared/platform/apple_platform.dart';
+import '../../shared/mentions/nostr_uri_mentions.dart';
 import '../../shared/profile/user_cache_provider.dart';
 import '../../shared/relay/relay.dart';
 import '../../shared/syntax_highlight.dart';
@@ -264,7 +265,7 @@ class MessageContent extends HookConsumerWidget {
     // block's "copied" tick vanishes the moment a profile lands.
     final keyed = keyedMentionIdentities(
       ref,
-      useMemoized(() => nostrProfileUriPubkeys(markdownContent), [
+      useMemoized(() => nostrUriMentionPubkeys(markdownContent), [
         markdownContent,
       ]),
       resolvedMentionNames,

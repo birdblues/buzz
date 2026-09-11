@@ -1,5 +1,6 @@
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
+import '../../shared/mentions/nostr_uri_mentions.dart';
 import '../../shared/relay/relay.dart';
 import '../channels/channel_management_provider.dart';
 import '../../shared/profile/user_cache_provider.dart';
@@ -63,8 +64,16 @@ class SendMessage {
     _ensureDeliveryValid();
     // Use explicitly passed pubkeys, or resolve @mentions against
     // channel members to avoid matching the wrong user.
-    final explicitMentions =
-        mentionPubkeys ?? await _resolveMentions(content, channelId);
+    //
+    // A `nostr:npub…` in the body addresses its owner just as much as an
+    // `@name` chip does — the relay's own extractor tags it, which is why a
+    // mention from an agent reaches the person and one typed here did not.
+    // Added on top rather than instead: the composer's chips carry identities
+    // the body cannot express, and a body may carry keys no chip does.
+    final explicitMentions = [
+      ...mentionPubkeys ?? await _resolveMentions(content, channelId),
+      ...nostrUriMentionPubkeys(content),
+    ];
     final authorPubkey = _signedEventRelay.pubkey;
     final dmRecipientPubkeys = channel?.isDm == true
         ? await _fetchDmRecipientPubkeys(channelId, channel!, authorPubkey)

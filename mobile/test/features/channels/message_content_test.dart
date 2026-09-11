@@ -3258,9 +3258,11 @@ Photos
         expect(find.text('npub1x6q…dr3f'), findsOneWidget);
       });
 
-      testWidgets('an uppercase scheme resolves the same name', (tester) async {
-        // The pattern is case-blind, so `NOSTR:` renders a chip; the key scan
-        // has to agree or the chip renders without ever asking for a name.
+      testWidgets('an uppercase scheme is not a mention at all', (
+        tester,
+      ) async {
+        // The relay's extractor matches `nostr:npub1` literally, so it never
+        // tags this. A chip here would promise a delivery nobody made.
         await tester.pumpWidget(
           _testable(
             const MessageContent(content: 'Hey NOSTR:$npub', mentionNames: {}),
@@ -3274,7 +3276,8 @@ Photos
           ),
         );
 
-        expect(find.text('Alice'), findsOneWidget);
+        expect(_allParagraphText(tester), contains('NOSTR:$npub'));
+        expect(find.text('Alice'), findsNothing);
       });
 
       testWidgets('a late profile renames the chip without a remount', (

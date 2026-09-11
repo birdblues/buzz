@@ -90,7 +90,9 @@ void main() {
       expect(nostrProfileUriPubkey('nostr:$canonicalNpub'), canonicalHex);
       expect(nostrProfileUriPubkey('nostr:$canonicalNprofile'), canonicalHex);
       expect(nostrProfileUriPubkey('  nostr:$canonicalNpub  '), canonicalHex);
-      expect(nostrProfileUriPubkey('NOSTR:$canonicalNpub'), canonicalHex);
+      // Not the uppercase scheme: the relay matches `nostr:npub1` literally,
+      // so accepting it would name someone the message never tagged.
+      expect(nostrProfileUriPubkey('NOSTR:$canonicalNpub'), isNull);
     });
 
     test('refuses everything that is not a person', () {

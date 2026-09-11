@@ -60,9 +60,14 @@ String shortPubkey(String identity) {
 /// person and return null, as does anything that fails to decode to a
 /// 64-character hex key. `nsec` never resolves: a secret key is not an
 /// identity to render.
+///
+/// The scheme must be lowercase, because the relay's extractor matches
+/// `nostr:npub1` literally (`crates/buzz-sdk/src/mentions.rs`). Accepting
+/// `NOSTR:` here would draw a mention chip for a message the relay never
+/// tagged — a delivery the reader can see but the addressee never gets.
 String? nostrProfileUriPubkey(String uri) {
   final trimmed = uri.trim();
-  if (!trimmed.toLowerCase().startsWith('nostr:')) return null;
+  if (!trimmed.startsWith('nostr:')) return null;
   try {
     final decoded = nostr.Nip19.decodeAny(payload: trimmed.substring(6));
     if (decoded.prefix != nostr.Nip19Prefix.npub &&

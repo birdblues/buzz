@@ -1,3 +1,4 @@
+import '../../shared/mentions/nostr_uri_mentions.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 import '../../shared/relay/relay.dart';
@@ -29,7 +30,9 @@ Future<void> publishNote(
     tags.add(['p', replyTo.pubkey.toLowerCase()]);
   }
 
-  for (final pubkey in mentionPubkeys) {
+  // A `nostr:npub…` in the body addresses its owner the same way an `@name`
+  // chip does, and the relay's extractor tags it — see `send_message_provider`.
+  for (final pubkey in [...mentionPubkeys, ...nostrUriMentionPubkeys(text)]) {
     final normalized = pubkey.toLowerCase();
     if (seen.add(normalized)) tags.add(['p', normalized]);
   }

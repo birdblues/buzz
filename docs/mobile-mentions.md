@@ -37,21 +37,38 @@ asks again). Everything that knows a key is real already requests it: the
 `p`-tag map, the message author, the member roster. At most 50 keys per body
 are looked up, matching the SDK's `MENTION_CAP`.
 
-It has to work that way, because often no `p` tag names the person at all.
-This client does not scan a composed body for `nostr:` URIs when it builds
-tags — only `@name` chips from the composer become tags — and a sender is
+It has to work that way, because a `p` tag may not name the person: a sender is
 never tagged for mentioning themselves (`messageMentionPubkeys` seeds its seen
-set with the sender). The owner hit exactly that: his own key, pasted into a
-message, drew a compact npub while the same key from an agent drew his name,
-because the agent's message came through the SDK, which does extract the URI.
+set with the sender). The owner hit exactly that — his own key, pasted into a
+message, drew a compact npub while the same key from an agent drew his name.
 
-**The composer does not tag the people a keyed mention names, so a
-`nostr:npub…` typed in this client renders correctly and notifies nobody.**
-Before this chip existed the reader saw 63 characters of bech32 and read it as
-a pasted key; now it is shaped exactly like a delivered `@mention`, which is a
-signal the message does not earn. Closing it means extracting the URIs into `p`
-tags on send, the way the SDK does — a change to who gets notified and pushed,
-so it is a separate decision, not a detail.
+## Writing one addresses its owner
+
+A `nostr:npub…` in the body is a mention, so sending one tags the person
+(`nostrUriMentionPubkeys`, wired into chat, forum posts and notes). It used to
+tag nobody: the composer turned only its own `@name` chips into tags, so a key
+typed here rendered as a mention and delivered nothing — a promise the message
+did not keep, and one this chip made much easier to believe.
+
+Who gets addressed is decided to match the relay's own extractor
+(`extract_nostr_uris`), because a message written by one and read by the other
+must name the same people:
+
+- code is removed first (`stripCodeRegions`, a port of the SDK's), so quoting a
+  key does not summon its owner;
+- `npub` is read as a fixed 58-character window, so a key running into other
+  text still counts;
+- the scheme must be lowercase — the extractor matches `nostr:npub1` literally,
+  so `NOSTR:` is not a mention here either, and renders as plain text;
+- at most `nostrUriMentionCap` (50) keys per body, the SDK's `MENTION_CAP`.
+
+Two places where the extractor's idea of code is narrower than CommonMark's are
+matched rather than corrected: an indented block and a double-backtick span are
+prose to it, so they are prose here. The one deliberate narrowing is a key
+touching a backtick — the pattern refuses it so a double-backtick span cannot
+render a chip between two visible ticks. The relay would address that person;
+we do not. Addressing fewer people than the relay leaves a mention the reader
+can see undelivered, which is recoverable; the reverse is not.
 
 Where the surface wires `onMentionTap` — a channel bubble, a thread reply, a
 forum post — the chip opens the key it names even with no profile loaded: the
@@ -128,6 +145,9 @@ relay tags; agents address people with `npub`.
 4. `nostr:note1…` in a body → still the URI.
 5. VoiceOver over a chip → one stop, "Open profile of …", activating it opens
    the profile.
+6. Paste someone else's key into a message and send it → **they get the
+   notification**, the same as an `@name` mention. Send one inside a fenced
+   block → they do not.
 
 Surfaces to check: a channel bubble, a thread reply and a forum post — they
 all render through `MessageContent`. A push banner does not: `previewBody` in
