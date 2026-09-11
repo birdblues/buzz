@@ -50,25 +50,33 @@ tag nobody: the composer turned only its own `@name` chips into tags, so a key
 typed here rendered as a mention and delivered nothing — a promise the message
 did not keep, and one this chip made much easier to believe.
 
-Who gets addressed is decided to match the relay's own extractor
-(`extract_nostr_uris`), because a message written by one and read by the other
-must name the same people:
+**What a message tags is exactly what it shows as a mention.** The sender and
+the renderer claim the same pattern and skip the same places, so nobody is
+notified for a mention that is invisible to every reader — including its
+author, who would have no way to know it went out.
 
-- code is removed first (`stripCodeRegions`, a port of the SDK's), so quoting a
-  key does not summon its owner;
+The rules follow the relay's own extractor (`extract_nostr_uris`), because a
+message written by one and read by the other must name the same people:
+
+- code is skipped (`stripCodeRegions`, a port of the SDK's), so quoting a key
+  does not summon its owner;
 - `npub` is read as a fixed 58-character window, so a key running into other
   text still counts;
 - the scheme must be lowercase — the extractor matches `nostr:npub1` literally,
   so `NOSTR:` is not a mention here either, and renders as plain text;
 - at most `nostrUriMentionCap` (50) keys per body, the SDK's `MENTION_CAP`.
 
-Two places where the extractor's idea of code is narrower than CommonMark's are
-matched rather than corrected: an indented block and a double-backtick span are
-prose to it, so they are prose here. The one deliberate narrowing is a key
-touching a backtick — the pattern refuses it so a double-backtick span cannot
-render a chip between two visible ticks. The relay would address that person;
-we do not. Addressing fewer people than the relay leaves a mention the reader
-can see undelivered, which is recoverable; the reverse is not.
+An indented block is prose to the extractor and to this renderer alike, so a
+key there is both tagged and chipped.
+
+Three cases are deliberately narrower than the extractor, and all three are
+places the renderer draws nothing: a key touching a backtick (the guard that
+keeps a chip out of a ``double-backtick`` span), a key inside link syntax (its
+label renders in the link's own widget, where a nested chip does not paint on
+iOS), and a key inside image syntax. The relay would address those people; we
+do not. Addressing fewer people than the relay leaves a mention the reader can
+see undelivered, which is recoverable. The reverse — a notification with
+nothing on screen to explain it — is not.
 
 Where the surface wires `onMentionTap` — a channel bubble, a thread reply, a
 forum post — the chip opens the key it names even with no profile loaded: the
@@ -147,7 +155,8 @@ relay tags; agents address people with `npub`.
    the profile.
 6. Paste someone else's key into a message and send it → **they get the
    notification**, the same as an `@name` mention. Send one inside a fenced
-   block → they do not.
+   block, a link label or a ``double-backtick`` span → no chip, and no
+   notification either.
 
 Surfaces to check: a channel bubble, a thread reply and a forum post — they
 all render through `MessageContent`. A push banner does not: `previewBody` in

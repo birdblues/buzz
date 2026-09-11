@@ -36,25 +36,33 @@ void main() {
       expect(nostrUriMentionPubkeys('  ```\n  nostr:$npub\n  ```'), isEmpty);
     });
 
-    test('what the relay still counts as prose, and so do we', () {
-      // Recorded, not endorsed: the extractor's idea of code is narrower than
-      // CommonMark's, and the client has to agree with the extractor rather
-      // than with CommonMark. An indented block is not code to either of them,
-      // and a double-backtick span reads as one empty inline span followed by
-      // ordinary text.
-      expect(nostrUriMentionPubkeys('para\n\n    nostr:$npub\n'), [hex]);
-      expect(nostrUriMentionPubkeys('a ``nostr:$npub`` b'), [hex]);
+    test('a key the reader would not see as a mention addresses nobody', () {
+      // The set this returns is the set the reader sees as chips. Where the
+      // renderer refuses — a key touching a backtick, so a CommonMark
+      // double-backtick span cannot draw a chip between two visible ticks, and
+      // a key inside link or image syntax, which renders as a label, alt text
+      // or a URL — nobody is addressed either. Otherwise the addressee gets a
+      // notification for a mention no reader can see, not even its author.
+      expect(nostrUriMentionPubkeys('a ``nostr:$npub`` b'), isEmpty);
+      expect(nostrUriMentionPubkeys('a `nostr:$npub b'), isEmpty);
+      expect(
+        nostrUriMentionPubkeys('[nostr:$npub](https://example.com)'),
+        isEmpty,
+      );
+      expect(nostrUriMentionPubkeys('[Alice](nostr:$npub)'), isEmpty);
+      expect(
+        nostrUriMentionPubkeys('![nostr:$npub](https://example.com/a.png)'),
+        isEmpty,
+      );
+      // The relay's extractor addresses all of these. Addressing fewer people
+      // than it does leaves a visible mention undelivered, which a reader can
+      // see and fix; the reverse cannot be seen at all.
     });
 
-    test('a key glued to a backtick addresses nobody, unlike the relay', () {
-      // The one place this is deliberately narrower. The pattern refuses a URI
-      // touching a backtick so that a CommonMark double-backtick span does not
-      // render a chip between two visible ticks; an unclosed backtick falls
-      // under the same rule. The relay would address this person. Addressing
-      // fewer people than the relay leaves a mention undelivered, which the
-      // reader can see and fix — the reverse would promise a delivery nobody
-      // made.
-      expect(nostrUriMentionPubkeys('a `nostr:$npub b'), isEmpty);
+    test('an indented block is prose to the relay, and to the reader', () {
+      // Recorded, not endorsed: neither the extractor nor this renderer treats
+      // an indented block as code, so a key there is addressed and chipped.
+      expect(nostrUriMentionPubkeys('para\n\n    nostr:$npub\n'), [hex]);
     });
 
     test('an uppercase scheme addresses nobody', () {

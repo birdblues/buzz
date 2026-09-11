@@ -34,16 +34,26 @@ final RegExp nostrProfileUriPattern = RegExp(
 const int nostrUriMentionCap = 50;
 
 /// Every profile key [content] addresses by NIP-27 URI: first-seen order, no
-/// duplicates, code regions excluded, at most [nostrUriMentionCap] of them.
+/// duplicates, at most [nostrUriMentionCap] of them.
 ///
-/// Quoting a key must not address its owner, so code is removed first — the
-/// same reason the SDK runs `strip_code_regions` before its own scan.
+/// **This is exactly the set the reader sees as mention chips.** The renderer
+/// claims the same pattern and skips the same places, so a message never tags
+/// someone it does not visibly address — nobody gets a notification for a
+/// mention that is invisible to every reader, including its author.
+///
+/// Skipped: code, because quoting a key must not summon its owner, and link or
+/// image syntax, because a key there renders as the link's label or its alt
+/// text rather than as a mention.
 List<String> nostrUriMentionPubkeys(String content) {
-  if (content.length < 'nostr:npub1'.length) return const [];
+  // The scheme is lowercase (see [nostrProfileUriPubkey]), so this cheap test
+  // is exact, and it keeps the scans below off every message without a key.
+  if (!content.contains('nostr:')) return const [];
+  final skip = _unaddressableRanges(content);
   final pubkeys = <String>{};
-  for (final match in nostrProfileUriPattern.allMatches(
-    stripCodeRegions(content),
-  )) {
+  for (final match in nostrProfileUriPattern.allMatches(content)) {
+    if (skip.any((r) => match.start >= r.start && match.start < r.end)) {
+      continue;
+    }
     final pubkey = nostrProfileUriPubkey(match.group(0)!);
     if (pubkey != null) pubkeys.add(pubkey);
     if (pubkeys.length == nostrUriMentionCap) break;
@@ -51,21 +61,56 @@ List<String> nostrUriMentionPubkeys(String content) {
   return pubkeys.toList(growable: false);
 }
 
-/// [content] with fenced blocks and inline code spans replaced by a space, so
-/// a scan over the result cannot see anything that was written as code.
+/// Link and image syntax — `[label](destination)` and its `!` form.
 ///
-/// A port of the SDK's `strip_code_regions` (`crates/buzz-sdk/src/mentions.rs`)
-/// — deliberately the same shape, including what it does not cover: an indented
-/// code block is not code here, and neither is a CommonMark double-backtick
-/// span (its two ticks read as one empty inline span). Sender and relay must
-/// agree on who a message tags; matching CommonMark instead would split them.
+/// Mirrors what `ATagMd` and `ImageMd` claim in gpt_markdown, which is why a
+/// key inside one never becomes a chip: the label renders inside the link's own
+/// widget (where a nested one does not paint on iOS) and the destination
+/// renders as a URL.
+final RegExp _markdownLinkPattern = RegExp(
+  r'!?\[.*?\]\([^\s]*\)',
+  dotAll: true,
+);
+
+/// Where in [content] a `nostr:` URI is not a mention: code regions and link
+/// or image syntax.
+List<({int start, int end})> _unaddressableRanges(String content) => [
+  ..._codeRegions(content),
+  for (final match in _markdownLinkPattern.allMatches(content))
+    (start: match.start, end: match.end),
+];
+
+/// [content] with fenced blocks and inline code spans replaced by a space.
+///
+/// The readable form of [_codeRegions], and the surface its agreement with the
+/// relay is checked through: this is a port of the SDK's `strip_code_regions`
+/// (`crates/buzz-sdk/src/mentions.rs`), deliberately the same shape — including
+/// what it does not cover. An indented code block is not code here, and neither
+/// is a CommonMark double-backtick span, whose two ticks read as one empty
+/// inline span. Sender and relay must agree on what counts as code; matching
+/// CommonMark instead would split them.
 String stripCodeRegions(String content) {
   final out = StringBuffer();
+  var next = 0;
+  for (final region in _codeRegions(content)) {
+    out.write(content.substring(next, region.start));
+    out.write(' ');
+    next = region.end;
+  }
+  out.write(content.substring(next));
+  return out.toString();
+}
+
+/// Fenced blocks and inline code spans in [content], in order, never
+/// overlapping.
+List<({int start, int end})> _codeRegions(String content) {
+  final regions = <({int start, int end})>[];
   var i = 0;
   while (i < content.length) {
     if (content.startsWith('```', i) && _onlyIndentBefore(content, i)) {
-      out.write(' ');
-      i = _fencedBlockEnd(content, i);
+      final end = _fencedBlockEnd(content, i);
+      regions.add((start: i, end: end));
+      i = end;
       continue;
     }
     if (content[i] == '`') {
@@ -74,15 +119,14 @@ String stripCodeRegions(String content) {
           ? content.indexOf('`', afterTick)
           : -1;
       if (close >= 0 && !content.substring(afterTick, close).contains('\n')) {
-        out.write(' ');
+        regions.add((start: i, end: close + 1));
         i = close + 1;
         continue;
       }
     }
-    out.write(content[i]);
     i++;
   }
-  return out.toString();
+  return regions;
 }
 
 /// Whether everything between the start of [index]'s line and [index] is

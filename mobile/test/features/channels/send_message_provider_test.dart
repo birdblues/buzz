@@ -88,7 +88,12 @@ void main() {
     await result;
   });
 
-  test('a keyed mention written as code addresses nobody', () async {
+  test('a keyed mention no reader sees as one addresses nobody', () async {
+    // Code, a link label, a double-backtick span: the renderer draws no chip
+    // for any of them, so none of them may tag anyone. The relay's extractor
+    // would tag all three — addressing fewer people than it does leaves a
+    // visible mention undelivered, which a reader can fix; the reverse is a
+    // notification nobody can account for.
     const npub =
         'npub1x6q8zruqrdfzqv05c4vkaray859e75z44fjful0qs6vqxfk2lffs0jdr3f';
     final session = _PendingPublishRelaySession();
@@ -106,7 +111,9 @@ void main() {
 
     final result = send(
       channelId: _channelId,
-      content: 'look at this\n\n```\nnostr:$npub\n```',
+      content:
+          'look at this\n\n```\nnostr:$npub\n```\n'
+          'and [nostr:$npub](https://example.com) and ``nostr:$npub``',
       mentionPubkeys: const [],
     );
     await session.published;
