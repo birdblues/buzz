@@ -41,6 +41,7 @@ import 'sandbox_bridge.dart';
 import 'sandbox_open.dart';
 import 'voice_note_attachment.dart';
 
+part 'message_content/citation_marker.dart';
 part 'message_content/media_carousel.dart';
 part 'message_content/media_mosaic.dart';
 part 'message_content/nostr_mention.dart';
@@ -376,6 +377,7 @@ class MessageContent extends HookConsumerWidget {
         textAlign: textAlign,
         maxLines: maxLines,
         inlineComponents: [
+          _CitationMarkerMd(),
           _MentionMd(
             mentionNames: resolvedMentionNames,
             agentMentionPubkeys: resolvedAgentMentionPubkeys,

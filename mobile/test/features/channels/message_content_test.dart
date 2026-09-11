@@ -3148,6 +3148,45 @@ Photos
       });
     });
 
+    group('citation markers', () {
+      testWidgets('a link after [1] still renders as a link', (tester) async {
+        // An agent listing its sources writes `[1] <url>`, which the bare-link
+        // normalizer turns into `[1] [url](url)`. gpt_markdown's link pattern
+        // ends at the last `]` before a `(` and so matches the whole run, but
+        // its parser takes the first balanced `]`, finds `[1]`, and prints the
+        // run as source text. Every source in the list came out as raw
+        // markdown on the owner's screen.
+        await tester.pumpWidget(
+          _testable(
+            const MessageContent(
+              content:
+                  '## 출처\n'
+                  '[1] https://example.com/a  \n'
+                  '[2] https://example.com/b',
+            ),
+          ),
+        );
+        await tester.pump();
+
+        final rendered = _allParagraphText(tester);
+        expect(rendered, isNot(contains('](')));
+        expect(rendered, contains('https://example.com/a'));
+        expect(rendered, contains('https://example.com/b'));
+      });
+
+      testWidgets('a marker keeps its superscript', (tester) async {
+        // Splitting the run must not change how the marker itself is drawn.
+        await tester.pumpWidget(
+          _testable(const MessageContent(content: '[1] 그냥 글')),
+        );
+        await tester.pump();
+
+        expect(find.text('1'), findsOneWidget);
+        expect(_allParagraphText(tester), contains('그냥 글'));
+        expect(_allParagraphText(tester), isNot(contains('[1]')));
+      });
+    });
+
     group('NIP-27 nostr: mentions', () {
       // The key and its two written forms, derived from each other so the
       // fixtures cannot drift apart: `_npub` and `_nprofile` both name `_hex`.
