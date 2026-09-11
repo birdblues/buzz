@@ -125,10 +125,26 @@ class SearchNotifier extends Notifier<SearchState> {
     // If the query changed while debouncing, bail out.
     if (state.query != query) return;
 
-    // Fire all three lookups in parallel.
+    // Fire all three lookups in parallel. Channels match synchronously; the
+    // two relay lookups race and land in either order.
+    _pendingLookups = 2;
     _searchMessages(query);
     _searchUsers(query);
     _searchChannels(query);
+  }
+
+  /// Relay lookups still running for the current query.
+  int _pendingLookups = 0;
+
+  /// Records one finished relay lookup for [query]. Loading ends when the
+  /// last lookup lands — not when any one of them does. Deriving it from
+  /// "are the other lists still empty" flipped the spinner back on for good
+  /// whenever a no-hit message search finished before an equally empty user
+  /// search (a pasted npub does exactly that), and nothing cleared it again.
+  void _lookupFinished(String query, SearchState Function(SearchState) apply) {
+    if (state.query != query) return;
+    _pendingLookups--;
+    state = apply(state).copyWith(isLoading: _pendingLookups > 0);
   }
 
   Future<void> _searchMessages(String query) async {
@@ -167,11 +183,9 @@ class SearchNotifier extends Notifier<SearchState> {
           )
           .toList();
 
-      if (state.query != query) return;
-      state = state.copyWith(messageResults: hits, isLoading: false);
+      _lookupFinished(query, (s) => s.copyWith(messageResults: hits));
     } catch (e) {
-      if (state.query != query) return;
-      state = state.copyWith(isLoading: false, error: e.toString());
+      _lookupFinished(query, (s) => s.copyWith(error: e.toString()));
     }
   }
 
@@ -181,13 +195,11 @@ class SearchNotifier extends Notifier<SearchState> {
           .read(channelActionsProvider)
           .searchUsers(query, limit: 8);
 
-      if (state.query != query) return;
-      state = state.copyWith(
-        userResults: users,
-        isLoading: state.messageResults.isEmpty && state.channelResults.isEmpty,
-      );
+      _lookupFinished(query, (s) => s.copyWith(userResults: users));
     } catch (_) {
-      // User search failure is non-critical — keep existing results.
+      // User search failure is non-critical — keep existing results, but
+      // the lookup is over.
+      _lookupFinished(query, (s) => s);
     }
   }
 
@@ -201,10 +213,7 @@ class SearchNotifier extends Notifier<SearchState> {
     }).toList();
 
     if (state.query != query) return;
-    state = state.copyWith(
-      channelResults: matches,
-      isLoading: state.messageResults.isEmpty && state.userResults.isEmpty,
-    );
+    state = state.copyWith(channelResults: matches);
   }
 
   void clear() {
