@@ -316,6 +316,11 @@ class _ThreadContent extends HookConsumerWidget {
                   content: content,
                   mentionPubkeys: mentionPubkeys,
                   mediaTags: mediaTags,
+                  // Whose post this is, and the last voice that was not mine.
+                  replyAudiencePubkeys: [
+                    post.pubkey,
+                    ?_lastOtherVoice(replies, currentPubkey),
+                  ],
                 ),
           ),
       ],
@@ -683,4 +688,18 @@ Map<String, String> _buildMentionNames(
     }
   }
   return names;
+}
+
+/// The author of the most recent reply that is not [currentPubkey], or null
+/// when nobody else has commented.
+///
+/// Answering yourself addresses nobody: without this, a second consecutive
+/// comment from the post's author would name only the author, both names
+/// would drop as self, and whoever is being answered would never hear it.
+String? _lastOtherVoice(List<ThreadReply> replies, String? currentPubkey) {
+  final mine = currentPubkey?.toLowerCase();
+  for (final reply in replies.reversed) {
+    if (reply.pubkey.toLowerCase() != mine) return reply.pubkey;
+  }
+  return null;
 }

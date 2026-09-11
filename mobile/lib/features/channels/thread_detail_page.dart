@@ -958,14 +958,18 @@ class ThreadDetailPage extends HookConsumerWidget {
                               channel: channel,
                               parentEventId: threadHead.id,
                               rootEventId: effectiveRootId,
-                              // Whose thread this is, and whoever spoke last —
-                              // the two people a reply is answering. Replies
-                              // here are flat, so the parent is always the
-                              // head; without the tail, answering an agent in
-                              // your own thread would address nobody.
+                              // Whose thread this is, and the last voice that
+                              // was not mine — the two people a reply is
+                              // answering. Replies here are flat, so the
+                              // parent is always the head; without the tail,
+                              // answering an agent in your own thread would
+                              // address nobody. The tail has to skip my own
+                              // messages or a second consecutive reply would
+                              // address only me, and the agent I am answering
+                              // would never hear it.
                               replyAudiencePubkeys: [
                                 liveHead.pubkey,
-                                if (replies.isNotEmpty) replies.last.pubkey,
+                                ?_lastOtherVoice(replies, currentPubkey),
                               ],
                               mediaTags: mediaTags,
                             ),
@@ -998,4 +1002,19 @@ class ThreadDetailPage extends HookConsumerWidget {
       ),
     );
   }
+}
+
+/// The author of the most recent reply that is not [currentPubkey], or null
+/// when nobody else has spoken in the thread.
+///
+/// A reply addresses the person it answers, and answering yourself addresses
+/// nobody: without this, a second consecutive message from the thread's owner
+/// would name only the owner, both names would drop as self, and the agent
+/// being answered would never wake.
+String? _lastOtherVoice(List<TimelineMessage> replies, String? currentPubkey) {
+  final mine = currentPubkey?.toLowerCase();
+  for (final reply in replies.reversed) {
+    if (reply.pubkey.toLowerCase() != mine) return reply.pubkey;
+  }
+  return null;
 }

@@ -10641,6 +10641,85 @@ void main() {
       ]);
     });
 
+    testWidgets('a second reply of my own still answers the other voice', (
+      tester,
+    ) async {
+      // Answering yourself addresses nobody. The thread owner replying twice
+      // in a row would otherwise name only themselves, both names would drop
+      // as self, and the agent being answered would never hear the follow-up.
+      final head = _textMsg(id: 'head', pubkey: 'alice', content: 'starting');
+      final agent = _textMsg(
+        id: 'agent',
+        pubkey: 'bob',
+        content: 'answering',
+        createdAt: 1100,
+        extraTags: const [
+          ['e', 'head', '', 'reply'],
+        ],
+      );
+      final mine = _textMsg(
+        id: 'mine',
+        pubkey: 'alice',
+        content: 'thanks',
+        createdAt: 1200,
+        extraTags: const [
+          ['e', 'head', '', 'reply'],
+        ],
+      );
+      final timeline = formatTimeline([head, agent, mine]);
+      final captured = <List<String>>[];
+
+      await tester.pumpWidget(
+        _buildTestable(
+          messages: [head, agent, mine],
+          extraOverrides: [
+            sendMessageProvider.overrideWithValue(
+              _CapturingSendMessage(
+                (audience) => captured.add(audience.toList()),
+              ),
+            ),
+          ],
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: TextButton(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => ThreadDetailPage(
+                        threadHead: timeline.first,
+                        allMessages: timeline,
+                        channelId: _testChannel.id,
+                        currentPubkey: 'alice',
+                        isMember: true,
+                        isArchived: false,
+                      ),
+                    ),
+                  ),
+                  child: const Text('Open own thread'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Open own thread'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Reply in thread\u2026'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).last, 'one more thing');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(LucideIcons.arrowUp).last);
+      await tester.pumpAndSettle();
+
+      // The head is me and the newest reply is me; the agent is still the
+      // voice being answered. The send path drops my own name.
+      expect(captured, [
+        ['alice', 'bob'],
+      ]);
+    });
+
     testWidgets('waits for a delayed target jump before highlighting', (
       tester,
     ) async {

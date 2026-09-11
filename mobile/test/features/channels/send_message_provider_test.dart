@@ -6,6 +6,7 @@ import 'package:nostr/nostr.dart' as nostr;
 import 'package:buzz/features/channels/channel.dart';
 import 'package:buzz/features/channels/channel_management_provider.dart';
 import 'package:buzz/features/channels/send_message_provider.dart';
+import 'package:buzz/shared/push/push_subscription.dart';
 import 'package:buzz/shared/relay/relay.dart';
 
 void main() {
@@ -157,6 +158,46 @@ void main() {
     expect(session.event.tags.where((tag) => tag.first == 'p').toList(), [
       ['p', other],
     ]);
+
+    session.accept();
+    await result;
+  });
+
+  test('the reply audience never silences a message it was added to', () async {
+    // The relay drops a push entirely once a message addresses more than
+    // buzzPushHellthreadParticipantLimit people. Two names added on the
+    // sender's behalf must not be what crosses that line: a reply the author
+    // deliberately addressed to 20 people still notifies them.
+    final session = _PendingPublishRelaySession();
+    final chipped = [
+      for (var i = 0; i < buzzPushHellthreadParticipantLimit; i++)
+        i.toRadixString(16).padLeft(64, '0'),
+    ];
+    final send = SendMessage(
+      signedEventRelay: SignedEventRelay(
+        session: session,
+        nsec: nostr.Keys.generate().nsec,
+      ),
+      fetchMembers: (_) async => const [],
+      readUserCache: () => const {},
+      addLocalMessage: (_, _) {},
+      completeLocalMessage: (_, _) {},
+      removeLocalMessage: (_, _) {},
+    );
+
+    final result = send(
+      channelId: _channelId,
+      content: 'a crowded reply',
+      parentEventId: 'thread-head',
+      mentionPubkeys: chipped,
+      replyAudiencePubkeys: ['a' * 64, 'b' * 64],
+    );
+    await session.published;
+
+    expect(
+      session.event.tags.where((tag) => tag.first == 'p'),
+      hasLength(buzzPushHellthreadParticipantLimit),
+    );
 
     session.accept();
     await result;

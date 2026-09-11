@@ -145,11 +145,54 @@ final class BuzzPushNotificationResolverTests: XCTestCase {
   func testPreviewBodyLeavesProseThatOnlyLooksLikeMarkup() {
     // Every rule above is a chance to eat ordinary text. An identifier that
     // arrived as prose is not emphasis, a pipe between two words is not a
-    // table, and a `#` inside a word is not a heading.
+    // table, a `#` inside a word is not a heading, and an asterisk with air
+    // around it multiplies rather than emphasises.
     XCTAssertEqual(
       BuzzPushNotificationResolver.previewBody("some_var_name either|or C#은 언어"),
       "some_var_name either|or C#은 언어"
     )
+    XCTAssertEqual(
+      BuzzPushNotificationResolver.previewBody("총 2 * 3 * 4 입니다"),
+      "총 2 * 3 * 4 입니다"
+    )
+    XCTAssertEqual(
+      BuzzPushNotificationResolver.previewBody("3*4*5 입니다"),
+      "3*4*5 입니다"
+    )
+    // A pipe is a cell separator only on a line fenced by pipes.
+    XCTAssertEqual(
+      BuzzPushNotificationResolver.previewBody("yes | no 중 하나"),
+      "yes | no 중 하나"
+    )
+    // Emphasis that does hug its text still goes.
+    XCTAssertEqual(
+      BuzzPushNotificationResolver.previewBody("**굵게** 와 *기울임*"),
+      "굵게 와 기울임"
+    )
+  }
+
+  func testPreviewBodyDropsEmptyMarkersAndKeepsMarkupOnlyBodies() {
+    // A marker with nothing after it is not structure; a bare ":" or "·" in a
+    // banner reads as a glitch.
+    XCTAssertEqual(BuzzPushNotificationResolver.previewBody("##\n본문"), "본문")
+    XCTAssertEqual(BuzzPushNotificationResolver.previewBody("-\n본문"), "본문")
+    // A body that is nothing but markup still has to arrive: an empty body
+    // makes the resolver drop the notification, so the source text stands in.
+    XCTAssertEqual(BuzzPushNotificationResolver.previewBody("---"), "---")
+    XCTAssertEqual(BuzzPushNotificationResolver.previewBody("***"), "***")
+  }
+
+  func testPreviewBodyStaysBoundedOnABodyFullOfKeys() {
+    // This runs in a notification extension, where overrunning the budget is
+    // a silently missing notification. Rewriting the whole string per match
+    // made a body of a few thousand keys quadratic.
+    let npub = "npub1x6q8zruqrdfzqv05c4vkaray859e75z44fjful0qs6vqxfk2lffs0jdr3f"
+    let body = String(repeating: "nostr:\(npub) ", count: 3000)
+
+    let preview = BuzzPushNotificationResolver.previewBody(body)
+
+    XCTAssertEqual(preview.count, 178)
+    XCTAssertTrue(preview.hasPrefix("@npub1x6q…dr3f"))
   }
 
   func testPreviewBodyCompactsKeyedMentions() {

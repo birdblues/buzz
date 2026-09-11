@@ -612,12 +612,22 @@ public final class BuzzPushNotificationResolver: BuzzPushNotificationResolving {
     result = result.replacingOccurrences(
       of: #"https?://\S+"#, with: "[link]", options: .regularExpression)
     result = compactProfileURIs(result)
-    result = stripBlockMarkers(result)
-    result = stripEmphasis(result)
-    result = result.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+    let flattened = collapsed(
+      stripEmphasis(stripBlockMarkers(flattenTableRows(result)))
+    )
+    // Markup with nothing in it is still a message somebody sent. An empty
+    // body means `makeResolution` drops the notification entirely, so a
+    // message that flattens to nothing keeps its source text instead of
+    // vanishing from the phone.
+    let body = flattened.isEmpty ? collapsed(result) : flattened
+    return body.count > 180
+      ? String(body.prefix(177)).trimmingCharacters(in: .whitespacesAndNewlines) + "…" : body
+  }
+
+  /// [text] as one line: every whitespace run becomes a single space.
+  private static func collapsed(_ text: String) -> String {
+    text.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
       .trimmingCharacters(in: .whitespacesAndNewlines)
-    return result.count > 180
-      ? String(result.prefix(177)).trimmingCharacters(in: .whitespacesAndNewlines) + "…" : result
   }
 
   /// NIP-27 profile references as the compact npub the app draws when it has
@@ -627,29 +637,45 @@ public final class BuzzPushNotificationResolver: BuzzPushNotificationResolving {
   /// names exactly who the message addressed.
   private static func compactProfileURIs(_ text: String) -> String {
     guard text.contains("nostr:") else { return text }
-    var result = text
-    var searchFrom = result.startIndex
-    while let found = result.range(
-      of: #"nostr:npub1[a-z0-9]{58}"#,
-      options: .regularExpression,
-      range: searchFrom..<result.endIndex
-    ) {
-      let bech32 = String(result[found].dropFirst("nostr:".count))
-      guard Bech32.canonicalNpub(from: bech32) != nil else {
-        searchFrom = found.upperBound
-        continue
+    var out = ""
+    var cursor = text.startIndex
+    var replaced = 0
+    while replaced < mentionCompactionLimit,
+      let found = text.range(
+        of: #"nostr:npub1[a-z0-9]{58}"#,
+        options: .regularExpression,
+        range: cursor..<text.endIndex
+      )
+    {
+      out += text[cursor..<found.lowerBound]
+      let bech32 = String(text[found].dropFirst("nostr:".count))
+      if Bech32.canonicalNpub(from: bech32) != nil {
+        out += "@" + shortPubkey(bech32)
+        replaced += 1
+      } else {
+        out += text[found]
       }
-      let label = "@" + shortPubkey(bech32)
-      result.replaceSubrange(found, with: label)
-      searchFrom = result.index(found.lowerBound, offsetBy: label.count)
+      cursor = found.upperBound
     }
-    return result
+    out += text[cursor...]
+    return out
   }
+
+  /// How many keyed mentions are worth compacting in one body.
+  ///
+  /// The banner holds 180 characters, so a body naming more people than this
+  /// has already lost the argument; scanning the rest only spends an app
+  /// extension's budget, which is measured in tens of megabytes and seconds.
+  private static let mentionCompactionLimit = 64
 
   /// Line-level markup: headings, quotes, list markers, rules, table rows.
   private static func stripBlockMarkers(_ text: String) -> String {
     var result = text
     for (pattern, replacement) in [
+      // A marker with nothing after it is not structure, and a stray ":" or
+      // "·" in a banner reads as a glitch.
+      (#"(?m)^[ \t]{0,3}#{1,6}[ \t]*#*[ \t]*$"#, ""),
+      (#"(?m)^[ \t]{0,3}[-*+][ \t]*$"#, ""),
       // A heading labels what follows, so it keeps that role as a colon.
       (#"(?m)^[ \t]{0,3}#{1,6}[ \t]+(.*?)[ \t]*#*[ \t]*$"#, "$1:"),
       (#"(?m)^[ \t]{0,3}(?:>[ \t]?)+"#, ""),
@@ -657,17 +683,39 @@ public final class BuzzPushNotificationResolver: BuzzPushNotificationResolving {
       // marker rule, which would otherwise read `---` as a bullet.
       (#"(?m)^[ \t]{0,3}([-*_])[ \t]*(?:\1[ \t]*){2,}$"#, ""),
       // A table's separator row is scaffolding; its cells are content.
-      (#"(?m)^[ \t]{0,3}\|?[ \t]*:?-{2,}:?[ \t]*(?:\|[ \t]*:?-{2,}:?[ \t]*)+\|?[ \t]*$"#, ""),
       (#"(?m)^[ \t]{0,3}[-*+][ \t]+"#, "· "),
       (#"(?m)^[ \t]{0,3}\d{1,9}[.)][ \t]+"#, "· "),
-      (#"(?m)^[ \t]*\|[ \t]*"#, ""),
-      (#"(?m)[ \t]*\|[ \t]*$"#, ""),
-      (#"[ \t]+\|[ \t]*|[ \t]*\|[ \t]+"#, " · "),
+      (#"(?m)^[ \t]{0,3}\|?[ \t]*:?-{2,}:?[ \t]*(?:\|[ \t]*:?-{2,}:?[ \t]*)+\|?[ \t]*$"#, ""),
     ] {
       result = result.replacingOccurrences(
         of: pattern, with: replacement, options: .regularExpression)
     }
     return result
+  }
+
+  /// Table rows, flattened to their cells.
+  ///
+  /// Only a line fenced by pipes is a table: `yes | no` is a sentence, and
+  /// turning its pipe into a bullet would rewrite what someone wrote.
+  private static func flattenTableRows(_ text: String) -> String {
+    guard text.contains("|") else { return text }
+    return text.split(separator: "\n", omittingEmptySubsequences: false)
+      .map { line -> Substring in
+        let trimmed = line.drop(while: { $0 == " " || $0 == "\t" })
+        guard trimmed.first == "|", trimmed.dropFirst().contains("|") else {
+          return line
+        }
+        let cells = trimmed.dropFirst()
+          .split(separator: "|", omittingEmptySubsequences: false)
+          .map { $0.trimmingCharacters(in: .whitespaces) }
+          .filter { !$0.isEmpty }
+        // The rule under a header row is scaffolding, not content.
+        let isSeparator =
+          !cells.isEmpty
+          && cells.allSatisfy { $0.allSatisfy { ":-".contains($0) } }
+        return isSeparator ? "" : Substring(cells.joined(separator: " · "))
+      }
+      .joined(separator: "\n")
   }
 
   /// Emphasis runs, unwrapped to the text they emphasise.
@@ -677,9 +725,10 @@ public final class BuzzPushNotificationResolver: BuzzPushNotificationResolving {
   private static func stripEmphasis(_ text: String) -> String {
     var result = text
     for pattern in [
-      #"\*\*\*([^*\n]+)\*\*\*"#,
-      #"\*\*([^*\n]+)\*\*"#,
-      #"(?<!\*)\*([^*\n]+)\*(?!\*)"#,
+      // An emphasis run hugs its text: `*a*` emphasises, `2 * 3 * 4` multiplies.
+      #"(?<![\w*])\*\*\*(?=\S)([^*\n]*[^\s*])\*\*\*"#,
+      #"(?<![\w*])\*\*(?=\S)([^*\n]*[^\s*])\*\*"#,
+      #"(?<![\w*])\*(?=\S)([^*\n]*[^\s*])\*(?!\*)"#,
       #"~~([^~\n]+)~~"#,
       #"(?<![\w_])__([^_\n]+)__(?![\w_])"#,
       #"(?<![\w_])_([^_\n]+)_(?![\w_])"#,

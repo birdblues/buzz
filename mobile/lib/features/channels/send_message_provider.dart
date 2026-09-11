@@ -1,6 +1,7 @@
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 import '../../shared/mentions/nostr_uri_mentions.dart';
+import '../../shared/push/push_subscription.dart';
 import '../../shared/relay/relay.dart';
 import '../channels/channel_management_provider.dart';
 import '../../shared/profile/user_cache_provider.dart';
@@ -74,12 +75,6 @@ class SendMessage {
     final explicitMentions = [
       ...mentionPubkeys ?? await _resolveMentions(content, channelId),
       ...nostrUriMentionPubkeys(content),
-      // Replying to someone addresses them. Nothing else said so: a reply
-      // carried only `e` tags and the author's own `p` tag, so a message in
-      // your thread never reached you — no push, no agent, nothing until you
-      // opened the app and looked. The caller decides who that is, because
-      // only it knows the shape of the thread it is replying into.
-      ...replyAudiencePubkeys,
     ];
     final authorPubkey = _signedEventRelay.pubkey;
     final dmRecipientPubkeys = channel?.isDm == true
@@ -102,6 +97,23 @@ class SendMessage {
       for (final pk in resolvedMentions)
         if (seenMentions.add(pk.toLowerCase())) pk,
     ];
+    // Replying to someone addresses them. Nothing else said so: a reply
+    // carried only `e` tags and the author's own `p` tag, so a message in your
+    // thread never reached you — no push, no agent, nothing until you opened
+    // the app and looked. The caller decides who that is, because only it
+    // knows the shape of the thread it is replying into.
+    //
+    // Added last and only while there is room: the relay suppresses a push
+    // entirely once a message addresses more than
+    // `buzzPushHellthreadParticipantLimit` people, so two names added on the
+    // sender's behalf must never be what silences a message its author
+    // deliberately addressed.
+    for (final pk in replyAudiencePubkeys) {
+      final atLimit =
+          normalizedMentions.length >= buzzPushHellthreadParticipantLimit;
+      if (atLimit) break;
+      if (seenMentions.add(pk.toLowerCase())) normalizedMentions.add(pk);
+    }
 
     final tags = <List<String>>[
       ['h', channelId],

@@ -54,7 +54,18 @@ drops itself and duplicates as it does for every other mention.
 
 The second of those is what makes a conversation work: in your own thread the
 head is you, so without it, answering an agent that replied to you would
-address nobody and the agent would never see it.
+address nobody and the agent would never see it. It skips your own messages
+for the same reason — a second reply in a row would otherwise name only you.
+
+Forum comments follow the same contract (`forum_provider.dart`), because a
+forum comment qualifies for push only through an exact `p` tag: the
+channel-wide subscription covers chat messages alone.
+
+Both add their names **last and only while there is room**. The relay drops a
+push entirely once a message addresses more than
+`buzzPushHellthreadParticipantLimit` (20) people, so two names added on the
+sender's behalf must never be what silences a message its author deliberately
+addressed.
 
 ## Writing one addresses its owner
 

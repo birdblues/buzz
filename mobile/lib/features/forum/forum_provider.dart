@@ -1,4 +1,5 @@
 import '../../shared/mentions/nostr_uri_mentions.dart';
+import '../../shared/push/push_subscription.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 import '../../shared/relay/relay.dart';
@@ -121,6 +122,7 @@ class ForumEventDelivery {
     required String content,
     List<String> mentionPubkeys = const [],
     List<List<String>> mediaTags = const [],
+    Iterable<String> replyAudiencePubkeys = const [],
   }) async {
     await _submit(
       kind: EventKind.forumComment,
@@ -129,6 +131,7 @@ class ForumEventDelivery {
       content: content,
       mentionPubkeys: mentionPubkeys,
       mediaTags: mediaTags,
+      replyAudiencePubkeys: replyAudiencePubkeys,
     );
     _container.invalidate(forumPostsProvider(channelId));
     _container.invalidate(
@@ -143,6 +146,7 @@ class ForumEventDelivery {
     String? parentEventId,
     required List<String> mentionPubkeys,
     required List<List<String>> mediaTags,
+    Iterable<String> replyAudiencePubkeys = const [],
   }) async {
     final currentConfig = _container.read(relayConfigProvider);
     if (currentConfig.baseUrl != _relayUrl || currentConfig.nsec != _nsec) {
@@ -159,6 +163,17 @@ class ForumEventDelivery {
       for (final pk in [...mentionPubkeys, ...nostrUriMentionPubkeys(content)])
         if (seen.add(pk.toLowerCase())) pk,
     ];
+    // A reply addresses the person it answers — the same contract chat threads
+    // keep (`send_message_provider`), and for the same reason: without it a
+    // comment on your post reaches you nowhere. Added last and only while
+    // there is room, so names added on the sender's behalf are never what
+    // pushes a message past the relay's suppression limit.
+    for (final pk in replyAudiencePubkeys) {
+      final atLimit =
+          normalizedMentions.length >= buzzPushHellthreadParticipantLimit;
+      if (atLimit) break;
+      if (seen.add(pk.toLowerCase())) normalizedMentions.add(pk);
+    }
 
     await _relay.submit(
       kind: kind,
