@@ -17,6 +17,11 @@ import 'push_subscription.dart';
 
 const _pushBootstrapRetryDelay = Duration(seconds: 5);
 
+/// Upper bound on one enrollment + lease publication. The native enrollment
+/// waits on App Attest and the gateway; if either never answers, the attempt
+/// must fail and become retryable instead of holding the gate open.
+const _pushPublicationTimeout = Duration(seconds: 90);
+
 @visibleForTesting
 class BuzzPushAttemptGate {
   BuzzPushAttemptGate({this.retryDelay = _pushBootstrapRetryDelay});
@@ -63,6 +68,17 @@ class BuzzPushAttemptGate {
     _retryTimer?.cancel();
     _retryTimer = null;
     _attempt = null;
+  }
+
+  /// Forgets the current attempt and any scheduled retry, so the same
+  /// attempt key can begin again. A successful publication parks its key
+  /// here until renewal — up to the lease lifetime — and without this the
+  /// user turning push off and on again re-derived that same key and was
+  /// refused: nothing published until the app process died.
+  void reset() {
+    _attempt = null;
+    _retryTimer?.cancel();
+    _retryTimer = null;
   }
 
   void dispose() => _retryTimer?.cancel();
@@ -149,6 +165,17 @@ class BuzzPushBootstrap extends HookConsumerWidget {
       },
       const [],
     );
+    // Turning push off ends whatever publication was in flight or parked
+    // for renewal; turning it back on must publish a fresh lease even though
+    // the attempt key (community, relay, token, executor, subscriptions) is
+    // unchanged. The gate is keyed on the attempt, not the toggle, so clear it
+    // here — otherwise re-enabling silently did nothing until a restart.
+    useEffect(() {
+      if (community?.pushNotificationsEnabled != true) {
+        publicationAttempt.reset();
+      }
+      return null;
+    }, [community?.id, community?.pushNotificationsEnabled]);
 
     useEffect(
       () {
@@ -286,7 +313,7 @@ class BuzzPushBootstrap extends HookConsumerWidget {
               activeCommunity,
               memberPubkey!,
               relay,
-            );
+            ).timeout(_pushPublicationTimeout);
             final renewInMilliseconds =
                 grant.expiresAt * 1000 -
                 DateTime.now().millisecondsSinceEpoch -

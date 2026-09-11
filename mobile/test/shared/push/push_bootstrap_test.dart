@@ -54,6 +54,28 @@ void main() {
     expect(gate.tryBegin('attempt'), isTrue);
   });
 
+  test('reset lets the same attempt begin again after a renewal hold', () {
+    // A successful publication parks its key until renewal. Push turned off
+    // and on again derives the same key, so without reset() the re-enable
+    // was refused until the app restarted.
+    final gate = BuzzPushAttemptGate();
+    addTearDown(gate.dispose);
+    expect(gate.tryBegin('lease'), isTrue);
+    gate.retryAfter('lease', delay: const Duration(days: 30), retry: () {});
+    expect(gate.tryBegin('lease'), isFalse);
+    gate.reset();
+    expect(gate.tryBegin('lease'), isTrue);
+  });
+
+  test('reset releases an attempt still in flight', () {
+    final gate = BuzzPushAttemptGate();
+    addTearDown(gate.dispose);
+    expect(gate.tryBegin('lease'), isTrue);
+    expect(gate.tryBegin('lease'), isFalse);
+    gate.reset();
+    expect(gate.tryBegin('lease'), isTrue);
+  });
+
   test('publication attempt changes when the relay executor rotates', () {
     final subscription = BuzzPushSubscription(
       filter: BuzzPushFilter(kinds: const [9], pTags: [_hex('a')]),
