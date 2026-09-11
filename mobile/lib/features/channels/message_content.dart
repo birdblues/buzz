@@ -18,6 +18,7 @@ import '../../shared/deeplink/deep_link.dart';
 import '../../shared/deeplink/pending_deep_link_provider.dart';
 import '../../shared/layout/layout_mode.dart';
 import '../../shared/platform/apple_platform.dart';
+import '../../shared/profile/user_cache_provider.dart';
 import '../../shared/relay/relay.dart';
 import '../../shared/syntax_highlight.dart';
 import '../../shared/theme/theme.dart';
@@ -257,6 +258,19 @@ class MessageContent extends HookConsumerWidget {
       customEmojiFromTags(tags),
       ref.watch(customEmojiListProvider),
     );
+    // Deliberately not folded into the presentation key below: gpt_markdown
+    // regenerates its spans when the inline components change identity, while
+    // a changed key remounts the subtree and resets descendant state — a code
+    // block's "copied" tick vanishes the moment a profile lands.
+    final keyed = keyedMentionIdentities(
+      ref,
+      useMemoized(() => nostrProfileUriPubkeys(markdownContent), [
+        markdownContent,
+      ]),
+      resolvedMentionNames,
+    );
+    final chipMentionNames = {...resolvedMentionNames, ...keyed.names};
+    final chipAgentPubkeys = {...resolvedAgentMentionPubkeys, ...keyed.agents};
     final mentionPresentationKey = [
       for (final entry
           in (resolvedMentionNames.entries.toList()
@@ -367,8 +381,8 @@ class MessageContent extends HookConsumerWidget {
             onMentionTap: onMentionTap,
           ),
           _NostrMentionMd(
-            mentionNames: resolvedMentionNames,
-            agentMentionPubkeys: resolvedAgentMentionPubkeys,
+            mentionNames: chipMentionNames,
+            agentMentionPubkeys: chipAgentPubkeys,
             onMentionTap: onMentionTap,
           ),
           CustomEmojiMd(

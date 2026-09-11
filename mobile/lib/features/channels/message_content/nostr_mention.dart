@@ -97,3 +97,64 @@ class _NostrMentionMd extends InlineMd {
     );
   }
 }
+
+/// Every profile key a body addresses by NIP-27 URI, first-seen order, no
+/// duplicates, at most [_keyedMentionLookupCap] of them.
+///
+/// The scan is deliberately case-blind, like the pattern it uses: `NOSTR:` with
+/// a lowercase payload renders a chip, so it has to resolve a name too.
+List<String> nostrProfileUriPubkeys(String content) {
+  final pubkeys = <String>{};
+  for (final match in _NostrMentionMd._pattern.allMatches(content)) {
+    final pubkey = nostrProfileUriPubkey(match.group(0)!);
+    if (pubkey != null) pubkeys.add(pubkey);
+    if (pubkeys.length == _keyedMentionLookupCap) break;
+  }
+  return pubkeys.toList(growable: false);
+}
+
+/// Mirrors the SDK's `MENTION_CAP`: a message may not address more people than
+/// this, so a body carrying more keys than this is not a wall of mentions —
+/// it is a key dump, and the extra ones are not worth a cache lookup each.
+const int _keyedMentionLookupCap = 50;
+
+/// How a keyed mention should be drawn for each of [pubkeys] that [known] does
+/// not already name: the display name, and whether the key belongs to an agent
+/// so it gets the bot chip rather than an `@`.
+///
+/// A keyed mention carries its key in the body, so it can name the person even
+/// when no `p` tag does, and often none does: this client does not scan a
+/// composed body for `nostr:` URIs when it builds tags, and a sender is never
+/// tagged for mentioning themselves (`messageMentionPubkeys`). Without this the
+/// chip fell back to a compact npub for people whose profile was right there,
+/// and drew an agent as an ordinary person.
+///
+/// It only reads. The keys come from message text, which nobody vouches for:
+/// a code block full of valid keys renders no chip at all, and requesting a
+/// profile per key would let a body decide how much the client fetches, with
+/// the misses repeating every time the row scrolls back. Every key that
+/// matters is already requested by something that knows it is real — the p-tag
+/// map, the message author, the member roster — so this reads what they filled
+/// in and falls back to the compact npub otherwise.
+({Map<String, String> names, Set<String> agents}) keyedMentionIdentities(
+  WidgetRef ref,
+  List<String> pubkeys,
+  Map<String, String> known,
+) {
+  final names = <String, String>{};
+  final agents = <String>{};
+  for (final pubkey in pubkeys) {
+    if (known.containsKey(pubkey)) continue;
+    final profile = ref.watch(
+      userCacheProvider.select((cache) => cache[pubkey]),
+    );
+    if (profile == null) continue;
+    final name = profile.displayName;
+    if (name != null && name.trim().isNotEmpty) names[pubkey] = name;
+    // The same rule the p-tag path uses (`agentPubkeysWithProfileOwners`): a
+    // profile carrying a NIP-OA owner is an agent, so the two mention forms
+    // draw one identity the same way.
+    if (profile.ownerPubkey != null) agents.add(pubkey);
+  }
+  return (names: names, agents: agents);
+}

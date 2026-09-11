@@ -21,7 +21,37 @@ looked like noise. Both forms now render the same chip.
 | `nostr:npub1…` | the mentioned person's display name |
 | `nostr:nprofile1…` | the same — relay hints are not part of the identity |
 | either, with no profile in scope | the compact npub, `npub1x6q…dr3f` |
-| either, naming a known agent | the bot chip, as `@agent` mentions get |
+| either, naming an agent | the bot chip, as `@agent` mentions get — read from the profile's NIP-OA owner, so a `p`-tagged and an untagged mention of one agent look alike |
+
+## The key names the person, not the tag
+
+A keyed mention carries its key in the body, so the chip resolves the name from
+that key: the `p`-tag map first, then the shared profile cache
+(`userCacheProvider`), then the compact npub.
+
+That lookup only **reads** the cache. The keys come out of message text, which
+nobody vouches for — a code block full of valid keys renders no chip at all —
+so letting a body decide how many profiles to fetch would hand it an unbounded,
+repeating work budget (a key nobody has is never cached, so every scroll back
+asks again). Everything that knows a key is real already requests it: the
+`p`-tag map, the message author, the member roster. At most 50 keys per body
+are looked up, matching the SDK's `MENTION_CAP`.
+
+It has to work that way, because often no `p` tag names the person at all.
+This client does not scan a composed body for `nostr:` URIs when it builds
+tags — only `@name` chips from the composer become tags — and a sender is
+never tagged for mentioning themselves (`messageMentionPubkeys` seeds its seen
+set with the sender). The owner hit exactly that: his own key, pasted into a
+message, drew a compact npub while the same key from an agent drew his name,
+because the agent's message came through the SDK, which does extract the URI.
+
+**The composer does not tag the people a keyed mention names, so a
+`nostr:npub…` typed in this client renders correctly and notifies nobody.**
+Before this chip existed the reader saw 63 characters of bech32 and read it as
+a pasted key; now it is shaped exactly like a delivered `@mention`, which is a
+signal the message does not earn. Closing it means extracting the URIs into `p`
+tags on send, the way the SDK does — a change to who gets notified and pushed,
+so it is a separate decision, not a detail.
 
 Where the surface wires `onMentionTap` — a channel bubble, a thread reply, a
 forum post — the chip opens the key it names even with no profile loaded: the
@@ -92,6 +122,7 @@ relay tags; agents address people with `npub`.
    bech32; tapping it opens your profile.
 2. A message naming a key with no profile in the community → the compact npub
    chip, and tapping it opens that profile sheet.
+2b. Your own key, pasted into a message you send → your name, not a npub.
 3. The same URI inside `` ` ` ``, inside ``` `` ``` and inside a fenced block
    → still the URI.
 4. `nostr:note1…` in a body → still the URI.

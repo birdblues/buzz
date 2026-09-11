@@ -21,6 +21,8 @@ import 'package:buzz/features/channels/voice_note_recording.dart';
 import 'package:buzz/shared/deeplink/deep_link.dart';
 import 'package:buzz/shared/deeplink/pending_deep_link_provider.dart';
 import 'package:buzz/shared/emoji/emoji_only.dart';
+import 'package:buzz/shared/profile/user_cache_provider.dart';
+import 'package:buzz/shared/profile/user_profile.dart';
 import 'package:buzz/shared/relay/relay.dart';
 import 'package:buzz/shared/theme/theme.dart';
 import 'package:buzz/shared/utils/string_utils.dart';
@@ -3187,6 +3189,121 @@ Photos
         expect(_allParagraphText(tester), isNot(contains('nprofile1')));
       });
 
+      testWidgets('names its person even when no p tag does', (tester) async {
+        // A body composed in this client is not scanned for `nostr:` URIs when
+        // its p tags are built, and a sender is never tagged for mentioning
+        // themselves — so the key in the text is the only thing that knows who
+        // is meant. The owner saw his own keyed mention fall back to a npub.
+        await tester.pumpWidget(
+          _testable(
+            const MessageContent(content: 'Hey nostr:$npub', mentionNames: {}),
+            overrides: [
+              userCacheProvider.overrideWith(
+                () => _FakeUserCache({
+                  hex: const UserProfile(pubkey: hex, displayName: 'Alice'),
+                }),
+              ),
+            ],
+          ),
+        );
+
+        expect(find.text('Alice'), findsOneWidget);
+        expect(find.text('npub1x6q…dr3f'), findsNothing);
+      });
+
+      testWidgets('a keyed agent gets the same bot chip as @agent', (
+        tester,
+      ) async {
+        // agentMentionPubkeys is derived from p tags, which a keyed mention
+        // often has none of. The profile says the same thing — a NIP-OA owner
+        // means an agent — so one identity draws one way in both forms.
+        await tester.pumpWidget(
+          _testable(
+            const MessageContent(content: 'Ask nostr:$npub', mentionNames: {}),
+            overrides: [
+              userCacheProvider.overrideWith(
+                () => _FakeUserCache({
+                  hex: const UserProfile(
+                    pubkey: hex,
+                    displayName: 'Helper Bot',
+                    ownerPubkey: 'owner-pubkey',
+                  ),
+                }),
+              ),
+            ],
+          ),
+        );
+
+        expect(find.byIcon(LucideIcons.bot), findsOneWidget);
+        expect(find.text('Helper Bot'), findsOneWidget);
+        expect(find.text('@'), findsNothing);
+      });
+
+      testWidgets('a blank display name falls back to the compact npub', (
+        tester,
+      ) async {
+        await tester.pumpWidget(
+          _testable(
+            const MessageContent(content: 'Hey nostr:$npub', mentionNames: {}),
+            overrides: [
+              userCacheProvider.overrideWith(
+                () => _FakeUserCache({
+                  hex: const UserProfile(pubkey: hex, displayName: '   '),
+                }),
+              ),
+            ],
+          ),
+        );
+
+        expect(find.text('npub1x6q…dr3f'), findsOneWidget);
+      });
+
+      testWidgets('an uppercase scheme resolves the same name', (tester) async {
+        // The pattern is case-blind, so `NOSTR:` renders a chip; the key scan
+        // has to agree or the chip renders without ever asking for a name.
+        await tester.pumpWidget(
+          _testable(
+            const MessageContent(content: 'Hey NOSTR:$npub', mentionNames: {}),
+            overrides: [
+              userCacheProvider.overrideWith(
+                () => _FakeUserCache({
+                  hex: const UserProfile(pubkey: hex, displayName: 'Alice'),
+                }),
+              ),
+            ],
+          ),
+        );
+
+        expect(find.text('Alice'), findsOneWidget);
+      });
+
+      testWidgets('a late profile renames the chip without a remount', (
+        tester,
+      ) async {
+        // The profile usually lands after the first frame, so the chip has to
+        // pick it up — but by rebuilding. Remounting the markdown subtree
+        // would reset what lives inside it, such as a code block's copied tick.
+        final cache = _FakeUserCache({});
+        await tester.pumpWidget(
+          _testable(
+            const MessageContent(
+              content: 'Hey nostr:$npub\n\n```\njust test\n```',
+              mentionNames: {},
+            ),
+            overrides: [userCacheProvider.overrideWith(() => cache)],
+          ),
+        );
+        expect(find.text('npub1x6q…dr3f'), findsOneWidget);
+        final markdown = tester.element(find.byType(GptMarkdown));
+
+        cache.arrive(const UserProfile(pubkey: hex, displayName: 'Alice'));
+        await tester.pump();
+
+        expect(find.text('Alice'), findsOneWidget);
+        expect(find.text('npub1x6q…dr3f'), findsNothing);
+        expect(tester.element(find.byType(GptMarkdown)), same(markdown));
+      });
+
       testWidgets('falls back to the compact npub without a profile', (
         tester,
       ) async {
@@ -3469,4 +3586,21 @@ Photos
       });
     });
   });
+}
+
+/// The shared profile cache, preloaded. Reads hit [state]; a miss is a miss
+/// rather than a relay round trip.
+class _FakeUserCache extends UserCacheNotifier {
+  _FakeUserCache(this._profiles);
+
+  final Map<String, UserProfile> _profiles;
+
+  @override
+  Map<String, UserProfile> build() => _profiles;
+
+  @override
+  UserProfile? get(String pubkey) => state[pubkey.toLowerCase()];
+
+  /// A profile landing after the first frame, the way the relay delivers one.
+  void arrive(UserProfile profile) => put(profile);
 }
