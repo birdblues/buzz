@@ -57,15 +57,22 @@ head is you, so without it, answering an agent that replied to you would
 address nobody and the agent would never see it. It skips your own messages
 for the same reason — a second reply in a row would otherwise name only you.
 
+**Only when the author named nobody.** A mention is the author choosing an
+audience, and filling in the thread's usual one on top of it sent a question
+addressed to a debate's moderator to the debater who happened to speak last —
+who answered it, three times, because each answer made them the last voice
+again. Names the author typed are the whole audience; the two guessed for them
+fill in only when there is none — judged on what was typed, so naming only
+yourself still counts as choosing. The exception is a DM: its members are
+addressed by membership regardless (`messageMentionPubkeys`), and that is
+untouched here. This also keeps the guessed names from ever
+being what pushes a reply past the relay's suppression limit
+(`buzzPushHellthreadParticipantLimit`): they are added only to a reply that
+addresses nobody else, so at most two.
+
 Forum comments follow the same contract (`forum_provider.dart`), because a
 forum comment qualifies for push only through an exact `p` tag: the
 channel-wide subscription covers chat messages alone.
-
-Both add their names **last and only while there is room**. The relay drops a
-push entirely once a message addresses more than
-`buzzPushHellthreadParticipantLimit` (20) people, so two names added on the
-sender's behalf must never be what silences a message its author deliberately
-addressed.
 
 ## Writing one addresses its owner
 

@@ -1,7 +1,6 @@
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 import '../../shared/mentions/nostr_uri_mentions.dart';
-import '../../shared/push/push_subscription.dart';
 import '../../shared/relay/relay.dart';
 import '../channels/channel_management_provider.dart';
 import '../../shared/profile/user_cache_provider.dart';
@@ -76,6 +75,10 @@ class SendMessage {
       ...mentionPubkeys ?? await _resolveMentions(content, channelId),
       ...nostrUriMentionPubkeys(content),
     ];
+    // Whether the author named anyone at all — judged before the sender drops
+    // itself and before a DM widens the list to its members, because a chip
+    // naming only yourself is still you choosing, and a DM's members are not.
+    final authorChoseAudience = explicitMentions.isNotEmpty;
     final authorPubkey = _signedEventRelay.pubkey;
     final dmRecipientPubkeys = channel?.isDm == true
         ? await _fetchDmRecipientPubkeys(channelId, channel!, authorPubkey)
@@ -103,16 +106,16 @@ class SendMessage {
     // the app and looked. The caller decides who that is, because only it
     // knows the shape of the thread it is replying into.
     //
-    // Added last and only while there is room: the relay suppresses a push
-    // entirely once a message addresses more than
-    // `buzzPushHellthreadParticipantLimit` people, so two names added on the
-    // sender's behalf must never be what silences a message its author
-    // deliberately addressed.
-    for (final pk in replyAudiencePubkeys) {
-      final atLimit =
-          normalizedMentions.length >= buzzPushHellthreadParticipantLimit;
-      if (atLimit) break;
-      if (seenMentions.add(pk.toLowerCase())) normalizedMentions.add(pk);
+    // Only when the author named nobody. A mention is the author choosing an
+    // audience, and adding to it behind their back sent a question meant for
+    // a debate's moderator to the debater who happened to speak last — who
+    // then answered it, three times, because each answer made them the last
+    // voice again. Names the author typed are the audience; names guessed
+    // for them fill in only when there is none.
+    if (!authorChoseAudience) {
+      for (final pk in replyAudiencePubkeys) {
+        if (seenMentions.add(pk.toLowerCase())) normalizedMentions.add(pk);
+      }
     }
 
     final tags = <List<String>>[

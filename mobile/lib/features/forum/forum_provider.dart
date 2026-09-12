@@ -1,5 +1,4 @@
 import '../../shared/mentions/nostr_uri_mentions.dart';
-import '../../shared/push/push_subscription.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 import '../../shared/relay/relay.dart';
@@ -159,20 +158,23 @@ class ForumEventDelivery {
     final seen = <String>{?selfPubkey};
     // A `nostr:npub…` in the body addresses its owner the same way an `@name`
     // chip does, and the relay's extractor tags it — see `send_message_provider`.
+    final typedMentions = [
+      ...mentionPubkeys,
+      ...nostrUriMentionPubkeys(content),
+    ];
     final normalizedMentions = [
-      for (final pk in [...mentionPubkeys, ...nostrUriMentionPubkeys(content)])
+      for (final pk in typedMentions)
         if (seen.add(pk.toLowerCase())) pk,
     ];
     // A reply addresses the person it answers — the same contract chat threads
     // keep (`send_message_provider`), and for the same reason: without it a
-    // comment on your post reaches you nowhere. Added last and only while
-    // there is room, so names added on the sender's behalf are never what
-    // pushes a message past the relay's suppression limit.
-    for (final pk in replyAudiencePubkeys) {
-      final atLimit =
-          normalizedMentions.length >= buzzPushHellthreadParticipantLimit;
-      if (atLimit) break;
-      if (seen.add(pk.toLowerCase())) normalizedMentions.add(pk);
+    // comment on your post reaches you nowhere. Only when the author named
+    // nobody: a mention is the author choosing the audience — judged on what
+    // they typed, so naming only yourself still counts as choosing.
+    if (typedMentions.isEmpty) {
+      for (final pk in replyAudiencePubkeys) {
+        if (seen.add(pk.toLowerCase())) normalizedMentions.add(pk);
+      }
     }
 
     await _relay.submit(

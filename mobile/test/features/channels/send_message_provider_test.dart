@@ -6,7 +6,6 @@ import 'package:nostr/nostr.dart' as nostr;
 import 'package:buzz/features/channels/channel.dart';
 import 'package:buzz/features/channels/channel_management_provider.dart';
 import 'package:buzz/features/channels/send_message_provider.dart';
-import 'package:buzz/shared/push/push_subscription.dart';
 import 'package:buzz/shared/relay/relay.dart';
 
 void main() {
@@ -98,7 +97,6 @@ void main() {
     final signingKey = nostr.Keys.generate().nsec;
     final threadStarter = 'a' * 64;
     final lastReplier = 'b' * 64;
-    final chipped = 'c' * 64;
     final send = SendMessage(
       signedEventRelay: SignedEventRelay(session: session, nsec: signingKey),
       fetchMembers: (_) async => const [],
@@ -112,13 +110,12 @@ void main() {
       channelId: _channelId,
       content: 'on it',
       parentEventId: 'thread-head',
-      mentionPubkeys: [chipped],
+      mentionPubkeys: const [],
       replyAudiencePubkeys: [threadStarter, lastReplier],
     );
     await session.published;
 
     expect(session.event.tags.where((tag) => tag.first == 'p').toList(), [
-      ['p', chipped],
       ['p', threadStarter],
       ['p', lastReplier],
     ]);
@@ -163,16 +160,15 @@ void main() {
     await result;
   });
 
-  test('the reply audience never silences a message it was added to', () async {
-    // The relay drops a push entirely once a message addresses more than
-    // buzzPushHellthreadParticipantLimit people. Two names added on the
-    // sender's behalf must not be what crosses that line: a reply the author
-    // deliberately addressed to 20 people still notifies them.
+  test('a keyed mention alone is also the author choosing', () async {
+    // The chip map is not the only way to name someone: a `nostr:npub…` in
+    // the body is a mention too, and must suppress the guessed audience just
+    // as a chip does.
+    const npub =
+        'npub1x6q8zruqrdfzqv05c4vkaray859e75z44fjful0qs6vqxfk2lffs0jdr3f';
+    const hex =
+        '3680710f801b522031f4c5596e8fa43d0b9f5055aa649e7de086980326cafa53';
     final session = _PendingPublishRelaySession();
-    final chipped = [
-      for (var i = 0; i < buzzPushHellthreadParticipantLimit; i++)
-        i.toRadixString(16).padLeft(64, '0'),
-    ];
     final send = SendMessage(
       signedEventRelay: SignedEventRelay(
         session: session,
@@ -187,22 +183,126 @@ void main() {
 
     final result = send(
       channelId: _channelId,
-      content: 'a crowded reply',
+      content: 'for nostr:$npub only',
       parentEventId: 'thread-head',
-      mentionPubkeys: chipped,
+      mentionPubkeys: const [],
       replyAudiencePubkeys: ['a' * 64, 'b' * 64],
     );
     await session.published;
 
-    expect(
-      session.event.tags.where((tag) => tag.first == 'p'),
-      hasLength(buzzPushHellthreadParticipantLimit),
-    );
+    expect(session.event.tags.where((tag) => tag.first == 'p').toList(), [
+      ['p', hex],
+    ]);
 
     session.accept();
     await result;
   });
 
+  test('a key inside code is not a choice', () async {
+    // The renderer draws no chip for a key in code and the sender tags nobody
+    // for it, so it cannot count as the author naming someone either: the
+    // guessed audience still fills in.
+    const npub =
+        'npub1x6q8zruqrdfzqv05c4vkaray859e75z44fjful0qs6vqxfk2lffs0jdr3f';
+    final session = _PendingPublishRelaySession();
+    final send = SendMessage(
+      signedEventRelay: SignedEventRelay(
+        session: session,
+        nsec: nostr.Keys.generate().nsec,
+      ),
+      fetchMembers: (_) async => const [],
+      readUserCache: () => const {},
+      addLocalMessage: (_, _) {},
+      completeLocalMessage: (_, _) {},
+      removeLocalMessage: (_, _) {},
+    );
+
+    final result = send(
+      channelId: _channelId,
+      content: 'see `nostr:$npub`',
+      parentEventId: 'thread-head',
+      mentionPubkeys: const [],
+      replyAudiencePubkeys: ['a' * 64, 'b' * 64],
+    );
+    await session.published;
+
+    expect(session.event.tags.where((tag) => tag.first == 'p').toList(), [
+      ['p', 'a' * 64],
+      ['p', 'b' * 64],
+    ]);
+
+    session.accept();
+    await result;
+  });
+
+  test('naming only yourself is still choosing', () async {
+    // A self mention delivers to nobody, but it is the author choosing an
+    // audience all the same; the sender must not read "nobody left" as
+    // "nobody named" and wake the thread's last voice.
+    final session = _PendingPublishRelaySession();
+    final signingKey = nostr.Keys.generate().nsec;
+    final sender = nostr.Keys(
+      nostr.Nip19.decode(payload: signingKey).data,
+    ).public;
+    final send = SendMessage(
+      signedEventRelay: SignedEventRelay(session: session, nsec: signingKey),
+      fetchMembers: (_) async => const [],
+      readUserCache: () => const {},
+      addLocalMessage: (_, _) {},
+      completeLocalMessage: (_, _) {},
+      removeLocalMessage: (_, _) {},
+    );
+
+    final result = send(
+      channelId: _channelId,
+      content: 'note to self',
+      parentEventId: 'thread-head',
+      mentionPubkeys: [sender],
+      replyAudiencePubkeys: ['a' * 64, 'b' * 64],
+    );
+    await session.published;
+
+    expect(session.event.tags.where((tag) => tag.first == 'p'), isEmpty);
+
+    session.accept();
+    await result;
+  });
+
+  test('a mention makes the author the judge of the audience', () async {
+    // Naming someone is choosing who a reply is for. Filling in the thread's
+    // usual audience on top sent a question addressed to a moderator to the
+    // debater who spoke last, and each of their answers made them the last
+    // voice again. Names the author typed are the whole audience.
+    final session = _PendingPublishRelaySession();
+    final chipped = 'c' * 64;
+    final send = SendMessage(
+      signedEventRelay: SignedEventRelay(
+        session: session,
+        nsec: nostr.Keys.generate().nsec,
+      ),
+      fetchMembers: (_) async => const [],
+      readUserCache: () => const {},
+      addLocalMessage: (_, _) {},
+      completeLocalMessage: (_, _) {},
+      removeLocalMessage: (_, _) {},
+    );
+
+    final result = send(
+      channelId: _channelId,
+      content: 'a question for one person',
+      parentEventId: 'thread-head',
+      mentionPubkeys: [chipped],
+      replyAudiencePubkeys: ['a' * 64, 'b' * 64],
+    );
+    await session.published;
+
+    expect(session.event.tags.where((tag) => tag.first == 'p').toList(), [
+      ['p', chipped],
+    ]);
+
+    session.accept();
+    await result;
+  });
   test('a keyed mention no reader sees as one addresses nobody', () async {
     // Code, a link label, a double-backtick span: the renderer draws no chip
     // for any of them, so none of them may tag anyone. The relay's extractor

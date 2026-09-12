@@ -1,5 +1,4 @@
 import 'package:buzz/features/forum/forum_provider.dart';
-import 'package:buzz/shared/push/push_subscription.dart';
 import 'package:buzz/shared/relay/relay.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
@@ -16,6 +15,7 @@ void main() {
   Future<NostrEvent> reply({
     List<String> mentionPubkeys = const [],
     Iterable<String> audience = const [],
+    String content = 'commenting',
   }) async {
     final session = _CapturingRelaySession();
     final container = ProviderContainer(
@@ -28,10 +28,10 @@ void main() {
     await ForumEventDelivery.capture(container).createReply(
       channelId: channelId,
       parentEventId: 'post-id',
-      content: 'commenting',
       mentionPubkeys: mentionPubkeys,
       mediaTags: const [],
       replyAudiencePubkeys: audience,
+      content: content,
     );
     return session.published!;
   }
@@ -48,23 +48,23 @@ void main() {
     },
   );
 
-  test('an explicit mention still comes first, and nobody repeats', () async {
+  test('a keyed mention alone is also the author choosing', () async {
+    const npub =
+        'npub1x6q8zruqrdfzqv05c4vkaray859e75z44fjful0qs6vqxfk2lffs0jdr3f';
+    const hex =
+        '3680710f801b522031f4c5596e8fa43d0b9f5055aa649e7de086980326cafa53';
     expect(
-      pTags(await reply(mentionPubkeys: [other], audience: [author, other])),
-      [other, author],
+      pTags(await reply(content: 'for nostr:$npub', audience: [author, other])),
+      [hex],
     );
   });
 
-  test('the audience never crosses the push suppression limit', () async {
-    // Two names added on the sender's behalf must not be what silences a
-    // comment its author deliberately addressed.
-    final crowd = [
-      for (var i = 0; i < buzzPushHellthreadParticipantLimit; i++)
-        i.toRadixString(16).padLeft(64, '0'),
-    ];
+  test('a mention makes the author the judge of the audience', () async {
+    // Naming someone is choosing who the comment is for; nobody is added on
+    // the author's behalf on top of that.
     expect(
-      pTags(await reply(mentionPubkeys: crowd, audience: [author, other])),
-      hasLength(buzzPushHellthreadParticipantLimit),
+      pTags(await reply(mentionPubkeys: [other], audience: [author, other])),
+      [other],
     );
   });
 }
